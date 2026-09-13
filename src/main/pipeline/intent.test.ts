@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ClassifiedIntent, ClassifyRequest, Engine, EngineState } from '../engine/types'
-import { IntentRouter } from './intent'
+import { IntentRouter, usableGoal } from './intent'
 
 const SAID = 'Can you make my last message less apologetic?'
 const COMPOSER = 'I will get back to you today, sorry I was slow.'
@@ -413,5 +413,40 @@ describe('IntentRouter — an engine that cannot answer in time', () => {
       expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
     }
     expect((await router.decide(INPUT)).fallbackReason).toBe('too-slow')
+  })
+})
+
+/**
+ * The goal the navigator is handed.
+ *
+ * It never sees what the user said — only this sentence and a list of what is
+ * on screen — and what it does with it is press things. A real session
+ * produced `goal="Anil Turaga"`, which leaves it to guess, and the guess is a
+ * keystroke in somebody's application. The classifier prompt is the fix; this
+ * is the backstop, and it only has to catch the shape that is definitely
+ * useless.
+ */
+describe('usableGoal', () => {
+  const said = 'may we get to Anil Turaga'
+
+  it('keeps a goal that says where to go and what to do there', () => {
+    for (const goal of [
+      'open the conversation with Anil Turaga and read the recent messages',
+      'open the #eng-platform channel and read the recent messages',
+      'find whether Priya replied about pricing'
+    ]) {
+      expect(usableGoal(goal, said)).toBe(goal)
+    }
+  })
+
+  it('falls back to the user’s own words when handed a name', () => {
+    expect(usableGoal('Anil Turaga', said)).toBe(said)
+    expect(usableGoal('#eng-platform', said)).toBe(said)
+    expect(usableGoal('  ', said)).toBe(said)
+  })
+
+  /** Longer, but still nothing actually being asked for. */
+  it('falls back on a noun phrase with no verb in it', () => {
+    expect(usableGoal('the terms doc conversation with Anil', said)).toBe(said)
   })
 })

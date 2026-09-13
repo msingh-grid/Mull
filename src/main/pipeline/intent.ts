@@ -282,7 +282,7 @@ function toRoute(
     // things to press and no way to tell whether we arrived. Dictating the
     // words is the honest answer, as it is for a compose with no screen.
     if (!context.hasScreen) return { kind: 'dictate', text: transcript }
-    return { kind: 'navigate', goal: intent.goal.trim() || transcript }
+    return { kind: 'navigate', goal: usableGoal(intent.goal, transcript) }
   }
 
   const target =
@@ -299,6 +299,33 @@ function toRoute(
     instruction: intent.instruction.trim() || transcript,
     target
   }
+}
+
+/**
+ * The goal, or the user's own words if the goal is too thin to act on.
+ *
+ * The navigator is shown this sentence and a list of what is on screen, and
+ * nothing else — it never sees what the user actually said. So a goal of
+ * "Anil Turaga" (which is what the classifier returned, before its prompt said
+ * otherwise) leaves it to guess what to do with him, and the guess is a press
+ * in somebody's application.
+ *
+ * The prompt is the fix and this is the backstop, in that order. It only has to
+ * catch the one shape that is definitely useless: a bare noun phrase with no
+ * verb in it. The transcript is a worse goal than a good one and a much better
+ * goal than a name.
+ */
+export function usableGoal(goal: string, transcript: string): string {
+  const trimmed = goal.trim()
+  if (!trimmed) return transcript
+  // Two words or fewer is a name or a channel, never an instruction.
+  const words = trimmed.split(/\s+/u)
+  if (words.length <= 2) return transcript
+  // Longer, but still nothing being *asked for* — "the terms doc conversation".
+  if (!/\b(open|read|find|check|look|see|go|search|scroll|show|tell|get)\b/iu.test(trimmed)) {
+    return transcript
+  }
+  return trimmed
 }
 
 /** See the call site: the classifier is never shown the picture. */
