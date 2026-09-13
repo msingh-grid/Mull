@@ -5,6 +5,7 @@ import {
   FocusedElementParamsSchema,
   ReplaceRangeParamsSchema,
   SidecarMethods,
+  SidecarNotifications,
   SIDECAR_PROTOCOL_VERSION
 } from './sidecar-api'
 
@@ -69,9 +70,28 @@ describe('sidecar-api zod contract', () => {
       'replaceRange',
       'secureInputState',
       'activateApp',
-      'keyChord'
+      'keyChord',
+      'startHotkeyTap',
+      'stopHotkeyTap'
     ])
     // Bumped whenever a shape changes; the sidecar's `init` refuses a mismatch.
-    expect(SIDECAR_PROTOCOL_VERSION).toBe(2)
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(3)
+  })
+})
+
+describe('notifications', () => {
+  it('validates the hotkey notification the event tap sends', () => {
+    expect(SidecarNotifications.hotkey.parse({ phase: 'down', chord: 'opt-space' })).toEqual({
+      phase: 'down',
+      chord: 'opt-space'
+    })
+    expect(SidecarNotifications.hotkey.safeParse({ phase: 'sideways' }).success).toBe(false)
+    expect(
+      SidecarNotifications.hotkey.safeParse({ phase: 'up', chord: 'caps-lock' }).success
+    ).toBe(false)
+  })
+
+  it('is a closed set — an unknown notification has no schema to hide behind', () => {
+    expect(Object.keys(SidecarNotifications)).toEqual(['hotkey'])
   })
 })

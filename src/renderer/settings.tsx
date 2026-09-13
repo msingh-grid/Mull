@@ -145,6 +145,18 @@ function SettingsWindow(): JSX.Element {
               <option value="fn">Fn (globe)</option>
             </select>
           </Row>
+          {about?.hotkeyMode !== 'tap' && about?.hotkeyTapReason ? (
+            <p className="warn-line">
+              {about.hotkeyTapReason === 'no-input-monitoring'
+                ? 'Mull is watching the key the older way because Input Monitoring isn’t granted. Grant it above, then quit and reopen Mull — the better path also removes the stray space ⌥Space types.'
+                : `The event tap isn’t in use (${about.hotkeyTapReason}); Mull fell back to the older listener.`}
+            </p>
+          ) : null}
+          {settings.hotkey === 'fn' && about?.hotkeyMode !== 'tap' ? (
+            <p className="warn-line">
+              Fn needs the event tap, so ⌥Space is what actually works right now.
+            </p>
+          ) : null}
           <p>
             ⌥Z undoes the last thing Mull did, wherever you are. Both chords are released the
             moment Mull quits.

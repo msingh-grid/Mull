@@ -186,6 +186,29 @@ export const ActivateAppResultSchema = z.object({
   reason: z.string().nullable()
 })
 
+// ---------------------------------------------------------------------------
+// Hotkey tap (M3)
+// ---------------------------------------------------------------------------
+
+export const StartHotkeyTapParamsSchema = z.object({
+  chord: z.enum(['opt-space', 'fn']),
+  /**
+   * Consume the chord so the focused app never sees it — this is what removes
+   * the stray U+00A0 that ⌥Space types. Ignored for Fn, which the window
+   * server does not let anyone swallow.
+   */
+  swallow: z.boolean().optional()
+})
+export const StartHotkeyTapResultSchema = z.object({
+  started: z.boolean(),
+  reason: z.string().nullable(),
+  /** False when the tap is watching but the key still reaches the app. */
+  swallowing: z.boolean()
+})
+
+export const StopHotkeyTapParamsSchema = z.object({})
+export const StopHotkeyTapResultSchema = z.object({ stopped: z.boolean() })
+
 export const KeyChordParamsSchema = z.object({
   /** Key name, e.g. 'v', 'return', 'escape'. */
   key: z.string(),
@@ -201,12 +224,39 @@ export const KeyChordResultSchema = z.object({
 // ---------------------------------------------------------------------------
 
 /**
- * Bumped to 2 in M2: `focusedElement` gained `textStart`/`truncated`/`reason`,
- * the write verbs gained `verified`/`caret`, and `replaceRange` was added. The
- * `init` handshake rejects a mismatch, so a stale `mull-mac` binary fails loudly
- * at boot instead of returning shapes the host can't parse.
+ * 2 (M2): `focusedElement` gained `textStart`/`truncated`/`reason`, the write
+ * verbs gained `verified`/`caret`, and `replaceRange` was added.
+ * 3 (M3): the hotkey event tap — `startHotkeyTap`/`stopHotkeyTap`, and with
+ * them the sidecar's first *notifications*, messages it sends unprompted.
+ *
+ * The `init` handshake rejects a mismatch, so a stale `mull-mac` binary fails
+ * loudly at boot instead of returning shapes the host can't parse.
  */
-export const SIDECAR_PROTOCOL_VERSION = 2
+export const SIDECAR_PROTOCOL_VERSION = 3
+
+// ---------------------------------------------------------------------------
+// Notifications: sidecar -> host, no id, no reply.
+// ---------------------------------------------------------------------------
+
+export const HotkeyNotificationSchema = z.object({
+  phase: z.enum(['down', 'up']),
+  chord: z.enum(['opt-space', 'fn'])
+})
+
+/**
+ * Validated the same way results are. A notification is the one message the
+ * host did not ask for, which makes it the easiest place for a drifting binary
+ * to go unnoticed — so it gets a schema too, and an unknown method is logged
+ * rather than silently dropped.
+ */
+export const SidecarNotifications = {
+  hotkey: HotkeyNotificationSchema
+} as const
+
+export type SidecarNotificationName = keyof typeof SidecarNotifications
+export type SidecarNotification<N extends SidecarNotificationName> = z.infer<
+  (typeof SidecarNotifications)[N]
+>
 
 export const SidecarMethods = {
   init: { params: InitParamsSchema, result: InitResultSchema },
@@ -222,7 +272,12 @@ export const SidecarMethods = {
   replaceRange: { params: ReplaceRangeParamsSchema, result: ReplaceRangeResultSchema },
   secureInputState: { params: SecureInputStateParamsSchema, result: SecureInputStateResultSchema },
   activateApp: { params: ActivateAppParamsSchema, result: ActivateAppResultSchema },
-  keyChord: { params: KeyChordParamsSchema, result: KeyChordResultSchema }
+  keyChord: { params: KeyChordParamsSchema, result: KeyChordResultSchema },
+  startHotkeyTap: {
+    params: StartHotkeyTapParamsSchema,
+    result: StartHotkeyTapResultSchema
+  },
+  stopHotkeyTap: { params: StopHotkeyTapParamsSchema, result: StopHotkeyTapResultSchema }
 } as const
 
 export type SidecarMethodName = keyof typeof SidecarMethods

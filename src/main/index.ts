@@ -61,7 +61,12 @@ let engine: Engine | null = null
 let settings: SettingsStore | null = null
 let permissions: PermissionsService | null = null
 /** Filled in at boot; the about pane reports what is actually running. */
-let runtime = { hotkeyMode: 'unavailable', asrProvider: 'none', sidecarVersion: null as string | null }
+let runtime = {
+  hotkeyMode: 'unavailable',
+  hotkeyTapReason: null as string | null,
+  asrProvider: 'none',
+  sidecarVersion: null as string | null
+}
 let sidecar: SidecarApi & { dispose?: () => Promise<void> }
 let asr: AsrProvider
 
@@ -421,19 +426,20 @@ async function bootstrap(): Promise<void> {
   }
 
   hotkey = new HotkeyService({
+    chord: settings.get().hotkey,
+    sidecar,
     onStart: () => pipeline?.begin(),
     onStop: () => pipeline?.end(),
     log: logFn
   })
-  const mode = hotkey.start(globalShortcut)
+  const mode = await hotkey.start(globalShortcut)
   runtime = {
     hotkeyMode: mode,
+    hotkeyTapReason: hotkey.tapReason,
     asrProvider: selection.degradedReason ? 'fake (degraded)' : 'whisper-cli',
     sidecarVersion: runtime.sidecarVersion
   }
-  tray?.setStatus(
-    mode === 'unavailable' ? 'Hotkey unavailable' : mode === 'toggle' ? '⌥Space to start/stop' : 'Hold ⌥Space to dictate'
-  )
+  tray?.setStatus(describeHotkeyMode(mode, settings.get().hotkey))
   if (mode === 'unavailable') {
     pushHudState({
       ...pipeline.getState(),
@@ -462,6 +468,22 @@ async function bootstrap(): Promise<void> {
   })
   if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
     void systemPreferences.askForMediaAccess('microphone')
+  }
+}
+
+/** The menu-bar status line: what the hotkey actually is right now. */
+function describeHotkeyMode(mode: string, chord: string): string {
+  const key = mode === 'tap' && chord === 'fn' ? 'Fn' : '⌥Space'
+  switch (mode) {
+    case 'tap':
+    case 'ptt':
+      return `Hold ${key} to dictate`
+    case 'ptt-passive':
+      return `Hold ${key} — it also reaches the app`
+    case 'toggle':
+      return `${key} to start, again to stop`
+    default:
+      return 'Hotkey unavailable — check Settings'
   }
 }
 
@@ -564,9 +586,33 @@ ipcMain.handle(IPC.settingsSet, (_event, patch: Partial<Settings>) => {
       if (!win.isDestroyed()) win.webContents.send(IPC.settingsChanged, next)
     }
     applyLaunchAtLogin(next)
+    void applyHotkeyChoice(next)
   }
   return next
 })
+
+/**
+ * Switch chords without a relaunch.
+ *
+ * Only the tap rung can actually offer Fn, so this is also where a user who
+ * picks it on a Mac without Input Monitoring finds out: the restart lands on
+ * whatever rung is available and the menu-bar status says which.
+ */
+async function applyHotkeyChoice(next: Settings): Promise<void> {
+  if (!hotkey || hotkey.chord === next.hotkey) return
+  hotkey.stop(globalShortcut)
+  hotkey = new HotkeyService({
+    chord: next.hotkey,
+    sidecar,
+    onStart: () => pipeline?.begin(),
+    onStop: () => pipeline?.end(),
+    log: logFn
+  })
+  const mode = await hotkey.start(globalShortcut)
+  runtime = { ...runtime, hotkeyMode: mode, hotkeyTapReason: hotkey.tapReason }
+  tray?.setStatus(describeHotkeyMode(mode, next.hotkey))
+  log.info(`hotkey switched to ${next.hotkey}: mode ${mode}`)
+}
 
 ipcMain.handle(IPC.permissionsGet, () => permissions?.snapshot() ?? null)
 ipcMain.handle(IPC.permissionsOpen, (_event, key: PermissionKey) => permissions?.open(key))
@@ -601,6 +647,7 @@ ipcMain.handle(IPC.about, async (): Promise<AboutInfo> => {
     sidecarVersion: runtime.sidecarVersion,
     sidecarProtocol: runtime.sidecarVersion ? SIDECAR_PROTOCOL_VERSION : null,
     hotkeyMode: runtime.hotkeyMode,
+    hotkeyTapReason: runtime.hotkeyTapReason,
     asrProvider: runtime.asrProvider,
     paths: {
       journal: journalPath(),

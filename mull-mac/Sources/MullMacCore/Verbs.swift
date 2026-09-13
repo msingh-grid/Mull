@@ -14,8 +14,12 @@ import Foundation
 /// Mull decided to write, and the one where being wrong means typing a password
 /// fragment into a chat window.
 
-public let SIDECAR_PROTOCOL_VERSION = 2
-public let SIDECAR_VERSION = "0.2.0"
+/// Protocol 3 (M3): adds the hotkey event tap and, with it, the sidecar's
+/// first *notifications* — messages the sidecar sends unprompted. `init`
+/// rejects a mismatch loudly, so a stale binary fails at boot rather than
+/// returning shapes the host cannot parse.
+public let SIDECAR_PROTOCOL_VERSION = 3
+public let SIDECAR_VERSION = "0.3.0"
 
 // MARK: - Param structs (mirror the zod schemas)
 
@@ -48,6 +52,13 @@ struct ActivateAppParams: Decodable {
 struct KeyChordParams: Decodable {
     let key: String
     let modifiers: [String]?
+}
+
+struct StartHotkeyTapParams: Decodable {
+    /// "opt-space" | "fn"
+    let chord: String
+    /// Consume the chord so the focused app never sees it. Ignored for Fn.
+    let swallow: Bool?
 }
 
 // MARK: - System abstraction (so XCTest never touches TCC / AppKit state)
@@ -147,6 +158,9 @@ public protocol SystemActions {
     func replaceRange(start: Int, length: Int, text: String, expect: String?) -> InsertOutcome
     func activateApp(bundleId: String) -> (activated: Bool, reason: String?)
     func keyChord(key: String, modifiers: [String]) -> (sent: Bool, reason: String?)
+    /// Watch the push-to-talk chord. Emits `hotkey` notifications until stopped.
+    func startHotkeyTap(chord: String, swallow: Bool) -> (started: Bool, reason: String?)
+    func stopHotkeyTap() -> Bool
 }
 
 // MARK: - JSON helpers
@@ -356,6 +370,34 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
         }
         let (sent, reason) = system.keyChord(key: params.key, modifiers: modifiers)
         return .object(["sent": .bool(sent), "reason": optional(reason)])
+    }
+
+    /// Start watching the push-to-talk chord.
+    ///
+    /// Deliberately *not* behind `blockedReason()`: the tap only observes, and
+    /// a user who has not yet granted Accessibility still needs their hotkey to
+    /// work so that the rest of the app can tell them what is missing. Input
+    /// Monitoring is the permission that actually gates this, and the failure
+    /// comes back as a reason rather than an error — the host has a fallback
+    /// ladder to walk down.
+    d.register("startHotkeyTap") { raw in
+        let params = try decodeParams(StartHotkeyTapParams.self, from: raw)
+        guard ["opt-space", "fn"].contains(params.chord) else {
+            throw RpcError.invalidParams("unknown chord '\(params.chord)'")
+        }
+        let (started, reason) = system.startHotkeyTap(
+            chord: params.chord, swallow: params.swallow ?? true)
+        return .object([
+            "started": .bool(started),
+            "reason": optional(reason),
+            // Fn is observable but not consumable; say so rather than letting
+            // the host assume the key never reaches the focused app.
+            "swallowing": .bool(started && params.chord != "fn" && (params.swallow ?? true))
+        ])
+    }
+
+    d.register("stopHotkeyTap") { _ in
+        .object(["stopped": .bool(system.stopHotkeyTap())])
     }
 
     return d

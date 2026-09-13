@@ -5,6 +5,9 @@ import type { z } from 'zod'
 import {
   SIDECAR_PROTOCOL_VERSION,
   SidecarMethods,
+  SidecarNotifications,
+  type SidecarNotification,
+  type SidecarNotificationName,
   type InsertionStrategy,
   type SidecarApi,
   type SidecarMethodName,
@@ -50,6 +53,8 @@ export interface SidecarEvents {
   crash: [{ code: number | null; signal: NodeJS.Signals | null; restarts: number }]
   ready: [{ sidecarVersion: string; pid: number }]
   gaveUp: [{ reason: string }]
+  /** The push-to-talk key, from the sidecar's event tap (protocol 3). */
+  hotkey: [SidecarNotification<'hotkey'>]
 }
 
 export class SidecarClient extends EventEmitter<SidecarEvents> implements SidecarApi {
@@ -142,8 +147,7 @@ export class SidecarClient extends EventEmitter<SidecarEvents> implements Sideca
 
     const id = message['id']
     if (typeof id !== 'number') {
-      // Notifications (no id) land here; none are defined in v0.
-      this.log('info', 'sidecar notification', message)
+      this.onNotification(message)
       return
     }
 
@@ -249,6 +253,38 @@ export class SidecarClient extends EventEmitter<SidecarEvents> implements Sideca
   secureInputState = (p: SidecarParams<'secureInputState'>) => this.call('secureInputState', p)
   activateApp = (p: SidecarParams<'activateApp'>) => this.call('activateApp', p)
   keyChord = (p: SidecarParams<'keyChord'>) => this.call('keyChord', p)
+  startHotkeyTap = (p: SidecarParams<'startHotkeyTap'>) => this.call('startHotkeyTap', p)
+  stopHotkeyTap = (p: SidecarParams<'stopHotkeyTap'>) => this.call('stopHotkeyTap', p)
+
+  /**
+   * A message the host never asked for.
+   *
+   * Validated like any result: an unprompted message is the easiest place for
+   * a drifting sidecar to go unnoticed, because nothing is waiting on it. An
+   * unknown method or a bad shape is logged loudly rather than dropped.
+   */
+  private onNotification(message: Record<string, unknown>): void {
+    const method = message['method']
+    if (typeof method !== 'string') {
+      this.log('warn', 'sidecar: notification without a method', message)
+      return
+    }
+    if (!(method in SidecarNotifications)) {
+      this.log('warn', `sidecar: unknown notification "${method}"`, message)
+      return
+    }
+
+    const name = method as SidecarNotificationName
+    const parsed = SidecarNotifications[name].safeParse(message['params'])
+    if (!parsed.success) {
+      this.log('error', `sidecar: notification "${method}" failed validation`, parsed.error.issues)
+      return
+    }
+
+    if (name === 'hotkey') {
+      this.emit('hotkey', parsed.data as SidecarNotification<'hotkey'>)
+    }
+  }
 
   async dispose(): Promise<void> {
     this.disposed = true
@@ -290,6 +326,8 @@ export interface FakeSidecarOptions {
   axLies?: boolean
   /** Pretend the target won't report its text (verified comes back null). */
   unreadable?: boolean
+  /** Refuse the hotkey tap, as a Mac without Input Monitoring would. */
+  hotkeyTap?: boolean
   /** Start with a document and caret, for undo/replaceRange tests. */
   text?: string
   caret?: number
@@ -323,6 +361,9 @@ export class FakeSidecar implements SidecarApi {
   text: string
   caret: number
   selectionLength: number
+
+  /** Which chord the pretend tap is watching, or null when it is stopped. */
+  hotkeyTapChord: 'opt-space' | 'fn' | null = null
 
   constructor(private readonly overrides: FakeSidecarOptions = {}) {
     this.text = overrides.text ?? ''
@@ -503,6 +544,24 @@ export class FakeSidecar implements SidecarApi {
   }
   async keyChord() {
     return { sent: false, reason: 'no-accessibility' }
+  }
+
+  async startHotkeyTap(params: { chord: 'opt-space' | 'fn'; swallow?: boolean }) {
+    if (this.overrides.hotkeyTap === false) {
+      return { started: false, reason: 'no-input-monitoring', swallowing: false }
+    }
+    this.hotkeyTapChord = params.chord
+    return {
+      started: true,
+      reason: null,
+      swallowing: params.chord !== 'fn' && params.swallow !== false
+    }
+  }
+
+  async stopHotkeyTap() {
+    const was = this.hotkeyTapChord !== null
+    this.hotkeyTapChord = null
+    return { stopped: was }
   }
 
   private apply(start: number, length: number, text: string): void {

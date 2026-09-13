@@ -1,32 +1,45 @@
+import type { SidecarApi } from '@shared/sidecar-api'
+import type { SidecarClient } from './sidecar'
 import { PttStateMachine, type PttKeyEvent } from './ptt-machine'
 
 /**
- * Global ⌥Space push-to-talk.
+ * The push-to-talk key.
  *
- * Two listeners, each covering the other's blind spot:
+ * Four ways to watch one key, tried in order of how well they work:
  *
- *  - Electron's `globalShortcut` claims ⌥Space and **consumes** it, so the
- *    focused app never receives the non-breaking space that ⌥Space normally
- *    types. That is the whole reason it is here: a passive listener alone
- *    would leave a stray U+00A0 in front of every dictation. It only reports
- *    key-down.
- *  - `uiohook-napi` is a passive tap that still sees the key-up we need to end
- *    the utterance.
+ *  - **tap** — a `CGEventTap` in the Swift sidecar (M3). One listener that both
+ *    observes *and* consumes, so there is no stray U+00A0 and no second
+ *    mechanism to keep in step. It is also the only rung that can offer Fn.
+ *  - **ptt** — Electron's `globalShortcut` (claims and consumes ⌥Space, but
+ *    reports only key-down) paired with `uiohook-napi` (sees key-up, cannot
+ *    consume). Two listeners, each covering the other's blind spot. This was
+ *    M1's best case and is now the fallback.
+ *  - **ptt-passive** — uiohook alone: push-to-talk works, but ⌥Space also
+ *    reaches the app underneath.
+ *  - **toggle** — globalShortcut alone: press to start, press again to stop.
  *
- * Degradation ladder, loudest capability first:
- *   both            -> true push-to-talk, no stray character
- *   uiohook only    -> push-to-talk, but ⌥Space also reaches the app
- *   globalShortcut  -> press-to-start / press-to-stop toggle
- *   neither         -> dev trigger only; the HUD says so
- *
- * M3 replaces all of this with a CGEventTap in the Swift sidecar, which can
- * both observe and swallow, and survives Input Monitoring being granted late.
+ * The tap is preferred but never required: it needs Input Monitoring, and a
+ * user who has not granted it yet still gets a working hotkey while the app
+ * explains what is missing. Failing over is silent by design — the mode is
+ * logged and shown in Settings, not thrown.
  */
 
-export type HotkeyMode = 'ptt' | 'ptt-passive' | 'toggle' | 'unavailable'
+export type HotkeyMode = 'tap' | 'ptt' | 'ptt-passive' | 'toggle' | 'unavailable'
+
+export type HotkeyChord = 'opt-space' | 'fn'
 
 export interface HotkeyServiceOptions {
   accelerator?: string
+  /** Which key to watch. `fn` is only possible on the tap rung. */
+  chord?: HotkeyChord
+  /** The sidecar, when one is running. Without it the tap rung is skipped. */
+  sidecar?: SidecarApi | null
+  /**
+   * How to load the passive key tap. Injected so tests never load the native
+   * module — requiring it actually starts listening to the keyboard, which is
+   * not something a test run should do to the machine it runs on.
+   */
+  loadUiohook?: () => UiohookLike
   onStart: () => void
   onStop: () => void
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
@@ -41,18 +54,36 @@ interface UiohookLike {
   stop(): void
 }
 
+/** Lazy require: loading this module begins listening, so never at import. */
+function loadUiohookNapi(): UiohookLike {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const mod = require('uiohook-napi') as { uIOhook: UiohookLike }
+  return mod.uIOhook
+}
+
 export class HotkeyService {
   private machine: PttStateMachine | null = null
   private uiohook: UiohookLike | null = null
   private registered = false
   private toggleActive = false
+  private sidecarTapRunning = false
+  private offHotkey: (() => void) | null = null
   private readonly accelerator: string
+  readonly chord: HotkeyChord
   private readonly log: NonNullable<HotkeyServiceOptions['log']>
   mode: HotkeyMode = 'unavailable'
+  /** Why the passive listener could not be loaded, if it could not. */
   lastError: string | null = null
+  /**
+   * Why the tap rung was not taken. Kept separate from `lastError` because
+   * both can fail in one launch and the tap's reason is the actionable one —
+   * "no-input-monitoring" is a thing the user can go and fix.
+   */
+  tapReason: string | null = null
 
   constructor(private readonly options: HotkeyServiceOptions) {
     this.accelerator = options.accelerator ?? 'Alt+Space'
+    this.chord = options.chord ?? 'opt-space'
     this.log = options.log ?? (() => {})
   }
 
@@ -60,10 +91,23 @@ export class HotkeyService {
    * @param globalShortcut Electron's module, injected so this file stays
    *        importable (and testable) outside an Electron process.
    */
-  start(globalShortcut?: {
+  async start(globalShortcut?: {
     register(accelerator: string, cb: () => void): boolean
     unregister(accelerator: string): void
-  }): HotkeyMode {
+  }): Promise<HotkeyMode> {
+    if (await this.trySidecarTap()) {
+      this.mode = 'tap'
+      this.log('info', 'hotkey mode: tap', { chord: this.chord })
+      return this.mode
+    }
+
+    if (this.chord === 'fn') {
+      // Only the tap can see Fn. Rather than silently watching a different key
+      // than the one Settings claims, say so — the fallback still runs, so the
+      // user keeps a working hotkey while they fix the permission.
+      this.log('warn', 'hotkey: Fn needs the sidecar event tap; falling back to ⌥Space')
+    }
+
     const claimed = this.tryGlobalShortcut(globalShortcut)
     const tapped = this.tryUiohook(claimed ? 'up-only' : 'edge')
 
@@ -74,6 +118,53 @@ export class HotkeyService {
 
     this.log('info', `hotkey mode: ${this.mode}`, { accelerator: this.accelerator })
     return this.mode
+  }
+
+  /**
+   * The best rung: one listener that both sees and swallows the chord.
+   *
+   * Any failure here is a fall-through, not an error. The common one is
+   * Input Monitoring not granted yet, which is a state the app is designed to
+   * survive — Settings will say so, and the ladder below still works.
+   */
+  private async trySidecarTap(): Promise<boolean> {
+    const sidecar = this.options.sidecar
+    if (!sidecar) return false
+
+    try {
+      const result = await sidecar.startHotkeyTap({ chord: this.chord, swallow: true })
+      if (!result.started) {
+        this.tapReason = result.reason
+        this.log('info', `hotkey: sidecar tap unavailable (${result.reason ?? 'unknown'})`)
+        return false
+      }
+      if (!result.swallowing) {
+        // True for Fn, which the window server will not let anyone consume.
+        this.log('info', `hotkey: watching ${this.chord}, but the app still receives it`)
+      }
+
+      const emitter = sidecar as Partial<SidecarClient>
+      if (typeof emitter.on !== 'function' || typeof emitter.off !== 'function') {
+        // A sidecar that cannot deliver notifications would leave the tap
+        // running with nobody listening — worse than not starting it.
+        await sidecar.stopHotkeyTap({}).catch(() => undefined)
+        this.tapReason = 'no-notification-channel'
+        return false
+      }
+
+      const handler = (event: { phase: 'down' | 'up' }): void => {
+        if (event.phase === 'down') this.options.onStart()
+        else this.options.onStop()
+      }
+      emitter.on('hotkey', handler)
+      this.offHotkey = () => emitter.off?.('hotkey', handler)
+      this.sidecarTapRunning = true
+      return true
+    } catch (err) {
+      this.tapReason = err instanceof Error ? err.message : String(err)
+      this.log('warn', 'hotkey: sidecar tap threw; falling back', err)
+      return false
+    }
   }
 
   private tryGlobalShortcut(gs?: {
@@ -94,11 +185,7 @@ export class HotkeyService {
 
   private tryUiohook(mode: 'edge' | 'up-only'): boolean {
     try {
-      // Lazy require: the native module is built for Electron's ABI, so
-      // importing it from plain node (vitest, scripts) would throw.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const mod = require('uiohook-napi') as { uIOhook: UiohookLike }
-      const hook = mod.uIOhook
+      const hook = this.options.loadUiohook?.() ?? loadUiohookNapi()
       this.machine = new PttStateMachine(KEYCODES, mode)
       hook.on('keydown', (e) => this.onHookEvent({ ...e, type: 'keydown' }))
       hook.on('keyup', (e) => this.onHookEvent({ ...e, type: 'keyup' }))
@@ -142,6 +229,12 @@ export class HotkeyService {
   }
 
   stop(gs?: { unregister(accelerator: string): void }): void {
+    this.offHotkey?.()
+    this.offHotkey = null
+    if (this.sidecarTapRunning) {
+      this.sidecarTapRunning = false
+      void this.options.sidecar?.stopHotkeyTap({}).catch(() => undefined)
+    }
     if (this.registered && gs) {
       try {
         gs.unregister(this.accelerator)

@@ -24,6 +24,23 @@ import IOKit.hid
 ///   - **type**  synthesise the characters. Slow and visible, but the only
 ///               thing some targets (terminals, games, remote desktops) accept.
 public final class RealSystem: SystemActions {
+    /// Where unprompted messages go. main.swift points this at stdout; tests
+    /// and the dispatcher never need it. Nil means "nobody is listening", which
+    /// is a valid state — the tap simply has nowhere to report.
+    public var notify: ((JSON) -> Void)?
+
+    private lazy var hotkeyTap = HotkeyTap { [weak self] phase, chord in
+        self?.notify?(
+            .object([
+                "jsonrpc": .string("2.0"),
+                "method": .string("hotkey"),
+                "params": .object([
+                    "phase": .string(phase.rawValue),
+                    "chord": .string(chord.rawValue)
+                ])
+            ]))
+    }
+
     public init() {}
 
     // MARK: - Permissions
@@ -424,4 +441,19 @@ public final class RealSystem: SystemActions {
         for (name, code) in digits { map[name] = CGKeyCode(code) }
         return map
     }()
+
+    // MARK: - Hotkey tap (M3)
+
+    public func startHotkeyTap(chord: String, swallow: Bool) -> (started: Bool, reason: String?) {
+        guard let parsed = HotkeyTap.Chord(rawValue: chord) else {
+            return (false, "unknown-chord")
+        }
+        return hotkeyTap.start(chord: parsed, swallow: swallow)
+    }
+
+    public func stopHotkeyTap() -> Bool {
+        let wasRunning = hotkeyTap.isRunning
+        hotkeyTap.stop()
+        return wasRunning
+    }
 }

@@ -17,6 +17,8 @@ export interface AboutInfo {
   sidecarProtocol: number | null
   /** The hotkey source in use: 'tap', 'ptt', 'toggle', 'unavailable', … */
   hotkeyMode: string
+  /** Why the sidecar event tap is not in use, when it is not. Actionable. */
+  hotkeyTapReason: string | null
   /** Whether ASR is the real local engine or the fake. */
   asrProvider: string
   paths: {

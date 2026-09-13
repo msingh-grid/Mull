@@ -106,6 +106,32 @@ async function checkSidecar(): Promise<void> {
     // smoke test can never type into whatever app happens to be in front.
     const chord = await client.keyChord({ key: 'no-such-key', modifiers: ['cmd'] })
     check('keyChord rejects unknown keys without posting', !chord.sent, chord.reason ?? '')
+
+    // The M3 event tap. Starting and stopping it is safe here: while it runs it
+    // only *observes* — and it is torn down two lines later, well before anyone
+    // could press the chord.
+    const tap = await client.startHotkeyTap({ chord: 'opt-space', swallow: true })
+    if (tap.started) {
+      check('hotkey tap starts', true, tap.swallowing ? 'swallowing ⌥Space' : 'observing only')
+      const stopped = await client.stopHotkeyTap({})
+      check('hotkey tap stops', stopped.stopped)
+    } else {
+      // Not a failure: without Input Monitoring the host falls back to the M1
+      // listener pair, which is the whole point of the ladder.
+      todo(
+        'hotkey tap starts',
+        false,
+        `${tap.reason ?? 'unavailable'} — grant Input Monitoring, then restart`
+      )
+    }
+
+    // Fn is observable but never swallowable; the sidecar must say so rather
+    // than letting the host believe the key is being consumed.
+    const fn = await client.startHotkeyTap({ chord: 'fn', swallow: true })
+    if (fn.started) {
+      check('fn tap admits it cannot swallow', !fn.swallowing)
+      await client.stopHotkeyTap({})
+    }
   } catch (err) {
     check('init handshake', false, err instanceof Error ? err.message : String(err))
   } finally {
