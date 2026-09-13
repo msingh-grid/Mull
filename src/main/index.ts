@@ -44,6 +44,8 @@ import { JournalStore } from './store/journal'
 import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
 import { SculptLane } from './pipeline/sculpt'
+import { NavigateLane } from './pipeline/navigate'
+import { ActionExecutor } from './pipeline/actions'
 import { IntentRouter } from './pipeline/intent'
 import { appliedText, diffText } from './pipeline/diff'
 import { FakeEngine } from './engine/fake'
@@ -81,6 +83,7 @@ let demoEngine: Engine | null = null
 let credentials: CredentialsStore | null = null
 let detectedLogin = false
 let sculpt: SculptLane | null = null
+let navigate: NavigateLane | null = null
 let intent: IntentRouter | null = null
 let settings: SettingsStore | null = null
 let permissions: PermissionsService | null = null
@@ -495,6 +498,25 @@ async function bootstrap(): Promise<void> {
     }
   })
 
+  // The navigation lane. Shares the same HUD port, and shares nothing else with
+  // the edit lane — it writes no text, and the only thing it can put anywhere is
+  // a search query.
+  navigate = new NavigateLane({
+    engine,
+    sidecar,
+    executor: new ActionExecutor({
+      sidecar,
+      journal: journal ?? undefined,
+      log: logFn
+    }),
+    hud: {
+      openCard: (card, onAction) => hud?.openCard(card, onAction),
+      updateCard: (card) => hud?.updateCard(card),
+      closeCard: () => hud?.closeCard()
+    },
+    log: logFn
+  })
+
   // Decides dictate-vs-edit. `useModel` is read per utterance, so switching to
   // rules-only in Settings takes effect on the next thing you say.
   intent = new IntentRouter({
@@ -511,6 +533,7 @@ async function bootstrap(): Promise<void> {
       insertion,
       journal: journal ?? undefined,
       sculpt,
+      navigate,
       intent,
       // Read per utterance, so changing it in Settings takes effect on the
       // next thing you say rather than the next launch.

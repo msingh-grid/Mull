@@ -113,6 +113,20 @@ export type ClassifiedIntent =
    * caret.
    */
   | { kind: 'compose'; instruction: string }
+  /**
+   * Go and look somewhere else in this application, then come back.
+   *
+   * The fourth route, and the only one that moves before it answers. It exists
+   * because "what did Priya say about the terms doc" is unanswerable from a
+   * window Priya is not in, and the honest options were to say so or to go and
+   * read it — and saying so is what Mull did before this, badly.
+   *
+   * **It does not weaken the missing `send` field above.** Navigation cannot
+   * send: `@shared/nav` has no verb for it, `navKey` cannot name ⏎, and a plan
+   * that navigates never carries a commit. What the classifier is choosing here
+   * is where to look, not what to do.
+   */
+  | { kind: 'navigate'; goal: string }
 
 /**
  * One turn of navigation: here is where we are, what do we do next?

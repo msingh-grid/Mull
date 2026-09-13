@@ -227,6 +227,14 @@ function toRoute(
     return { kind: 'compose', instruction: intent.instruction.trim() || transcript }
   }
 
+  if (intent.kind === 'navigate') {
+    // Nothing to navigate *from*: with no readable window there is no list of
+    // things to press and no way to tell whether we arrived. Dictating the
+    // words is the honest answer, as it is for a compose with no screen.
+    if (!context.hasScreen) return { kind: 'dictate', text: transcript }
+    return { kind: 'navigate', goal: intent.goal.trim() || transcript }
+  }
+
   const target =
     intent.target === 'selection' && !context.hasSelection
       ? 'document'

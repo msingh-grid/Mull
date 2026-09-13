@@ -92,14 +92,23 @@ function PlanCardView({
   card: PlanCard
   onAction?: (action: HudAction) => void
 }): JSX.Element {
+  const scope = [card.app, card.limit ? `up to ${card.limit} steps` : null]
+    .filter(Boolean)
+    .join(' · ')
   return (
     <div className="card">
       <div className="card-title">
         <span>
-          Plan · {card.steps.length} {card.steps.length === 1 ? 'step' : 'steps'}
+          Plan{scope ? ` · ${scope}` : ` · ${card.steps.length} ${card.steps.length === 1 ? 'step' : 'steps'}`}
         </span>
         {card.context ? <span className="count">{card.context}</span> : null}
       </div>
+      {card.goal ? (
+        <div className="plan-goal">
+          <span className="n">goal</span>
+          <span className="what">{card.goal}</span>
+        </div>
+      ) : null}
       <div className="card-body">
         {card.steps.map((step, index) => (
           <div key={step.id} className={`plan-step is-${step.state}`}>
@@ -114,13 +123,15 @@ function PlanCardView({
         ))}
       </div>
       <div className="card-actions">
-        <Btn kind="primary" hint="⏎" onClick={() => onAction?.('apply')}>
-          Run
-        </Btn>
+        {card.running ? null : (
+          <Btn kind="primary" hint="⏎" onClick={() => onAction?.('apply')}>
+            Run
+          </Btn>
+        )}
         <Btn hint="esc" onClick={() => onAction?.('cancel')}>
-          Cancel
+          {card.running ? 'Stop' : 'Cancel'}
         </Btn>
-        <span className="undo-promise">each step journaled</span>
+        <span className="undo-promise">{card.note ?? 'each step journaled'}</span>
       </div>
     </div>
   )

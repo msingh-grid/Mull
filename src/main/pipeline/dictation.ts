@@ -75,6 +75,24 @@ export interface SculptLaneLike {
   }): Promise<void>
 }
 
+/**
+ * The navigation lane, as this file sees it (implementation: `navigate.ts`).
+ *
+ * Narrowed to one method for the same reason `SculptLaneLike` is: dictation
+ * must not be able to reach anything that presses a key. All this can do is put
+ * a proposal on screen; the loop starts when the user presses Run, inside the
+ * lane, where this file cannot see it.
+ */
+export interface NavigateLaneLike {
+  propose(request: {
+    goal: string
+    transcript: string
+    app: { bundleId: string; name: string } | null
+    context?: ScreenContext | null
+    routedBy?: string
+  }): Promise<void>
+}
+
 export interface DictationDeps {
   sidecar: SidecarApi
   asr: AsrProvider
@@ -84,6 +102,8 @@ export interface DictationDeps {
   insertion: InsertionService
   /** Where instructions go. Absent = every utterance is dictation. */
   sculpt?: SculptLaneLike
+  /** Where "go and look somewhere else" goes. Absent = never offered. */
+  navigate?: NavigateLaneLike
   /** Decides dictate-vs-edit. Absent = every utterance is dictation. */
   intent?: IntentRouter
   /**
@@ -360,6 +380,21 @@ export class DictationPipeline {
           app: this.state.app ?? routed.snapshot.app,
           text: routed.snapshot.field?.text ?? '',
           transcript: text,
+          routedBy: routed.by
+        })
+        return
+      }
+
+      // The answer is somewhere else in this app. Nothing is written here and
+      // nothing moves yet — the lane puts a proposal on screen and the user
+      // presses Run. Only the model can choose this route (see `router.ts`).
+      if (routed?.route.kind === 'navigate' && this.deps.navigate) {
+        this.phase = 'idle'
+        await this.deps.navigate.propose({
+          goal: routed.route.goal,
+          transcript: text,
+          app: this.state.app ?? routed.snapshot.app,
+          context: routed.snapshot.context,
           routedBy: routed.by
         })
         return

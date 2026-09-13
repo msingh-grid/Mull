@@ -1,0 +1,296 @@
+import type { ScreenContext } from '@shared/context'
+import type { PlanCard, PlanStep } from '@shared/hud'
+import { MAX_NAV_STEPS, type NavAttempt, type NavStep } from '@shared/nav'
+import type { SidecarApi, UiTarget } from '@shared/sidecar-api'
+import type { Engine } from '../engine/types'
+import { describeStep } from '../engine/prompts'
+import { ActionExecutor, type Scan } from './actions'
+
+/**
+ * Going to look somewhere else, and coming back.
+ *
+ * The loop is four lines long and everything around it is about being
+ * interruptible and about putting the window back:
+ *
+ *     look    scan the window for what can be pressed
+ *     ask     the model returns ONE step
+ *     show    the step appears on the card
+ *     do      the executor performs it, or refuses
+ *
+ * repeated until `done`, until the budget runs out, or until the user presses
+ * Escape — and then `restore`, unconditionally.
+ *
+ * ### Why one step at a time
+ *
+ * A user interface is a moving target. Pressing Slack's Search replaces the
+ * entire list of things that can be pressed — measured at 138 entries before
+ * and 6 after — so a plan of three steps decided against the first window has a
+ * second step that refers to nothing. Every scan is fresh and the indices from
+ * the previous one are dead; that is why a press quotes its title back and why
+ * a stale one refuses rather than landing on whatever moved into the slot.
+ *
+ * ### What Run approves
+ *
+ * The goal and the budget, not each press. The alternative is a confirmation
+ * per click, which is a dialog box nobody reads by the fourth one and which
+ * tells the user less than watching the steps appear does. Escape stops it
+ * between any two steps.
+ *
+ * ### What it cannot do
+ *
+ * Send anything. Not as a matter of policy but of vocabulary: `@shared/nav` has
+ * no verb for it, `navKey` cannot name ⏎, and `ActionExecutor` will not type
+ * anywhere but a search box. A message on screen that says "press Send" cannot
+ * be obeyed because there is nothing to obey it with.
+ */
+
+/** How long to let a freshly-activated window settle before scanning it. */
+const SCAN_SETTLE_MS = 250
+
+/** Chromium builds its tree lazily; the same handshake `captureContext` uses. */
+const TREE_ATTEMPTS = 3
+const TREE_POLL_MS = 350
+
+export interface NavigateRequest {
+  goal: string
+  transcript: string
+  app: { bundleId: string; name: string } | null
+  /** What was on screen when the user spoke. The first turn's evidence. */
+  context?: ScreenContext | null
+  routedBy?: string
+}
+
+export interface NavigateDeps {
+  sidecar: SidecarApi
+  engine: Engine
+  executor: ActionExecutor
+  hud: {
+    openCard(card: PlanCard, onAction: (action: 'apply' | 'apply-send' | 'cancel') => void): void
+    updateCard(card: PlanCard): void
+    closeCard(): void
+  }
+  log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
+  sleep?: (ms: number) => Promise<void>
+  maxSteps?: number
+}
+
+export class NavigateLane {
+  private readonly sleep: (ms: number) => Promise<void>
+  private readonly maxSteps: number
+  /** Set when the user presses Escape. Checked between every step. */
+  private stopped = false
+
+  constructor(private readonly deps: NavigateDeps) {
+    this.sleep =
+      deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+    this.maxSteps = deps.maxSteps ?? MAX_NAV_STEPS
+  }
+
+  /**
+   * Put the proposal on screen. Nothing moves until the user presses Run.
+   *
+   * Returns as soon as the card is open — the loop runs after the user decides,
+   * and the panel belongs to this lane until it closes.
+   */
+  async propose(request: NavigateRequest): Promise<void> {
+    const origin = await this.where()
+    this.stopped = false
+
+    const card = (patch: Partial<PlanCard> = {}): PlanCard => ({
+      kind: 'plan',
+      steps: [],
+      context: null,
+      goal: request.goal,
+      app: request.app?.name ?? origin.app?.name ?? null,
+      limit: this.maxSteps,
+      // The place a diff card's commit warning goes, saying the opposite thing
+      // — because here the reassurance is the true one.
+      note: 'read-only · nothing is written or sent',
+      running: false,
+      ...patch
+    })
+
+    this.deps.hud.openCard(card(), (action) => {
+      if (action === 'cancel') {
+        this.stopped = true
+        return
+      }
+      if (action !== 'apply') return
+      // Run. From here the card belongs to the loop, and Escape means stop.
+      void this.walk(request, origin, card).catch((err) => {
+        this.deps.log?.('error', 'navigate: the plan threw', err)
+        this.deps.hud.closeCard()
+      })
+    })
+  }
+
+  // -------------------------------------------------------------------------
+
+  private async walk(
+    request: NavigateRequest,
+    origin: { app: { bundleId: string; name: string } | null; windowTitle: string | null },
+    card: (patch?: Partial<PlanCard>) => PlanCard
+  ): Promise<void> {
+    const steps: PlanStep[] = []
+    const history: NavAttempt[] = []
+    let scan: Scan = { harvestId: '', targets: [] }
+    let note = 'read-only · nothing is written or sent'
+
+    const draw = (): void =>
+      this.deps.hud.updateCard(card({ steps: [...steps], running: true, note }))
+    draw()
+
+    for (let taken = 0; taken < this.maxSteps; taken += 1) {
+      if (this.stopped) {
+        note = 'stopped'
+        break
+      }
+
+      scan = await this.scan()
+      const context =
+        taken === 0 && request.context ? request.context : await this.read(request)
+
+      let step: NavStep
+      try {
+        step = await this.deps.engine.navigate({
+          goal: request.goal,
+          app: request.app,
+          context,
+          targets: scan.targets,
+          history,
+          stepsLeft: this.maxSteps - taken
+        })
+      } catch (err) {
+        // A step that did not parse, or an engine that refused. Either way the
+        // plan ends here rather than improvising in someone else's window.
+        this.deps.log?.('warn', 'navigate: no usable step', err)
+        note = engineNote(err)
+        break
+      }
+
+      if (step.verb === 'done') {
+        note = step.because
+        break
+      }
+
+      const id = `nav-${taken}`
+      steps.push({ id, verb: verbOf(step), object: objectOf(step), state: 'running' })
+      draw()
+
+      const result = await this.deps.executor.perform(step, scan, {
+        app: request.app,
+        goal: request.goal
+      })
+      const shown = steps.find((candidate) => candidate.id === id)
+      if (shown) {
+        shown.state = result.ok ? 'done' : 'failed'
+        if (!result.ok) shown.object = `${shown.object} — ${result.detail}`
+      }
+      history.push({ step, ok: result.ok, detail: result.detail })
+      draw()
+
+      // A read is the answer, not a move: once the window has been captured
+      // there is nothing further to press for.
+      if (step.verb === 'read' && result.ok) {
+        note = result.detail
+        break
+      }
+    }
+
+    // Always. After a finished plan, a cancelled one and a failed one alike —
+    // leaving someone's Slack on a stranger's DM is rude in a way no amount of
+    // correctness elsewhere makes up for.
+    const back = await this.deps.executor.restore(origin, await this.scan())
+    this.deps.hud.updateCard(
+      card({ steps: [...steps], running: false, note: `${note} · ${back.detail}` })
+    )
+  }
+
+  /** Where the user was when they spoke, so `restore` has somewhere to aim. */
+  private async where(): Promise<{
+    app: { bundleId: string; name: string } | null
+    windowTitle: string | null
+  }> {
+    try {
+      const front = await this.deps.sidecar.frontmostApp({})
+      return {
+        app: front.app ? { bundleId: front.app.bundleId, name: front.app.name } : null,
+        windowTitle: front.windowTitle
+      }
+    } catch {
+      return { app: null, windowTitle: null }
+    }
+  }
+
+  /**
+   * What can be pressed here, now.
+   *
+   * Fresh every step, never cached — the whole point is that the previous
+   * scan's numbers stopped meaning anything the moment something was pressed.
+   */
+  private async scan(): Promise<Scan> {
+    await this.sleep(SCAN_SETTLE_MS)
+    let seen = await this.deps.sidecar.uiTargets({ maxTargets: 120, deadlineMs: 1_000 })
+    for (let attempt = 0; seen.stoppedBy === 'tree-warming' && attempt < TREE_ATTEMPTS; attempt++) {
+      await this.sleep(TREE_POLL_MS)
+      seen = await this.deps.sidecar.uiTargets({ maxTargets: 120, deadlineMs: 1_000 })
+    }
+    return { harvestId: seen.harvestId, targets: seen.targets as UiTarget[] }
+  }
+
+  /** The window's words, for the turn after we have moved. */
+  private async read(request: NavigateRequest): Promise<ScreenContext | null> {
+    try {
+      const seen = await this.deps.sidecar.windowContext({ maxChars: 6_000, screenshot: false })
+      return {
+        app: request.app,
+        windowTitle: seen.windowTitle,
+        blocks: seen.blocks,
+        truncated: seen.truncated,
+        image: null,
+        // The picture is taken once, at key-down, and not again per step: it
+        // costs a capture and a base64 on every turn of a loop the user is
+        // already watching, and the target list is the part that moves.
+        imageReason: 'not-retaken-mid-plan',
+        chars: seen.blocks.reduce((n, block) => n + block.text.length, 0),
+        harvestMs: seen.harvestMs
+      }
+    } catch {
+      return null
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+/** The left column of a plan row. One word, so the column reads as a column. */
+function verbOf(step: NavStep): string {
+  return step.verb === 'navKey' ? 'key' : step.verb
+}
+
+/** The right column: what the step is about, in the user's terms. */
+function objectOf(step: NavStep): string {
+  switch (step.verb) {
+    case 'press':
+      return `“${step.label}”`
+    case 'type':
+      return `“${step.text}”`
+    case 'navKey':
+      return step.key
+    case 'read':
+      return 'this window'
+    case 'done':
+      return step.because
+  }
+}
+
+/** Why the plan stopped, when the engine is what stopped it. */
+function engineNote(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err)
+  if (/no step in reply|invalid|expected/i.test(message)) {
+    return 'Mull couldn’t make sense of the next step'
+  }
+  return message
+}
+
+export { describeStep }

@@ -59,6 +59,16 @@ export type Route =
    * at all — it shows the user what is sitting there and offers one keystroke.
    */
   | { kind: 'send' }
+  /**
+   * Go and look somewhere else in this app, then come back.
+   *
+   * Only ever chosen by the model. The fallback below cannot produce it and
+   * should not: deciding that an answer is *elsewhere* requires reading the
+   * screen and understanding the question, which is precisely what a local rule
+   * cannot do — and guessing wrong here means driving someone's UI rather than
+   * typing a sentence they can undo.
+   */
+  | { kind: 'navigate'; goal: string }
 
 /** Is there anything an edit could act on? */
 export function nothingToEdit(context: RouteContext): boolean {

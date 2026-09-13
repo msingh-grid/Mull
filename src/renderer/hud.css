@@ -290,6 +290,20 @@
 .plan-step.is-done .st { color: var(--mem); }
 .plan-step.is-failed .st { color: var(--del); }
 
+/* The goal sits above the steps and reads as the thing they are serving, so it
+   borrows the step's own two-column rhythm rather than being a heading: the
+   label lines up where the step numbers line up. */
+.plan-goal {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--hairline-soft);
+  margin-bottom: 8px;
+}
+.plan-goal .n { color: var(--ink-3); }
+.plan-goal .what { flex: 1; min-width: 0; color: var(--ink); }
+
 /* ── Actions (§6.6) ──────────────────────────────────────────────────────── */
 .card-actions {
   display: flex;

@@ -48,10 +48,13 @@ Answer with one JSON object and nothing else:
 {"intent":"edit","target":"selection","instruction":"<what they asked for>"}
 {"intent":"edit","target":"document","instruction":"<what they asked for>"}
 {"intent":"compose","instruction":"<what they asked for>"}
+{"intent":"navigate","goal":"<what they want to find out>"}
 
 Choose "edit" when the words ask for something to be done TO the text shown to you — rewrite, shorten, fix, translate, change the tone, turn into a list. Use target "selection" when a selection is shown, otherwise "document" (the whole field).
 
 Choose "compose" when the words ask for something NEW to be written, using what is on screen — "reply to this", "draft an answer", "reply to Priya saying I'll have it by five", "write back declining". There is nothing to rewrite; the result goes where the cursor is. Only choose it when a <screen> block is shown, because a reply needs something to reply to.
+
+Choose "navigate" when the words ask about something that is NOT on the screen you were shown, but is plainly somewhere else in the same application — another conversation, another channel, another message, another file. "What did Priya say about the terms doc" with no Priya anywhere in <screen>; "check the eng-platform channel"; "what was in the thread about pricing". The tool will go and look, then come back. Only choose it when a <screen> block is shown and what the user is asking about is genuinely absent from it — if the answer is right there, this is "compose".
 
 "send" counts as asking for something to be written when a message follows it: "send that I'll have the code done in two days", "send them a written message about the delay". The user is describing a message they want written and sent, not speaking one. But "send the deck tonight" and "send Priya the numbers" name a thing being sent rather than a message to write, and those are dictation.
 
@@ -75,6 +78,10 @@ const ClassifiedIntentSchema = z.union([
   z.object({
     intent: z.literal('compose'),
     instruction: z.string().min(1)
+  }),
+  z.object({
+    intent: z.literal('navigate'),
+    goal: z.string().min(1)
   })
 ])
 
@@ -135,6 +142,10 @@ export function parseClassification(raw: string): ClassifiedIntent {
 
   if (parsed.data.intent === 'compose') {
     return { kind: 'compose', instruction: parsed.data.instruction.trim() }
+  }
+
+  if (parsed.data.intent === 'navigate') {
+    return { kind: 'navigate', goal: parsed.data.goal.trim() }
   }
 
   return {

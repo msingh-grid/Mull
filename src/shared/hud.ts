@@ -82,11 +82,38 @@ export interface PlanStep {
   state: PlanStepState
 }
 
+/**
+ * A plan, and — since M5a Stage 5 — a plan that is still being written.
+ *
+ * The steps arrive one at a time rather than all at once, because a user
+ * interface is a moving target: press Slack's Search and the list of things
+ * that can be pressed is entirely replaced, so a three-step plan decided
+ * against the first window has a second step that refers to nothing.
+ *
+ * That changes what Run means. It approves the **goal and the budget** — "go
+ * look for this, in this app, read-only, at most six steps" — and the steps
+ * then appear as they happen. A confirmation per press would be a dialog box
+ * nobody reads by the fourth one, and would say less than watching it.
+ */
 export interface PlanCard {
   kind: 'plan'
   steps: PlanStep[]
   /** Verb context shown at the card's top right. */
   context: string | null
+  /** The user's own words. Absent on the tray demo, present on a real plan. */
+  goal?: string | null
+  /** Named in the title, so it is obvious whose window is being driven. */
+  app?: string | null
+  /** The step budget, printed beside the app. `null` on a plan with no loop. */
+  limit?: number | null
+  /**
+   * One clause under the actions, in the place `CardCommit.warning` occupies on
+   * a diff card — and saying the opposite thing, because here the reassurance
+   * is what is true: nothing is written and nothing is sent.
+   */
+  note?: string | null
+  /** True once the loop is running; Run becomes unavailable and esc stops it. */
+  running?: boolean
 }
 
 /**
