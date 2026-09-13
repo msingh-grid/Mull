@@ -10,8 +10,13 @@
  *   npm run smoke
  */
 import { existsSync } from 'node:fs'
+import { DatabaseSync } from 'node:sqlite'
 import { defaultModelPath, resolveSidecarPath, resolveWhisperCli } from '../src/main/locations'
 import { SidecarClient, FakeSidecar } from '../src/main/services/sidecar'
+import { InsertionService } from '../src/main/services/insertion'
+import { UndoService } from '../src/main/services/undo'
+import { JournalStore } from '../src/main/store/journal'
+import type { SqlDatabase } from '../src/main/store/sqlite'
 import { selectAsrProvider } from '../src/main/asr'
 import { FakeAsrProvider } from '../src/main/asr/fake'
 import { DictationPipeline } from '../src/main/pipeline/dictation'
@@ -72,12 +77,35 @@ async function checkSidecar(): Promise<void> {
     const front = await client.frontmostApp({})
     check('frontmostApp responds', true, front.app?.name ?? 'none')
 
-    // M2 verbs must fail loudly, not silently succeed.
-    const notImplemented = await client
-      .focusedElement({ contextBytes: 512 })
-      .then(() => false)
-      .catch(() => true)
-    check('focusedElement is NotImplemented (M2)', notImplemented)
+    // M2 verbs. Without Accessibility (or with focus somewhere unreadable)
+    // these correctly report *why* rather than failing — the shape is what is
+    // under test here; docs/M2-VERIFY.md covers the behaviour by hand.
+    const focused = await client.focusedElement({ contextBytes: 512 })
+    check(
+      'focusedElement answers',
+      focused.element !== undefined,
+      focused.element ? `role=${focused.element.role} editable=${focused.element.editable}` : `null (${focused.reason})`
+    )
+
+    // A sentinel no real document contains, so the guard is what gets
+    // exercised and nothing on this machine can be edited by running smoke.
+    const sentinel = 'mull-smoke-sentinel-0d6f1c4a-never-present'
+    const badRange = await client.replaceRange({
+      start: 0,
+      length: sentinel.length,
+      text: sentinel,
+      expect: sentinel
+    })
+    check(
+      'replaceRange refuses when its expectation misses',
+      !badRange.replaced,
+      badRange.reason ?? ''
+    )
+
+    // Deliberately an unknown key: rejected *before* anything is posted, so the
+    // smoke test can never type into whatever app happens to be in front.
+    const chord = await client.keyChord({ key: 'no-such-key', modifiers: ['cmd'] })
+    check('keyChord rejects unknown keys without posting', !chord.sent, chord.reason ?? '')
   } catch (err) {
     check('init handshake', false, err instanceof Error ? err.message : String(err))
   } finally {
@@ -117,11 +145,14 @@ async function checkPipeline(): Promise<void> {
   const states: HudState[] = []
   let captureStarted = false
 
+  const journal = new JournalStore(new DatabaseSync(':memory:') as unknown as SqlDatabase)
   const pipe = new DictationPipeline(
     {
       sidecar,
       asr: new FakeAsrProvider('um, this is the smoke test.'),
       bench: new Bench('/dev/null'),
+      insertion: new InsertionService({ sidecar }),
+      journal,
       onState: (s) => states.push({ ...s }),
       capture: {
         start: () => {
@@ -149,6 +180,15 @@ async function checkPipeline(): Promise<void> {
     sidecar.insertions[0] === 'This is the smoke test.',
     sidecar.insertions[0] ?? '(nothing)'
   )
+
+  const entry = journal.recent(1)[0]
+  check('the action was journalled', entry?.status === 'applied', entry?.summary ?? '(no entry)')
+  check('and it is undoable', entry?.undoable === true, `verified=${String(entry?.verified)}`)
+
+  const undo = new UndoService({ sidecar, journal })
+  const undone = await undo.undoLast()
+  check('undo removes exactly what was inserted', undone.ok && sidecar.text === '', JSON.stringify(sidecar.text))
+  check('undo refuses a second time', (await undo.undoLast()).reason === 'nothing-to-undo')
   pipe.dispose()
 
   // Secure input must block insertion outright.
@@ -159,6 +199,7 @@ async function checkPipeline(): Promise<void> {
       sidecar: blockedSidecar,
       asr: new FakeAsrProvider(),
       bench: new Bench('/dev/null'),
+      insertion: new InsertionService({ sidecar: blockedSidecar }),
       onState: (s) => blocked.push({ ...s }),
       capture: { start: () => {}, stop: () => {} }
     },

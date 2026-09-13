@@ -9,6 +9,9 @@ import type { AsrProvider } from '../asr/types'
 import type { Bench } from '../bench'
 import { concatFloat32, peakAmplitude } from '../audio/wav'
 import { cleanTranscript, summarise } from './cleanup'
+import { describeInsertionReason, type InsertionService } from '../services/insertion'
+import type { JournalStore } from '../store/journal'
+import type { JournalDraft, JournalEntry } from '@shared/types'
 
 /**
  * The M1 loop: hold key -> capture -> transcribe -> clean -> insert.
@@ -30,6 +33,10 @@ export interface DictationDeps {
   asr: AsrProvider
   capture: { start(): void; stop(): void }
   bench: Bench
+  /** Walks the per-app strategy chain (M2). */
+  insertion: InsertionService
+  /** Where applied and failed actions are written down. Optional in tests. */
+  journal?: JournalStore
   onState: (state: HudState) => void
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   now?: () => number
@@ -211,6 +218,20 @@ export class DictationPipeline {
       const secure = await this.deps.sidecar.secureInputState({})
       if (secure.active) {
         this.phase = 'idle'
+        // The user said something and nothing happened: that is exactly the
+        // case the journal exists to explain.
+        this.journal({
+          intent: { kind: 'dictate', text },
+          app: this.state.app,
+          before: null,
+          after: null,
+          strategyUsed: null,
+          status: 'cancelled',
+          summary: `Dictation withheld · secure input · “${summarise(text)}”`,
+          verified: null,
+          caret: null,
+          undoable: false
+        })
         this.setState({
           phase: 'blocked',
           notice: 'Secure input turned on while Mull was listening — nothing was inserted.'
@@ -220,13 +241,32 @@ export class DictationPipeline {
 
       this.setState({ phase: 'inserting' })
       const insertStart = this.now()
-      const inserted = await this.deps.sidecar.insertText({ text, strategy: 'paste' })
+      // Normally resolved during the hold, off the critical path. A very short
+      // utterance can outrun it — and the strategy, the journal entry and undo
+      // all key off the app, so it is worth one round trip to know.
+      const target = this.state.app ?? (await this.resolveApp())
+      const inserted = await this.deps.insertion.insert(text, target)
       const insertMs = this.now() - insertStart
 
       this.phase = 'idle'
 
+      const appName = target?.name ?? 'this app'
+      const summary = `Dictation · ${appName} · “${summarise(text)}”`
+
       if (!inserted.inserted) {
-        const notice = describeInsertFailure(inserted.reason)
+        const notice = describeInsertionReason(inserted.reason)
+        this.journal({
+          intent: { kind: 'dictate', text },
+          app: target,
+          before: null,
+          after: null,
+          strategyUsed: null,
+          status: 'failed',
+          summary: `${summary} — not inserted`,
+          verified: null,
+          caret: null,
+          undoable: false
+        })
         this.setState({ phase: 'error', notice, partial: false })
         this.deps.bench.record({
           kind: 'dictation',
@@ -236,6 +276,8 @@ export class DictationPipeline {
           app: this.state.app?.bundleId ?? null,
           outcome: 'failed',
           reason: inserted.reason ?? 'unknown',
+          strategy: null,
+          attempts: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(','),
           captureMs,
           audioSeconds,
           asrMs,
@@ -246,22 +288,40 @@ export class DictationPipeline {
         return
       }
 
-      const appName = this.state.app?.name ?? 'this app'
+      const entry = this.journal({
+        intent: { kind: 'dictate', text },
+        app: target,
+        before: null,
+        after: text,
+        strategyUsed: inserted.strategyUsed,
+        status: 'applied',
+        summary,
+        verified: inserted.verified,
+        caret: inserted.caret,
+        // Undo removes exactly these characters, so it is offered only when the
+        // sidecar read them back and can say where they end.
+        undoable: inserted.verified === true && inserted.caret !== null
+      })
+
       this.setState({
         phase: 'applied',
         partial: false,
         notice: null,
         lastAction: {
-          summary: `Dictation · ${appName} · “${summarise(text)}”`,
+          summary,
           at: this.now(),
-          chars: text.length
+          chars: text.length,
+          entryId: entry?.id ?? null,
+          undoable: entry?.undoable ?? false
         }
       })
       this.log('info', 'dictation applied', {
         chars: text.length,
         removedFillers,
         asrMs,
-        insertMs
+        insertMs,
+        strategy: inserted.strategyUsed,
+        verified: inserted.verified
       })
 
       this.deps.bench.record({
@@ -271,6 +331,8 @@ export class DictationPipeline {
         chars: text.length,
         app: this.state.app?.bundleId ?? null,
         outcome: 'applied',
+        strategy: inserted.strategyUsed,
+        attempts: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(','),
         captureMs,
         audioSeconds,
         asrMs,
@@ -306,22 +368,65 @@ export class DictationPipeline {
     }
   }
 
+  private async resolveApp(): Promise<HudState['app']> {
+    try {
+      const { app } = await this.deps.sidecar.frontmostApp({})
+      if (!app) return null
+      const resolved = { bundleId: app.bundleId, name: app.name }
+      this.setState({ app: resolved })
+      return resolved
+    } catch (err) {
+      this.log('warn', 'dictation: frontmostApp failed', err)
+      return null
+    }
+  }
+
+  /**
+   * Show a message that didn't come from an utterance — an undo result, a
+   * permission warning. Ignored mid-utterance: the HUD belongs to whatever the
+   * user is saying right now, and nothing may interrupt that.
+   */
+  announce(
+    phase: Extract<HudState['phase'], 'applied' | 'error' | 'blocked'>,
+    notice: string,
+    lastAction?: HudState['lastAction']
+  ): boolean {
+    if (this.phase !== 'idle') return false
+    if (this.lingerTimer) {
+      clearTimeout(this.lingerTimer)
+      this.lingerTimer = null
+    }
+    this.setState({
+      phase,
+      notice,
+      partial: false,
+      transcript: '',
+      ...(lastAction !== undefined ? { lastAction } : {})
+    })
+    this.lingerTimer = setTimeout(() => {
+      this.lingerTimer = null
+      if (this.phase === 'idle') this.toIdle()
+    }, this.deps.appliedLingerMs ?? 1_400)
+    return true
+  }
+
+  /**
+   * Write one row. Journalling must never be the reason an utterance fails, so
+   * a broken store is logged and swallowed — the text is already on screen.
+   */
+  private journal(draft: JournalDraft): JournalEntry | null {
+    if (!this.deps.journal) return null
+    try {
+      return this.deps.journal.append(draft)
+    } catch (err) {
+      this.log('error', 'journal write failed', err)
+      return null
+    }
+  }
+
   dispose(): void {
     this.clearTimers()
     if (this.lingerTimer) clearTimeout(this.lingerTimer)
   }
 }
 
-/** Turn a sidecar reason code into something a human can act on. */
-export function describeInsertFailure(reason: string | null): string {
-  switch (reason) {
-    case 'secure-input':
-      return 'Secure input is on — Mull paused. Leave the password field and try again.'
-    case 'no-accessibility':
-      return 'Mull needs Accessibility access to place text. Grant it in System Settings → Privacy & Security → Accessibility, then restart Mull.'
-    case 'no-focused-element':
-      return 'No text field is focused — click where the text should go, then try again.'
-    default:
-      return `Couldn’t insert the text${reason ? ` (${reason})` : ''}.`
-  }
-}

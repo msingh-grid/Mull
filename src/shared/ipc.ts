@@ -34,6 +34,10 @@ export interface HudLastAction {
   /** Epoch ms. */
   at: number
   chars: number
+  /** Journal entry this action wrote, if any. */
+  entryId: string | null
+  /** Whether ⌥Z can still take it back — the HUD only offers undo when true. */
+  undoable: boolean
 }
 
 export interface HudState {
@@ -73,6 +77,11 @@ export const IPC = {
   captureChunk: 'mull:capture:chunk',
   /** capture renderer -> main: getUserMedia / worklet failure. */
   captureError: 'mull:capture:error',
+
+  /** journal window -> main: most recent entries (newest first). */
+  journalRecent: 'mull:journal:recent',
+  /** any renderer -> main: undo the last undoable entry (same path as ⌥Z). */
+  journalUndo: 'mull:journal:undo',
 
   /** Dev affordance: trigger an utterance without the hotkey. */
   devTrigger: 'mull:dev:trigger',

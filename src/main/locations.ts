@@ -32,6 +32,11 @@ export function benchPath(): string {
   return join(userDataDir(), 'bench.jsonl')
 }
 
+/** The journal database: every action Mull took, and whether it was undone. */
+export function journalPath(): string {
+  return join(userDataDir(), 'journal.db')
+}
+
 /** Places whisper.cpp's CLI lands, in preference order. */
 const WHISPER_CLI_CANDIDATES = [
   '/opt/homebrew/bin/whisper-cli',

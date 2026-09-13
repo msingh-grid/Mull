@@ -32,6 +32,13 @@ export interface BenchRow extends BenchStages {
   app: string | null
   outcome: 'applied' | 'blocked' | 'discarded' | 'failed'
   reason?: string
+  /** Strategy that finally worked, or null when nothing did. */
+  strategy?: string | null
+  /**
+   * The whole chain walk, e.g. `ax:ax-unsupported,paste:ok` — this column is
+   * what docs/INSERTION-MATRIX.md is filled in from.
+   */
+  attempts?: string
 }
 
 export class Bench {

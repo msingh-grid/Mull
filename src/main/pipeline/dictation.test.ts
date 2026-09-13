@@ -3,7 +3,10 @@ import { CAPTURE_SAMPLE_RATE, type HudState } from '@shared/ipc'
 import { FakeSidecar } from '../services/sidecar'
 import { FakeAsrProvider } from '../asr/fake'
 import { Bench, type BenchRow } from '../bench'
-import { DictationPipeline, describeInsertFailure } from './dictation'
+import { InsertionService, describeInsertionReason } from '../services/insertion'
+import { JournalStore } from '../store/journal'
+import { memoryDatabase } from '../store/journal.test-helpers'
+import { DictationPipeline } from './dictation'
 
 function speech(seconds: number, amplitude = 0.25): Float32Array {
   const samples = new Float32Array(Math.round(CAPTURE_SAMPLE_RATE * seconds))
@@ -16,6 +19,7 @@ function speech(seconds: number, amplitude = 0.25): Float32Array {
 interface Harness {
   pipe: DictationPipeline
   sidecar: FakeSidecar
+  journal: JournalStore
   states: HudState[]
   rows: Array<Omit<BenchRow, 'at'>>
   capture: { started: number; stopped: number }
@@ -27,6 +31,7 @@ function harness(options: {
   transcript?: string
 } = {}): Harness {
   const sidecar = options.sidecar ?? new FakeSidecar({ accessibility: true })
+  const journal = new JournalStore(memoryDatabase())
   const states: HudState[] = []
   const rows: Array<Omit<BenchRow, 'at'>> = []
   const capture = { started: 0, stopped: 0 }
@@ -42,6 +47,8 @@ function harness(options: {
       sidecar,
       asr: new FakeAsrProvider(options.transcript ?? 'um, hello from the pipeline test.', 0),
       bench,
+      insertion: new InsertionService({ sidecar }),
+      journal,
       onState: (s) => states.push({ ...s }),
       now: () => clockMs,
       appliedLingerMs: 5,
@@ -60,6 +67,7 @@ function harness(options: {
   return {
     pipe,
     sidecar,
+    journal,
     states,
     rows,
     capture,
@@ -189,6 +197,82 @@ describe('DictationPipeline', () => {
     h.pipe.dispose()
   })
 
+  it('journals an applied utterance as undoable, with the caret it landed at', async () => {
+    const h = harness()
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    const [entry] = h.journal.recent()
+    expect(entry).toMatchObject({
+      status: 'applied',
+      after: 'Hello from the pipeline test.',
+      strategyUsed: 'ax',
+      verified: true,
+      undoable: true
+    })
+    expect(entry?.caret).toBe(29)
+    expect(entry?.app?.name).toBe('TextEdit')
+
+    const applied = h.states.find((s) => s.phase === 'applied')
+    expect(applied?.lastAction).toMatchObject({ entryId: entry?.id, undoable: true })
+    h.pipe.dispose()
+  })
+
+  it('journals a failed insertion too, and does not offer to undo it', async () => {
+    const h = harness({
+      sidecar: new FakeSidecar({ accessibility: true, insertFails: 'cgevent-post-failed' })
+    })
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    const [entry] = h.journal.recent()
+    expect(entry?.status).toBe('failed')
+    expect(entry?.undoable).toBe(false)
+    expect(h.journal.lastUndoable()).toBeNull()
+    expect(h.states.at(-1)?.phase).toBe('error')
+    h.pipe.dispose()
+  })
+
+  it('records text withheld because secure input came on mid-utterance', async () => {
+    const sidecar = new FakeSidecar({ accessibility: true })
+    const h = harness({ sidecar })
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    // Focus moves to a password field while we are transcribing.
+    sidecar.secureInputState = async () => ({ active: true, pid: null })
+    h.pipe.end()
+    await settle()
+
+    const [entry] = h.journal.recent()
+    expect(entry?.status).toBe('cancelled')
+    expect(entry?.summary).toMatch(/withheld/)
+    expect(sidecar.insertions).toHaveLength(0)
+    h.pipe.dispose()
+  })
+
+  it('announce() never interrupts a live utterance', async () => {
+    const h = harness()
+    h.pipe.begin()
+    expect(h.pipe.announce('applied', 'undone')).toBe(false)
+    expect(h.pipe.getState().phase).toBe('listening')
+
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(h.pipe.announce('error', 'Nothing to undo.')).toBe(true)
+    expect(h.pipe.getState().notice).toBe('Nothing to undo.')
+    h.pipe.dispose()
+  })
+
   it('drops chunks that arrive outside an utterance', async () => {
     const h = harness()
     h.pipe.pushChunk(speech(1))
@@ -202,11 +286,11 @@ describe('DictationPipeline', () => {
   })
 })
 
-describe('describeInsertFailure', () => {
+describe('describeInsertionReason', () => {
   it('explains what to do, not just what broke', () => {
-    expect(describeInsertFailure('no-accessibility')).toMatch(/System Settings/)
-    expect(describeInsertFailure('secure-input')).toMatch(/password field/)
-    expect(describeInsertFailure('no-focused-element')).toMatch(/click where/)
-    expect(describeInsertFailure(null)).toMatch(/Couldn’t insert/)
+    expect(describeInsertionReason('no-accessibility')).toMatch(/System Settings/)
+    expect(describeInsertionReason('secure-input')).toMatch(/password field/)
+    expect(describeInsertionReason('no-focused-element')).toMatch(/click where/)
+    expect(describeInsertionReason(null)).toMatch(/Couldn’t insert/)
   })
 })

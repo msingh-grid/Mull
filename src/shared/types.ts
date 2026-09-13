@@ -44,6 +44,8 @@ export type Intent = DictateIntent | EditIntent | CommandIntent
 // Journal — every action Mull takes is recorded and undoable (M2).
 // ---------------------------------------------------------------------------
 
+export type JournalStatus = 'applied' | 'cancelled' | 'failed' | 'undone'
+
 export interface JournalEntry {
   id: string
   /** Epoch ms. */
@@ -55,7 +57,26 @@ export interface JournalEntry {
   before: string | null
   after: string | null
   strategyUsed: InsertionStrategy | null
-  status: 'applied' | 'cancelled' | 'failed' | 'undone'
+  status: JournalStatus
+  /** One line for the journal row and the HUD's last-action ghost. */
+  summary: string
+  /**
+   * Did the sidecar read back what it wrote? Undo requires `true`: removing
+   * text we only *believe* we inserted is how you delete someone's paragraph.
+   */
+  verified: boolean | null
+  /** Caret offset (UTF-16) immediately after the write, when AX reported it. */
+  caret: number | null
+  /** False once undone, or when the action left nothing to reverse. */
+  undoable: boolean
+  /** Epoch ms of the undo, if it happened. */
+  undoneAt: number | null
+}
+
+/** What the store needs to create an entry; the rest it fills in. */
+export type JournalDraft = Omit<JournalEntry, 'id' | 'at' | 'undoneAt'> & {
+  id?: string
+  at?: number
 }
 
 // ---------------------------------------------------------------------------

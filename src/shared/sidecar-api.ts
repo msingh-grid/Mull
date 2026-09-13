@@ -2,8 +2,7 @@
  * Typed JSON-RPC contract for the Swift sidecar (`mull-mac`).
  *
  * SOURCE OF TRUTH for the Electron <-> sidecar boundary (docs/PLAN.md,
- * "Key contracts"). The sidecar does not exist yet (built in M1 proper /
- * M2); this file defines the wire contract both sides are built against.
+ * "Key contracts"). Change this file first; the Swift side mirrors it.
  *
  * FRAMING: newline-delimited JSON (ndjson) over the sidecar's stdio.
  * One JSON-RPC 2.0 message per line, UTF-8, no embedded newlines:
@@ -36,7 +35,11 @@ export const AppRefSchema = z.object({
 export type AppRef = z.infer<typeof AppRefSchema>
 
 export const SelectionSchema = z.object({
-  /** UTF-16 offset of the selection start within `FocusedElement.text` (-1 if unknown). */
+  /**
+   * UTF-16 offset of the selection start within the element's *whole* value —
+   * absolute, not relative to the clamped `FocusedElement.text` window, so it
+   * can be handed straight back to `replaceRange`. -1 when unknown.
+   */
   start: z.number().int(),
   length: z.number().int().nonnegative(),
   text: z.string()
@@ -81,7 +84,10 @@ export const FrontmostAppResultSchema = z.object({
 })
 
 export const FocusedElementParamsSchema = z.object({
-  /** Max bytes of surrounding text to return on each side of the caret. Default 2048 (±2KB). */
+  /**
+   * Max surrounding text to return on each side of the caret, counted in UTF-16
+   * units (what AX itself indexes by), not bytes. Default 2048.
+   */
   contextBytes: z.number().int().positive().max(8192).default(2048)
 })
 export const FocusedElementResultSchema = z.object({
@@ -89,35 +95,79 @@ export const FocusedElementResultSchema = z.object({
   element: z
     .object({
       role: z.string(),
+      /** AX reports the value as settable — i.e. an AX write has a chance. */
       editable: z.boolean(),
       /** Surrounding text, clamped to ±contextBytes around the caret. */
       text: z.string(),
+      /** Absolute UTF-16 offset at which `text` begins (0 unless clamped). */
+      textStart: z.number().int().nonnegative(),
+      /** True when `text` is a window onto a longer value. */
+      truncated: z.boolean(),
       selection: SelectionSchema.nullable()
     })
     .nullable(),
-  app: AppRefSchema.nullable()
+  app: AppRefSchema.nullable(),
+  /** Why `element` is null: 'no-accessibility' | 'no-focused-element' | 'unreadable'. */
+  reason: z.string().nullable()
 })
 
 export const InsertTextParamsSchema = z.object({
   text: z.string(),
-  /** Forced strategy; omit to let the sidecar walk the ax -> paste -> type chain. */
-  strategy: InsertionStrategySchema.optional()
+  /** Forced strategy; omit and the sidecar pastes (the host owns the chain). */
+  strategy: InsertionStrategySchema.optional(),
+  /**
+   * How long to let the target app service a paste before the pasteboard is
+   * restored. Tuned per app in `src/main/services/insertion-table.ts`: native
+   * Cocoa apps are done in ~80ms, Electron targets need considerably longer.
+   */
+  settleMs: z.number().int().min(0).max(2000).optional()
 })
 export const InsertTextResultSchema = z.object({
   inserted: z.boolean(),
   strategyUsed: InsertionStrategySchema.nullable(),
   /** Populated when inserted=false (e.g. 'secure-input', 'no-focused-element'). */
-  reason: z.string().nullable()
+  reason: z.string().nullable(),
+  /**
+   * Did the sidecar *read back* the text it wrote? Only the `ax` strategy can:
+   * it re-reads the element afterwards. `paste` and `type` post key events into
+   * the void and report null — an honest "don't know", never a cheerful true.
+   */
+  verified: z.boolean().nullable(),
+  /** Caret offset after the write, when AX could report it (for undo). */
+  caret: z.number().int().nullable()
 })
 
 export const ReplaceSelectionParamsSchema = z.object({
   text: z.string(),
-  strategy: InsertionStrategySchema.optional()
+  strategy: InsertionStrategySchema.optional(),
+  settleMs: z.number().int().min(0).max(2000).optional()
 })
 export const ReplaceSelectionResultSchema = z.object({
   replaced: z.boolean(),
   strategyUsed: InsertionStrategySchema.nullable(),
-  reason: z.string().nullable()
+  reason: z.string().nullable(),
+  verified: z.boolean().nullable(),
+  caret: z.number().int().nullable(),
+  /** What was selected before the write — the `before` half of a journal entry. */
+  replacedText: z.string().nullable()
+})
+
+/**
+ * Write to an explicit range of the focused element. AX-only by design: this is
+ * how undo removes exactly what Mull inserted, and a key-event fallback that
+ * "probably deletes the right characters" is worse than refusing.
+ */
+export const ReplaceRangeParamsSchema = z.object({
+  start: z.number().int().nonnegative(),
+  length: z.number().int().nonnegative(),
+  text: z.string(),
+  /** Refuse unless the range currently holds exactly this text. */
+  expect: z.string().optional()
+})
+export const ReplaceRangeResultSchema = z.object({
+  replaced: z.boolean(),
+  reason: z.string().nullable(),
+  verified: z.boolean().nullable()
 })
 
 export const SecureInputStateParamsSchema = z.object({})
@@ -132,7 +182,8 @@ export const ActivateAppParamsSchema = z.object({
   bundleId: z.string()
 })
 export const ActivateAppResultSchema = z.object({
-  activated: z.boolean()
+  activated: z.boolean(),
+  reason: z.string().nullable()
 })
 
 export const KeyChordParamsSchema = z.object({
@@ -141,14 +192,21 @@ export const KeyChordParamsSchema = z.object({
   modifiers: z.array(z.enum(['cmd', 'shift', 'alt', 'ctrl', 'fn'])).default([])
 })
 export const KeyChordResultSchema = z.object({
-  sent: z.boolean()
+  sent: z.boolean(),
+  reason: z.string().nullable()
 })
 
 // ---------------------------------------------------------------------------
 // The RPC map — one entry per method; both sides are generated/checked from it
 // ---------------------------------------------------------------------------
 
-export const SIDECAR_PROTOCOL_VERSION = 1
+/**
+ * Bumped to 2 in M2: `focusedElement` gained `textStart`/`truncated`/`reason`,
+ * the write verbs gained `verified`/`caret`, and `replaceRange` was added. The
+ * `init` handshake rejects a mismatch, so a stale `mull-mac` binary fails loudly
+ * at boot instead of returning shapes the host can't parse.
+ */
+export const SIDECAR_PROTOCOL_VERSION = 2
 
 export const SidecarMethods = {
   init: { params: InitParamsSchema, result: InitResultSchema },
@@ -161,6 +219,7 @@ export const SidecarMethods = {
   focusedElement: { params: FocusedElementParamsSchema, result: FocusedElementResultSchema },
   insertText: { params: InsertTextParamsSchema, result: InsertTextResultSchema },
   replaceSelection: { params: ReplaceSelectionParamsSchema, result: ReplaceSelectionResultSchema },
+  replaceRange: { params: ReplaceRangeParamsSchema, result: ReplaceRangeResultSchema },
   secureInputState: { params: SecureInputStateParamsSchema, result: SecureInputStateResultSchema },
   activateApp: { params: ActivateAppParamsSchema, result: ActivateAppResultSchema },
   keyChord: { params: KeyChordParamsSchema, result: KeyChordResultSchema }

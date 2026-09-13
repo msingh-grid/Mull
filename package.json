@@ -13,6 +13,7 @@
     "check:native": "electron scripts/native-check.cjs",
     "fetch:model": "tsx scripts/fetch-model.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "notarize:dryrun": "tsx scripts/notarize-dryrun.ts",
     "test": "vitest run"
   },
   "author": "",

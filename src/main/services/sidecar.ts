@@ -5,6 +5,7 @@ import type { z } from 'zod'
 import {
   SIDECAR_PROTOCOL_VERSION,
   SidecarMethods,
+  type InsertionStrategy,
   type SidecarApi,
   type SidecarMethodName,
   type SidecarParams,
@@ -244,6 +245,7 @@ export class SidecarClient extends EventEmitter<SidecarEvents> implements Sideca
   focusedElement = (p: SidecarParams<'focusedElement'>) => this.call('focusedElement', p)
   insertText = (p: SidecarParams<'insertText'>) => this.call('insertText', p)
   replaceSelection = (p: SidecarParams<'replaceSelection'>) => this.call('replaceSelection', p)
+  replaceRange = (p: SidecarParams<'replaceRange'>) => this.call('replaceRange', p)
   secureInputState = (p: SidecarParams<'secureInputState'>) => this.call('secureInputState', p)
   activateApp = (p: SidecarParams<'activateApp'>) => this.call('activateApp', p)
   keyChord = (p: SidecarParams<'keyChord'>) => this.call('keyChord', p)
@@ -271,27 +273,83 @@ export class SidecarRpcError extends Error {
   }
 }
 
+export interface FakeSidecarOptions {
+  accessibility?: boolean
+  inputMonitoring?: boolean
+  secureInput?: boolean
+  app?: { bundleId: string; name: string; pid: number } | null
+  /** Force every insertion to fail with this reason code. */
+  insertFails?: string | null
+  /** Which strategies this pretend app implements. Default: all three. */
+  supports?: Partial<Record<InsertionStrategy, boolean>>
+  /**
+   * Accept an AX write and then quietly drop it — the behaviour that makes
+   * read-back verification necessary in the first place. Some real apps do
+   * exactly this.
+   */
+  axLies?: boolean
+  /** Pretend the target won't report its text (verified comes back null). */
+  unreadable?: boolean
+  /** Start with a document and caret, for undo/replaceRange tests. */
+  text?: string
+  caret?: number
+  selectionLength?: number
+  /** No text element has focus. */
+  noFocus?: boolean
+  /**
+   * Focus exists and reports a caret, but refuses to hand over its value —
+   * web text areas and terminals do this. Callers then have no local copy to
+   * check against and must rely on the sidecar's own `expect` guard.
+   */
+  valueUnreadable?: boolean
+}
+
 /**
  * Sidecar stand-in for tests and for running without a built binary.
  *
- * It reports no permissions and refuses insertion — the app must stay honest
- * when the real thing is missing rather than silently pretending to type.
+ * It models a single text field — value, caret, selection — so the whole write
+ * path (chain walking, verification, undo's read-then-replace) can be exercised
+ * without macOS in the loop. Without a document it would only be able to prove
+ * that we *called* the right methods, which is the part that was never in doubt.
+ *
+ * Defaults are deliberately pessimistic: no permissions, insertion refused. The
+ * app must stay honest when the real sidecar is missing rather than silently
+ * pretending to type.
  */
 export class FakeSidecar implements SidecarApi {
   insertions: string[] = []
+  /** Every (strategy, text) pair the service asked for, in order. */
+  calls: Array<{ method: string; strategy?: string; text?: string; settleMs?: number }> = []
+  text: string
+  caret: number
+  selectionLength: number
 
-  constructor(
-    private readonly overrides: {
-      accessibility?: boolean
-      inputMonitoring?: boolean
-      secureInput?: boolean
-      app?: { bundleId: string; name: string; pid: number } | null
-      insertFails?: string | null
-    } = {}
-  ) {}
+  constructor(private readonly overrides: FakeSidecarOptions = {}) {
+    this.text = overrides.text ?? ''
+    this.caret = overrides.caret ?? this.text.length
+    this.selectionLength = overrides.selectionLength ?? 0
+  }
+
+  private supports(strategy: InsertionStrategy): boolean {
+    return this.overrides.supports?.[strategy] ?? true
+  }
+
+  private guard(): { reason: string } | null {
+    if (this.overrides.secureInput) return { reason: 'secure-input' }
+    if (this.overrides.accessibility === false || this.overrides.accessibility === undefined) {
+      // Permission defaults to absent, matching the real "nothing granted yet".
+      return { reason: 'no-accessibility' }
+    }
+    return null
+  }
 
   async init() {
-    return { ok: true as const, sidecarVersion: 'fake', protocolVersion: SIDECAR_PROTOCOL_VERSION, pid: 0 }
+    return {
+      ok: true as const,
+      sidecarVersion: 'fake',
+      protocolVersion: SIDECAR_PROTOCOL_VERSION,
+      pid: 0
+    }
   }
   async checkPermissions() {
     return {
@@ -304,34 +362,152 @@ export class FakeSidecar implements SidecarApi {
   }
   async frontmostApp() {
     return {
-      app: this.overrides.app === undefined ? { bundleId: 'com.apple.TextEdit', name: 'TextEdit', pid: 1 } : this.overrides.app,
+      app:
+        this.overrides.app === undefined
+          ? { bundleId: 'com.apple.TextEdit', name: 'TextEdit', pid: 1 }
+          : this.overrides.app,
       windowTitle: null
     }
   }
-  async focusedElement() {
-    return { element: null, app: null }
+
+  async focusedElement(p: SidecarParams<'focusedElement'>) {
+    const app = (await this.frontmostApp()).app
+    if (this.overrides.noFocus) {
+      return { element: null, app, reason: 'no-focused-element' }
+    }
+    if (this.overrides.accessibility === false) {
+      return { element: null, app, reason: 'no-accessibility' }
+    }
+    const context = p?.contextBytes ?? 2048
+    if (this.overrides.valueUnreadable) {
+      return {
+        element: {
+          role: 'AXTextArea',
+          editable: true,
+          text: '',
+          textStart: this.caret,
+          truncated: true,
+          selection: { start: this.caret, length: this.selectionLength, text: '' }
+        },
+        app,
+        reason: null
+      }
+    }
+    const start = Math.max(0, this.caret - context)
+    const end = Math.min(this.text.length, this.caret + context)
+    return {
+      element: {
+        role: 'AXTextArea',
+        editable: true,
+        text: this.text.slice(start, end),
+        textStart: start,
+        truncated: start > 0 || end < this.text.length,
+        selection: {
+          start: this.caret,
+          length: this.selectionLength,
+          text: this.text.slice(this.caret, this.caret + this.selectionLength)
+        }
+      },
+      app,
+      reason: null
+    }
   }
+
   async insertText(p: SidecarParams<'insertText'>) {
-    if (this.overrides.secureInput) {
-      return { inserted: false, strategyUsed: null, reason: 'secure-input' }
+    this.calls.push({
+      method: 'insertText',
+      strategy: p.strategy,
+      text: p.text,
+      settleMs: p.settleMs
+    })
+    const blocked = this.guard()
+    if (blocked) {
+      return { inserted: false, strategyUsed: null, reason: blocked.reason, verified: null, caret: null }
     }
     if (this.overrides.insertFails) {
-      return { inserted: false, strategyUsed: null, reason: this.overrides.insertFails }
+      return {
+        inserted: false,
+        strategyUsed: null,
+        reason: this.overrides.insertFails,
+        verified: null,
+        caret: null
+      }
     }
+    const strategy = (p.strategy ?? 'paste') as InsertionStrategy
+    if (!this.supports(strategy)) {
+      return {
+        inserted: false,
+        strategyUsed: null,
+        reason: strategy === 'ax' ? 'ax-unsupported' : 'strategy-unsupported',
+        verified: null,
+        caret: null
+      }
+    }
+    if (strategy === 'ax' && this.overrides.axLies) {
+      return {
+        inserted: false,
+        strategyUsed: null,
+        reason: 'ax-verify-failed',
+        verified: false,
+        caret: null
+      }
+    }
+
+    this.apply(this.caret, this.selectionLength, p.text)
     this.insertions.push(p.text)
-    return { inserted: true, strategyUsed: 'paste' as const, reason: null }
+    return {
+      inserted: true,
+      strategyUsed: strategy,
+      reason: null,
+      verified: this.overrides.unreadable ? null : true,
+      caret: this.overrides.unreadable ? null : this.caret
+    }
   }
+
   async replaceSelection(p: SidecarParams<'replaceSelection'>) {
-    this.insertions.push(p.text)
-    return { replaced: true, strategyUsed: 'paste' as const, reason: null }
+    const previous = this.text.slice(this.caret, this.caret + this.selectionLength)
+    const result = await this.insertText(p)
+    return {
+      replaced: result.inserted,
+      strategyUsed: result.strategyUsed,
+      reason: result.reason,
+      verified: result.verified,
+      caret: result.caret,
+      replacedText: result.inserted ? previous : null
+    }
   }
+
+  async replaceRange(p: SidecarParams<'replaceRange'>) {
+    this.calls.push({ method: 'replaceRange', text: p.text })
+    const blocked = this.guard()
+    if (blocked) return { replaced: false, reason: blocked.reason, verified: null }
+    if (this.overrides.noFocus) {
+      return { replaced: false, reason: 'no-focused-element', verified: null }
+    }
+    if (!this.supports('ax')) {
+      return { replaced: false, reason: 'ax-unsupported', verified: null }
+    }
+    const actual = this.text.slice(p.start, p.start + p.length)
+    if (p.expect !== undefined && actual !== p.expect) {
+      return { replaced: false, reason: 'expect-mismatch', verified: null }
+    }
+    this.apply(p.start, p.length, p.text)
+    return { replaced: true, reason: null, verified: true }
+  }
+
   async secureInputState() {
     return { active: this.overrides.secureInput ?? false, pid: null }
   }
   async activateApp() {
-    return { activated: false }
+    return { activated: false, reason: 'not-running' }
   }
   async keyChord() {
-    return { sent: false }
+    return { sent: false, reason: 'no-accessibility' }
+  }
+
+  private apply(start: number, length: number, text: string): void {
+    this.text = this.text.slice(0, start) + text + this.text.slice(start + length)
+    this.caret = start + text.length
+    this.selectionLength = 0
   }
 }

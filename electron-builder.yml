@@ -1,13 +1,55 @@
-# electron-builder config STUB — real packaging config lands in M6
-# (hardened runtime, entitlements, notarization, `binaries:` for the signed
-# Swift sidecar, DMG + electron-updater). Kept minimal so `electron-builder`
-# has a valid target once needed; not exercised in M1.
-appId: com.mull.app
+# Packaging. Exercised at M2 by `npm run notarize:dryrun` so the surprises
+# (entitlements, the unsigned sidecar, the native module) land seven weeks
+# before the release does — the whole point of the M2 dry run in docs/PLAN.md.
+#
+# Signing identity and Team ID are deliberately absent: they come from the
+# environment (CSC_NAME / CSC_LINK, APPLE_TEAM_ID) so no credential lives in the
+# repo, and an unsigned local build still works.
+
+appId: net.mull.app # placeholder — must match the Team ID's bundle prefix before the first notarised build
 productName: Mull
+copyright: © 2026
+
 directories:
   output: release
+  buildResources: build
+
 files:
-  - out/**
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+
+# The Swift sidecar ships inside the bundle and is signed with the same
+# identity; `mac.binaries` is what makes electron-builder sign it rather than
+# copying it in unsigned and failing notarisation.
+extraResources:
+  - from: mull-mac/.build/release/mull-mac
+    to: mull-mac
+
 mac:
   category: public.app-category.productivity
-  target: dmg
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  binaries:
+    - Contents/Resources/mull-mac
+  target:
+    - target: dmg
+      arch: [arm64]
+  extendInfo:
+    # macOS kills the process instead of prompting when this string is missing.
+    NSMicrophoneUsageDescription: Mull listens only while you hold ⌥Space, and transcribes on this Mac.
+    # Menu-bar resident: no Dock icon, no window on launch.
+    LSUIElement: true
+
+dmg:
+  title: Mull
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications

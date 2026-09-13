@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { IPC, type CaptureReadyPayload, type HudState } from '@shared/ipc'
+import type { JournalEntry } from '@shared/types'
 
 /**
  * The bridge. Renderers get exactly these functions and nothing else — no
@@ -16,6 +17,12 @@ export interface MullApi {
     getState: () => Promise<HudState>
     /** Dev-only: run one utterance without touching the keyboard. */
     devTrigger: (ms?: number) => Promise<void>
+  }
+  journal: {
+    /** Newest entries first. */
+    recent: (limit?: number) => Promise<JournalEntry[]>
+    /** Same path as ⌥Z; the result message is also shown on the HUD. */
+    undoLast: () => Promise<{ ok: boolean; message: string }>
   }
   capture: {
     onStart: (handler: () => void) => void
@@ -42,6 +49,12 @@ const api: MullApi = {
     },
     getState: () => ipcRenderer.invoke(IPC.hudStateGet) as Promise<HudState>,
     devTrigger: (ms) => ipcRenderer.invoke(IPC.devTrigger, ms) as Promise<void>
+  },
+
+  journal: {
+    recent: (limit) => ipcRenderer.invoke(IPC.journalRecent, limit) as Promise<JournalEntry[]>,
+    undoLast: () =>
+      ipcRenderer.invoke(IPC.journalUndo) as Promise<{ ok: boolean; message: string }>
   },
 
   capture: {

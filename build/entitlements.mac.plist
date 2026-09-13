@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the signed app.
+
+  Every entry is here because something breaks without it, and nothing is here
+  "just in case" — each one widens what a compromised Mull could do:
+
+    allow-jit / unsigned-executable-memory
+      Chromium's JavaScript engines. Non-negotiable for Electron.
+
+    disable-library-validation
+      Mull loads two things Apple didn't sign: the better-sqlite3 native module
+      and the `mull-mac` sidecar. Both are signed with the same Team ID, but the
+      loader still refuses them under library validation.
+
+    device.audio-input
+      The microphone. Paired with NSMicrophoneUsageDescription in the app's
+      Info.plist (see electron-builder.yml) — without the string, macOS kills
+      the process rather than prompting.
+
+  Deliberately absent: app sandbox (Accessibility control of other apps is
+  impossible inside it) and Apple Events (Mull drives apps through CGEvent and
+  the Accessibility API, never by scripting them).
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+  </dict>
+</plist>

@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { PassThrough } from 'node:stream'
 import { describe, expect, it } from 'vitest'
+import { SIDECAR_PROTOCOL_VERSION } from '@shared/sidecar-api'
 import { SidecarClient, SidecarRpcError, FakeSidecar } from './sidecar'
 
 /**
@@ -67,7 +68,7 @@ function clientWith(
 const initResult = {
   ok: true,
   sidecarVersion: '0.1.0',
-  protocolVersion: 1,
+  protocolVersion: SIDECAR_PROTOCOL_VERSION,
   pid: 4242
 }
 
@@ -78,7 +79,7 @@ describe('SidecarClient', () => {
     })
     await client.start()
     expect(child.requests[0]?.method).toBe('init')
-    expect(child.requests[0]?.params).toEqual({ protocolVersion: 1 })
+    expect(child.requests[0]?.params).toEqual({ protocolVersion: SIDECAR_PROTOCOL_VERSION })
     await client.dispose()
   })
 

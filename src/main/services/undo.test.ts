@@ -1,0 +1,164 @@
+import { describe, expect, it } from 'vitest'
+import type { JournalDraft } from '@shared/types'
+import { JournalStore } from '../store/journal'
+import { memoryDatabase } from '../store/journal.test-helpers'
+import { FakeSidecar, type FakeSidecarOptions } from './sidecar'
+import { UndoService } from './undo'
+
+const INSERTED = 'Send the deck today'
+
+function setup(
+  sidecarOptions: FakeSidecarOptions = {},
+  entry: Partial<JournalDraft> = {}
+): { undo: UndoService; sidecar: FakeSidecar; journal: JournalStore; id: string } {
+  const sidecar = new FakeSidecar({
+    accessibility: true,
+    app: { bundleId: 'com.apple.mail', name: 'Mail', pid: 7 },
+    text: `Hi there. ${INSERTED}`,
+    ...sidecarOptions
+  })
+  const journal = new JournalStore(memoryDatabase())
+  const written = journal.append({
+    intent: { kind: 'dictate', text: INSERTED },
+    app: { bundleId: 'com.apple.mail', name: 'Mail' },
+    before: null,
+    after: INSERTED,
+    strategyUsed: 'ax',
+    status: 'applied',
+    summary: `Dictation · Mail · “${INSERTED}”`,
+    verified: true,
+    caret: `Hi there. ${INSERTED}`.length,
+    undoable: true,
+    ...entry
+  })
+  return { undo: new UndoService({ sidecar, journal }), sidecar, journal, id: written.id }
+}
+
+describe('UndoService', () => {
+  it('removes exactly the characters it inserted', async () => {
+    const { undo, sidecar, journal, id } = setup()
+    const result = await undo.undoLast()
+
+    expect(result.ok).toBe(true)
+    expect(sidecar.text).toBe('Hi there. ')
+    expect(journal.get(id)?.status).toBe('undone')
+  })
+
+  it('restores the previous text for an edit', async () => {
+    const { undo, sidecar } = setup(
+      { text: 'Hi there. Send the deck today' },
+      { before: 'send it', after: INSERTED }
+    )
+    const result = await undo.undoLast()
+
+    expect(result.ok).toBe(true)
+    expect(sidecar.text).toBe('Hi there. send it')
+    expect(result.message).toMatch(/Restored/)
+  })
+
+  it('has nothing to undo on a fresh journal', async () => {
+    const journal = new JournalStore(memoryDatabase())
+    const undo = new UndoService({ sidecar: new FakeSidecar({ accessibility: true }), journal })
+
+    expect((await undo.undoLast()).reason).toBe('nothing-to-undo')
+  })
+
+  it('refuses when the user has moved to another app', async () => {
+    const { undo, sidecar } = setup({
+      app: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack', pid: 9 }
+    })
+    const result = await undo.undoLast()
+
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('different-app')
+    expect(result.message).toContain('Mail')
+    expect(sidecar.text).toContain(INSERTED)
+  })
+
+  it('refuses when nothing has focus', async () => {
+    const { undo } = setup({ noFocus: true })
+    expect((await undo.undoLast()).reason).toBe('no-focused-element')
+  })
+
+  it('refuses when the text has changed under it', async () => {
+    // The user typed after the insertion: the characters before the caret are
+    // no longer ours.
+    const { undo, sidecar } = setup({ text: `Hi there. ${INSERTED} and more` })
+    const before = sidecar.text
+    const result = await undo.undoLast()
+
+    expect(result.reason).toBe('text-changed')
+    expect(sidecar.text).toBe(before)
+  })
+
+  it('refuses when the caret sits before the text it would delete', async () => {
+    const { undo, sidecar } = setup({ text: `Hi there. ${INSERTED}`, caret: 3 })
+    const result = await undo.undoLast()
+
+    expect(result.reason).toBe('text-changed')
+    expect(sidecar.text).toContain(INSERTED)
+  })
+
+  it('relies on the sidecar when the element won’t hand over its text', async () => {
+    // Web text areas and terminals report a caret but no value, so the local
+    // pre-check cannot run at all. `expect` inside the sidecar is the guard
+    // that actually gates the write — this proves it, not the pre-check.
+    const { undo, sidecar } = setup({
+      text: `Hi there. something else entirely`,
+      valueUnreadable: true
+    })
+    sidecar.caret = sidecar.text.length
+    const before = sidecar.text
+    const result = await undo.undoLast()
+
+    expect(result.reason).toBe('text-changed')
+    expect(sidecar.text).toBe(before)
+  })
+
+  it('undoes through an element that won’t hand over its text, when the range does match', async () => {
+    const { undo, sidecar } = setup({ valueUnreadable: true })
+    expect((await undo.undoLast()).ok).toBe(true)
+    expect(sidecar.text).toBe('Hi there. ')
+  })
+
+  it('refuses to touch a write it could not verify', async () => {
+    const { undo, journal, id } = setup({}, { verified: null, undoable: true })
+    // The store already refuses to mark it undoable, so this is the belt to the
+    // store's braces: a hand-written row must not get undone either.
+    journal.append({
+      intent: { kind: 'dictate', text: INSERTED },
+      app: { bundleId: 'com.apple.mail', name: 'Mail' },
+      before: null,
+      after: INSERTED,
+      strategyUsed: 'paste',
+      status: 'applied',
+      summary: 'unverified',
+      verified: true,
+      caret: 29,
+      undoable: true
+    })
+    expect(journal.get(id)?.undoable).toBe(false)
+    expect((await undo.undoLast()).entry?.summary).toBe('unverified')
+  })
+
+  it('reports secure input rather than silently doing nothing', async () => {
+    const { undo } = setup({ secureInput: true })
+    const result = await undo.undoLast()
+
+    expect(result.reason).toBe('blocked')
+    expect(result.message).toMatch(/Secure input/)
+  })
+
+  it('undoes only once', async () => {
+    const { undo } = setup()
+    expect((await undo.undoLast()).ok).toBe(true)
+    expect((await undo.undoLast()).reason).toBe('nothing-to-undo')
+  })
+
+  it('peek says what ⌥Z would reverse', async () => {
+    const { undo } = setup()
+    expect(undo.peek()?.after).toBe(INSERTED)
+    await undo.undoLast()
+    expect(undo.peek()).toBeNull()
+  })
+})

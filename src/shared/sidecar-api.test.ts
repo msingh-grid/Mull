@@ -3,6 +3,7 @@ import {
   InsertTextParamsSchema,
   InsertTextResultSchema,
   FocusedElementParamsSchema,
+  ReplaceRangeParamsSchema,
   SidecarMethods,
   SIDECAR_PROTOCOL_VERSION
 } from './sidecar-api'
@@ -18,10 +19,37 @@ describe('sidecar-api zod contract', () => {
   })
 
   it('validates results and rejects bad strategies', () => {
-    expect(
-      InsertTextResultSchema.parse({ inserted: true, strategyUsed: 'ax', reason: null })
-    ).toEqual({ inserted: true, strategyUsed: 'ax', reason: null })
+    const result = { inserted: true, strategyUsed: 'ax', reason: null, verified: true, caret: 42 }
+    expect(InsertTextResultSchema.parse(result)).toEqual(result)
     expect(() => InsertTextParamsSchema.parse({ text: 'x', strategy: 'osascript' })).toThrow()
+  })
+
+  it('requires the honesty fields — a result may not just omit `verified`', () => {
+    // Nullable, not optional: a sidecar that has nothing to say about whether
+    // the text landed must say so explicitly rather than leaving the key out.
+    expect(() =>
+      InsertTextResultSchema.parse({ inserted: true, strategyUsed: 'paste', reason: null })
+    ).toThrow()
+    expect(
+      InsertTextResultSchema.parse({
+        inserted: true,
+        strategyUsed: 'paste',
+        reason: null,
+        verified: null,
+        caret: null
+      }).verified
+    ).toBeNull()
+  })
+
+  it('replaceRange carries the expectation that guards undo', () => {
+    const parsed = ReplaceRangeParamsSchema.parse({
+      start: 10,
+      length: 5,
+      text: '',
+      expect: 'hello'
+    })
+    expect(parsed.expect).toBe('hello')
+    expect(() => ReplaceRangeParamsSchema.parse({ start: -1, length: 5, text: '' })).toThrow()
   })
 
   it('applies defaults (focusedElement contextBytes = ±2KB)', () => {
@@ -38,10 +66,12 @@ describe('sidecar-api zod contract', () => {
       'focusedElement',
       'insertText',
       'replaceSelection',
+      'replaceRange',
       'secureInputState',
       'activateApp',
       'keyChord'
     ])
-    expect(SIDECAR_PROTOCOL_VERSION).toBe(1)
+    // Bumped whenever a shape changes; the sidecar's `init` refuses a mismatch.
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(2)
   })
 })

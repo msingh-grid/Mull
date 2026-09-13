@@ -3,11 +3,15 @@ import { join } from 'node:path'
 import log from 'electron-log/main'
 import { CAPTURE_SAMPLE_RATE, IPC, type CaptureReadyPayload, type HudState } from '@shared/ipc'
 import type { SidecarApi } from '@shared/sidecar-api'
-import { benchPath, resolveSidecarPath } from './locations'
+import { benchPath, journalPath, resolveSidecarPath } from './locations'
 import { Bench } from './bench'
 import { selectAsrProvider } from './asr'
 import { FakeSidecar, SidecarClient } from './services/sidecar'
 import { HotkeyService } from './services/hotkey'
+import { InsertionService } from './services/insertion'
+import { UndoService } from './services/undo'
+import { JournalStore } from './store/journal'
+import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
 import type { AsrProvider } from './asr/types'
 
@@ -17,6 +21,9 @@ let hudWindow: BrowserWindow | null = null
 let captureWindow: BrowserWindow | null = null
 let pipeline: DictationPipeline | null = null
 let hotkey: HotkeyService | null = null
+let journal: JournalStore | null = null
+let undo: UndoService | null = null
+let insertion: InsertionService | null = null
 let sidecar: SidecarApi & { dispose?: () => Promise<void> }
 let asr: AsrProvider
 
@@ -151,11 +158,28 @@ async function bootstrap(): Promise<void> {
 
   const bench = new Bench(benchPath(), (err) => log.warn('bench write failed', err))
 
+  // A journal that can't open must not take dictation down with it: the loop
+  // still works, it just stops remembering. Undo is disabled in that state
+  // rather than guessing.
+  try {
+    journal = new JournalStore(openSqlite(journalPath()))
+    const pruned = journal.prune()
+    if (pruned > 0) log.info(`journal pruned ${pruned} old entries`)
+  } catch (err) {
+    log.error('journal unavailable — actions will not be recorded or undoable', err)
+    journal = null
+  }
+
+  insertion = new InsertionService({ sidecar, log: logFn })
+  undo = journal ? new UndoService({ sidecar, journal, log: logFn }) : null
+
   pipeline = new DictationPipeline(
     {
       sidecar,
       asr,
       bench,
+      insertion,
+      journal: journal ?? undefined,
       onState: pushHudState,
       log: logFn,
       capture: {
@@ -184,6 +208,16 @@ async function bootstrap(): Promise<void> {
     })
   }
 
+  // ⌥Z — undo the last thing Mull did. Registered globally (not as a menu item)
+  // because the user is never in Mull's window when they want it, and consumed
+  // here so the chord doesn't reach the app underneath as a stray Ω.
+  if (undo) {
+    const registered = globalShortcut.register('Alt+Z', () => {
+      void runUndo()
+    })
+    if (!registered) log.warn('⌥Z is already claimed by another app — undo has no shortcut')
+  }
+
   // Permission state is logged once at boot so M1-VERIFY has something to
   // compare against when insertion silently does nothing.
   const perms = await sidecar.checkPermissions({}).catch(() => null)
@@ -197,11 +231,37 @@ async function bootstrap(): Promise<void> {
   }
 }
 
+/** One undo attempt, with its result shown on the HUD either way. */
+async function runUndo(): Promise<{ ok: boolean; message: string }> {
+  if (!undo) {
+    const message = 'Undo is unavailable — Mull couldn’t open its journal.'
+    pipeline?.announce('error', message)
+    return { ok: false, message }
+  }
+  try {
+    const outcome = await undo.undoLast()
+    pipeline?.announce(
+      outcome.ok ? 'applied' : 'error',
+      outcome.message,
+      // A successful undo retires the action it reversed.
+      outcome.ok ? null : undefined
+    )
+    return { ok: outcome.ok, message: outcome.message }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log.error('undo failed', err)
+    pipeline?.announce('error', `Couldn’t undo: ${message}`)
+    return { ok: false, message }
+  }
+}
+
 // ---------------------------------------------------------------------------
 // IPC
 // ---------------------------------------------------------------------------
 
 ipcMain.handle(IPC.ping, () => 'pong')
+ipcMain.handle(IPC.journalRecent, (_event, limit?: number) => journal?.recent(limit ?? 50) ?? [])
+ipcMain.handle(IPC.journalUndo, () => runUndo())
 ipcMain.handle(IPC.hudStateGet, () => pipeline?.getState() ?? null)
 
 ipcMain.on(IPC.captureChunk, (_event, data: Float32Array | ArrayBufferView) => {
@@ -259,6 +319,11 @@ app.on('will-quit', () => {
 app.on('before-quit', () => {
   hotkey?.stop(globalShortcut)
   pipeline?.dispose()
+  // What this session learned about each app's insertion behaviour — the raw
+  // material for docs/INSERTION-MATRIX.md.
+  const learned = insertion?.learned() ?? []
+  if (learned.length > 0) log.info('insertion: unsupported strategies observed', learned)
+  journal?.close()
   void asr?.dispose()
   void sidecar?.dispose?.()
   hudWindow?.destroy()

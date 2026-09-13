@@ -1,17 +1,21 @@
 import Foundation
 
-/// Verb registration + param validation for the v0 sidecar.
+/// Verb registration + param validation.
 ///
-/// v0 subset of src/shared/sidecar-api.ts:
-///   init, checkPermissions, promptAccessibility, frontmostApp,
-///   insertText (paste | type; ax => NotImplemented until M2),
-///   secureInputState.
-/// M2 verbs (focusedElement, replaceSelection, activateApp, keyChord) are
-/// registered as explicit NotImplemented so callers get a clear error rather
-/// than method-not-found.
+/// Mirrors `src/shared/sidecar-api.ts`, which is the source of truth. As of M2
+/// every verb in that map is implemented: init, checkPermissions,
+/// promptAccessibility, frontmostApp, focusedElement, insertText (ax | paste |
+/// type), replaceSelection, replaceRange, secureInputState, activateApp,
+/// keyChord.
+///
+/// Guard order is the same for every write verb, and deliberate:
+///   secure input  ->  accessibility  ->  do the thing
+/// Secure input comes first because it is the one the user can turn on *after*
+/// Mull decided to write, and the one where being wrong means typing a password
+/// fragment into a chat window.
 
-public let SIDECAR_PROTOCOL_VERSION = 1
-public let SIDECAR_VERSION = "0.1.0"
+public let SIDECAR_PROTOCOL_VERSION = 2
+public let SIDECAR_VERSION = "0.2.0"
 
 // MARK: - Param structs (mirror the zod schemas)
 
@@ -22,6 +26,28 @@ struct InitParams: Decodable {
 struct InsertTextParams: Decodable {
     let text: String
     let strategy: String?
+    /// Paste settle delay in ms; the host tunes it per app. Default 150.
+    let settleMs: Int?
+}
+
+struct FocusedElementParams: Decodable {
+    let contextBytes: Int?
+}
+
+struct ReplaceRangeParams: Decodable {
+    let start: Int
+    let length: Int
+    let text: String
+    let expect: String?
+}
+
+struct ActivateAppParams: Decodable {
+    let bundleId: String
+}
+
+struct KeyChordParams: Decodable {
+    let key: String
+    let modifiers: [String]?
 }
 
 // MARK: - System abstraction (so XCTest never touches TCC / AppKit state)
@@ -37,14 +63,68 @@ public struct AppInfo {
     }
 }
 
+public struct SelectionInfo {
+    public let start: Int
+    public let length: Int
+    public let text: String
+    public init(start: Int, length: Int, text: String) {
+        self.start = start
+        self.length = length
+        self.text = text
+    }
+}
+
+public struct FocusedElementInfo {
+    public let role: String
+    public let editable: Bool
+    public let text: String
+    public let textStart: Int
+    public let truncated: Bool
+    public let selection: SelectionInfo?
+    public init(
+        role: String, editable: Bool, text: String, textStart: Int, truncated: Bool,
+        selection: SelectionInfo?
+    ) {
+        self.role = role
+        self.editable = editable
+        self.text = text
+        self.textStart = textStart
+        self.truncated = truncated
+        self.selection = selection
+    }
+}
+
+public enum FocusedElementLookup {
+    case found(FocusedElementInfo)
+    /// 'no-accessibility' | 'no-focused-element' | 'unreadable'
+    case unavailable(String)
+}
+
+/// One shape for every write verb. `verified` is tri-state on purpose: nil means
+/// "the target would not tell us", which is different from "we checked and it
+/// wasn't there" (false).
 public struct InsertOutcome {
     public let inserted: Bool
     public let strategyUsed: String?
     public let reason: String?
-    public init(inserted: Bool, strategyUsed: String?, reason: String?) {
+    public let verified: Bool?
+    public let caret: Int?
+    public let replacedText: String?
+
+    public init(
+        inserted: Bool,
+        strategyUsed: String?,
+        reason: String?,
+        verified: Bool? = nil,
+        caret: Int? = nil,
+        replacedText: String? = nil
+    ) {
         self.inserted = inserted
         self.strategyUsed = strategyUsed
         self.reason = reason
+        self.verified = verified
+        self.caret = caret
+        self.replacedText = replacedText
     }
 }
 
@@ -57,14 +137,50 @@ public protocol SystemActions {
     func promptAccessibility() -> Bool
     func frontmostApp() -> (app: AppInfo?, windowTitle: String?)
     func secureInputActive() -> Bool
-    /// Perform insertion with a concrete strategy ("paste" or "type").
-    func insert(text: String, strategy: String) -> InsertOutcome
+    /// Read the focused element, clamped to `context` UTF-16 units per side.
+    func focusedElement(context: Int) -> FocusedElementLookup
+    /// Insert at the caret with a concrete strategy ("ax" | "paste" | "type").
+    func insert(text: String, strategy: String, settleMs: Int) -> InsertOutcome
+    /// Replace the current selection, reporting what was there before.
+    func replaceSelection(text: String, strategy: String, settleMs: Int) -> InsertOutcome
+    /// Replace an explicit UTF-16 range. AX-only; this is undo's instrument.
+    func replaceRange(start: Int, length: Int, text: String, expect: String?) -> InsertOutcome
+    func activateApp(bundleId: String) -> (activated: Bool, reason: String?)
+    func keyChord(key: String, modifiers: [String]) -> (sent: Bool, reason: String?)
 }
+
+// MARK: - JSON helpers
+
+private func optional(_ value: String?) -> JSON { value.map { JSON.string($0) } ?? .null }
+private func optional(_ value: Bool?) -> JSON { value.map { JSON.bool($0) } ?? .null }
+private func optional(_ value: Int?) -> JSON { value.map { JSON.int($0) } ?? .null }
+
+private func insertJSON(_ outcome: InsertOutcome, key: String) -> JSON {
+    .object([
+        key: .bool(outcome.inserted),
+        "strategyUsed": optional(outcome.strategyUsed),
+        "reason": optional(outcome.reason),
+        "verified": optional(outcome.verified),
+        "caret": optional(outcome.caret)
+    ])
+}
+
+private let knownStrategies = ["ax", "paste", "type"]
+
+/// Paste settle delay when the caller does not specify one.
+let DEFAULT_SETTLE_MS = 150
 
 // MARK: - Dispatcher assembly
 
 public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
     let d = RpcDispatcher()
+
+    /// Shared preflight for anything that writes into another app.
+    func blockedReason() -> String? {
+        if system.secureInputActive() { return "secure-input" }
+        if !system.accessibilityTrusted() { return "no-accessibility" }
+        return nil
+    }
 
     d.register("init") { raw in
         let params = try decodeParams(InitParams.self, from: raw)
@@ -101,19 +217,9 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
 
     d.register("frontmostApp") { _ in
         let (app, title) = system.frontmostApp()
-        let appJson: JSON
-        if let app {
-            appJson = .object([
-                "bundleId": .string(app.bundleId),
-                "name": .string(app.name),
-                "pid": .int(app.pid)
-            ])
-        } else {
-            appJson = .null
-        }
         return .object([
-            "app": appJson,
-            "windowTitle": title.map { JSON.string($0) } ?? .null
+            "app": appJSON(app),
+            "windowTitle": optional(title)
         ])
     }
 
@@ -125,47 +231,141 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
         ])
     }
 
+    d.register("focusedElement") { raw in
+        let params = try decodeParams(
+            FocusedElementParams.self, from: raw,
+            defaultIfMissing: FocusedElementParams(contextBytes: nil))
+        let context = min(max(params.contextBytes ?? 2048, 1), 8192)
+        let (app, _) = system.frontmostApp()
+
+        switch system.focusedElement(context: context) {
+        case .found(let element):
+            return .object([
+                "element": .object([
+                    "role": .string(element.role),
+                    "editable": .bool(element.editable),
+                    "text": .string(element.text),
+                    "textStart": .int(element.textStart),
+                    "truncated": .bool(element.truncated),
+                    "selection": element.selection.map {
+                        JSON.object([
+                            "start": .int($0.start),
+                            "length": .int($0.length),
+                            "text": .string($0.text)
+                        ])
+                    } ?? .null
+                ]),
+                "app": appJSON(app),
+                "reason": .null
+            ])
+        case .unavailable(let reason):
+            return .object([
+                "element": .null,
+                "app": appJSON(app),
+                "reason": .string(reason)
+            ])
+        }
+    }
+
     d.register("insertText") { raw in
         let params = try decodeParams(InsertTextParams.self, from: raw)
-        if let strategy = params.strategy {
-            guard ["ax", "paste", "type"].contains(strategy) else {
-                throw RpcError.invalidParams("unknown strategy '\(strategy)'")
-            }
-            if strategy == "ax" {
-                // AX writes land in M2 with the focused-element reader.
-                throw RpcError.notImplemented("insertText strategy 'ax' lands in M2")
-            }
+        if let strategy = params.strategy, !knownStrategies.contains(strategy) {
+            throw RpcError.invalidParams("unknown strategy '\(strategy)'")
         }
-        if system.secureInputActive() {
-            return .object([
-                "inserted": .bool(false),
-                "strategyUsed": .null,
-                "reason": .string("secure-input")
-            ])
+        if let reason = blockedReason() {
+            return insertJSON(
+                InsertOutcome(inserted: false, strategyUsed: nil, reason: reason), key: "inserted")
         }
-        if !system.accessibilityTrusted() {
-            return .object([
-                "inserted": .bool(false),
-                "strategyUsed": .null,
-                "reason": .string("no-accessibility")
-            ])
-        }
-        // v0 default chain is paste (ax is M2; type on request).
+        // The host picks the strategy from its per-app table
+        // (src/main/services/insertion-table.ts); paste is the safe default for
+        // a caller that does not.
         let strategy = params.strategy ?? "paste"
-        let outcome = system.insert(text: params.text, strategy: strategy)
+        let outcome = system.insert(
+            text: params.text, strategy: strategy, settleMs: params.settleMs ?? DEFAULT_SETTLE_MS)
+        return insertJSON(outcome, key: "inserted")
+    }
+
+    d.register("replaceSelection") { raw in
+        let params = try decodeParams(InsertTextParams.self, from: raw)
+        if let strategy = params.strategy, !knownStrategies.contains(strategy) {
+            throw RpcError.invalidParams("unknown strategy '\(strategy)'")
+        }
+        if let reason = blockedReason() {
+            return .object([
+                "replaced": .bool(false),
+                "strategyUsed": .null,
+                "reason": .string(reason),
+                "verified": .null,
+                "caret": .null,
+                "replacedText": .null
+            ])
+        }
+        let outcome = system.replaceSelection(
+            text: params.text,
+            strategy: params.strategy ?? "ax",
+            settleMs: params.settleMs ?? DEFAULT_SETTLE_MS)
         return .object([
-            "inserted": .bool(outcome.inserted),
-            "strategyUsed": outcome.strategyUsed.map { JSON.string($0) } ?? .null,
-            "reason": outcome.reason.map { JSON.string($0) } ?? .null
+            "replaced": .bool(outcome.inserted),
+            "strategyUsed": optional(outcome.strategyUsed),
+            "reason": optional(outcome.reason),
+            "verified": optional(outcome.verified),
+            "caret": optional(outcome.caret),
+            "replacedText": optional(outcome.replacedText)
         ])
     }
 
-    // M2 verbs: explicit NotImplemented (clearer than method-not-found).
-    for verb in ["focusedElement", "replaceSelection", "activateApp", "keyChord"] {
-        d.register(verb) { _ in
-            throw RpcError.notImplemented("\(verb) lands in M2")
+    d.register("replaceRange") { raw in
+        let params = try decodeParams(ReplaceRangeParams.self, from: raw)
+        guard params.start >= 0, params.length >= 0 else {
+            throw RpcError.invalidParams("start and length must be non-negative")
         }
+        if let reason = blockedReason() {
+            return .object([
+                "replaced": .bool(false),
+                "reason": .string(reason),
+                "verified": .null
+            ])
+        }
+        let outcome = system.replaceRange(
+            start: params.start, length: params.length, text: params.text, expect: params.expect)
+        return .object([
+            "replaced": .bool(outcome.inserted),
+            "reason": optional(outcome.reason),
+            "verified": optional(outcome.verified)
+        ])
+    }
+
+    d.register("activateApp") { raw in
+        let params = try decodeParams(ActivateAppParams.self, from: raw)
+        guard !params.bundleId.isEmpty else {
+            throw RpcError.invalidParams("bundleId must not be empty")
+        }
+        let (activated, reason) = system.activateApp(bundleId: params.bundleId)
+        return .object(["activated": .bool(activated), "reason": optional(reason)])
+    }
+
+    d.register("keyChord") { raw in
+        let params = try decodeParams(KeyChordParams.self, from: raw)
+        let modifiers = params.modifiers ?? []
+        let allowed = ["cmd", "shift", "alt", "ctrl", "fn"]
+        for modifier in modifiers where !allowed.contains(modifier) {
+            throw RpcError.invalidParams("unknown modifier '\(modifier)'")
+        }
+        if let reason = blockedReason() {
+            return .object(["sent": .bool(false), "reason": .string(reason)])
+        }
+        let (sent, reason) = system.keyChord(key: params.key, modifiers: modifiers)
+        return .object(["sent": .bool(sent), "reason": optional(reason)])
     }
 
     return d
+}
+
+private func appJSON(_ app: AppInfo?) -> JSON {
+    guard let app else { return .null }
+    return .object([
+        "bundleId": .string(app.bundleId),
+        "name": .string(app.name),
+        "pid": .int(app.pid)
+    ])
 }
