@@ -128,6 +128,20 @@ function isMachO(path: string): boolean {
   }
 }
 
+/**
+ * Loadable code we are responsible for signing.
+ *
+ * The extension test is doing real work here, not just being a fast path. The
+ * Agent SDK (M4) ships its own `claude` executable in `app.asar.unpacked`,
+ * already signed by Anthropic with a Developer ID and the hardened runtime —
+ * ad-hoc signing over that would replace a real signature with a weaker one,
+ * for no gain. It has no extension, so it is skipped, and the `--deep` verify
+ * at the end confirms it is intact rather than assuming it.
+ *
+ * (For M6: a *notarised* build cannot nest code signed by a different team.
+ * That is a real constraint on shipping the subscription lane to anyone else,
+ * and it is why the API-key lane exists as well.)
+ */
 const isLoadable = (path: string): boolean =>
   (path.endsWith('.node') || path.endsWith('.dylib') || path.endsWith('.so')) && isMachO(path)
 

@@ -126,10 +126,10 @@ account provides:
 
 | Gap | Why | Closes in |
 |---|---|---|
-| `asrMs` still misses the 400 ms budget | unchanged from M1: the CLI provider costs a process spawn per utterance | M3/M4 |
+| `asrMs` still misses the 400 ms budget | unchanged from M1: the CLI provider costs a process spawn per utterance | M5/M6 |
 | ~~The HUD is still an unstyled read-out~~ | closed in M3 | done |
 | ~~No journal *window* — the store has no UI~~ | closed in M3, with per-row undo | done |
-| Undo is single-step | the journal window now makes a stack legible; the stack itself is later | M4/M5 |
+| Undo is single-step | the journal window now makes a stack legible; the stack itself is later | M5 |
 | `activateApp` / `keyChord` are implemented but unused | they exist for the M5 whitelisted verbs; nothing calls them yet | M5 |
 | Swift `XCTest` suite still can't run here | needs full Xcode; `npm run smoke` drives the built binary over real ndjson instead | when Xcode is present |
 | Per-app demotions are in memory only | a fresh run re-tests its assumptions, which is what makes the matrix re-runnable; persisting them needs a settings surface | M6 |

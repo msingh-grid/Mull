@@ -147,9 +147,9 @@ Delete `onboardingCompletedAt` from `~/Library/Application Support/mull/settings
 |---|---|---|
 | Menu-bar icon is a text glyph | §6.7 wants a monochrome template image with an ochre badge; that needs real assets, which arrive with the app icon | M6 |
 | No app icon — the DMG shows Electron's | same | M6 |
-| Cards are driven by a `FakeEngine` | the engine is M4; the surfaces were built first so the preview can be judged before there is anything to preview | M4 |
-| No intent chip on real dictation | the router that would produce it is M4 | M4 |
-| `asrMs` still misses the 400 ms budget | unchanged: the CLI provider costs a process spawn per utterance | M4 |
+| ~~Cards are driven by a `FakeEngine`~~ | closed in M4 — the tray demo still uses it on purpose, so it works with no credentials | done |
+| ~~No intent chip on real dictation~~ | closed in M4 | done |
+| `asrMs` still misses the 400 ms budget | unchanged: the CLI provider costs a process spawn per utterance. M4 left it alone — it is an ASR problem, not an engine one | M5/M6 |
 | Memory chips render but cite nothing | the store is M5 | M5 |
-| Undo is still single-step | a stack needs the journal window first — which now exists | M4/M5 |
+| Undo is still single-step | a stack needs the journal window first — which now exists | M5 |
 | Swift `XCTest` suite still can't run here | needs full Xcode; `npm run smoke` drives the built binary over real ndjson | when Xcode is present |

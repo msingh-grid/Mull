@@ -33,7 +33,7 @@ function harness(options: {
   sidecar?: FakeSidecar
   transcript?: string
   /** Absent = no edit lane at all, which is the M1–M3 behaviour. */
-  sculpt?: boolean
+  sculpt?: boolean | 'throws'
 } = {}): Harness {
   const sidecar = options.sidecar ?? new FakeSidecar({ accessibility: true })
   const journal = new JournalStore(memoryDatabase())
@@ -60,6 +60,7 @@ function harness(options: {
         ? {
             run: async (request) => {
               sculpted.push(request)
+              if (options.sculpt === 'throws') throw new Error('the engine exploded')
             }
           }
         : undefined,
@@ -397,6 +398,51 @@ describe('DictationPipeline — routing', () => {
     expect(h.sidecar.insertions).toEqual(['Make this crisp'])
     // No hint either: there is nothing to discover on a build without the lane.
     expect(h.states.filter((s) => s.phase === 'applied').at(-1)?.notice).toBeNull()
+    h.pipe.dispose()
+  })
+})
+
+/**
+ * The invariant, as an assertion rather than a claim.
+ *
+ * docs/PLAN.md's routing rule is that plain dictation never waits on an engine
+ * and never depends on one. An engine can be signed out, rate limited, or
+ * outright broken; the loop the user relies on a hundred times a day has to
+ * carry on as if none of that existed.
+ */
+describe('DictationPipeline — dictation does not depend on the engine', () => {
+  const SELECTED = 'some selected words here'
+
+  it('survives an edit lane that throws, and dictates again immediately after', async () => {
+    const sidecar = new FakeSidecar({
+      accessibility: true,
+      text: SELECTED,
+      caret: 0,
+      selectionLength: SELECTED.length
+    })
+    const h = harness({ sidecar, transcript: 'make this crisp', sculpt: 'throws' })
+
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(h.sculpted.length).toBe(1)
+    expect(h.states.at(-1)?.phase).toBe('error')
+    expect(h.sidecar.insertions).toEqual([])
+
+    // The next utterance is plain dictation into an empty field, and it works.
+    h.sidecar.text = ''
+    h.sidecar.caret = 0
+    h.sidecar.selectionLength = 0
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(h.sidecar.insertions).toEqual(['Make this crisp'])
     h.pipe.dispose()
   })
 })
