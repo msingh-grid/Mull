@@ -41,12 +41,16 @@ function WhatMullSaw({ entry }: { entry: JournalEntryView }): JSX.Element | null
   const capture = entry.capture
   const [image, setImage] = useState<string | null>(null)
   const [showing, setShowing] = useState(false)
+  /** The file is gone, or the browser refused the bytes. Two sentences, not a glyph. */
+  const [failed, setFailed] = useState<'missing' | 'unrenderable' | null>(null)
 
   useEffect(() => {
     if (!showing || image) return
     let cancelled = false
     void window.mull?.journal.capture(entry.id).then((data) => {
-      if (!cancelled) setImage(data ?? null)
+      if (cancelled) return
+      if (data) setImage(data)
+      else setFailed('missing')
     })
     return () => {
       cancelled = true
@@ -73,8 +77,18 @@ function WhatMullSaw({ entry }: { entry: JournalEntryView }): JSX.Element | null
       <div className="saw-shot">
         {capture.imageFile ? (
           showing ? (
-            image ? (
-              <img src={image} alt="The window Mull was looking at" />
+            failed ? (
+              <div className="why">{WHY_NO_IMAGE[failed]}</div>
+            ) : image ? (
+              // A broken <img> is the worst available failure: it renders, so
+              // the row shows a broken-image glyph and its alt text, which
+              // reads as "Mull is lying about the screenshot" rather than as a
+              // file that has aged out. Say which.
+              <img
+                src={image}
+                alt="The window Mull was looking at"
+                onError={() => setFailed('unrenderable')}
+              />
             ) : (
               <div className="why">…</div>
             )
@@ -91,6 +105,12 @@ function WhatMullSaw({ entry }: { entry: JournalEntryView }): JSX.Element | null
       </div>
     </details>
   )
+}
+
+const WHY_NO_IMAGE: Record<'missing' | 'unrenderable', string> = {
+  missing:
+    'The screenshot has been cleared — Mull keeps only the most recent 25, and this row’s has aged out.',
+  unrenderable: 'Mull found the file but this window refused to display it.'
 }
 
 /** Why there is no picture, in a sentence that says whose problem it is. */

@@ -3,9 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      `img-src` is widened here and in no other window, because this is the only
+      one that shows a picture: the screenshot kept as evidence for a journal
+      row, handed over by main as a data: URI.
+
+      Without the clause it inherits `default-src 'self'`, which does not admit
+      data: — and the failure is silent in the worst way. The image element
+      renders, so the row shows a broken-image glyph and its alt text rather
+      than anything that looks like a refusal.
+
+      Still no remote hosts and no blob:. The bytes come from main, over IPC,
+      read off a file Mull wrote itself.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
     />
     <title>Journal — Mull</title>
   </head>
