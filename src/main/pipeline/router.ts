@@ -55,6 +55,17 @@ export type Route =
   /** Write something new from what is on screen. No `before`; lands at the caret. */
   | { kind: 'compose'; instruction: string }
   /**
+   * Answer a question about what is on screen, and write nothing.
+   *
+   * Only ever chosen by the model, and for the same reason `navigate` is: the
+   * difference between "reply to this" and "summarize this" is a fact about
+   * language, and the verb table that used to guess at such things is gone
+   * (see the top of this file — it is the first thing that table got wrong).
+   * The local fallback keeps producing `compose`, which puts a card in front of
+   * the user either way; it is the wrong card, not a wrong action.
+   */
+  | { kind: 'ask'; question: string }
+  /**
    * Send what is already in the composer. The only route that writes no text
    * at all — it shows the user what is sitting there and offers one keystroke.
    */

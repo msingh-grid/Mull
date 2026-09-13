@@ -450,6 +450,18 @@
   white-space: pre-wrap;
 }
 
+/* An answer is prose to be read, not a diff to be inspected — so it drops the
+   monospace the other bodies use for character-level comparison, and takes the
+   reading measure and full ink instead. */
+.card-body.is-answer {
+  font-family: var(--sans);
+  font-size: var(--fs-body);
+  line-height: 1.55;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Every destructive-ish action states its undo path in the same breath (§7.2). */
 .undo-promise {
   margin-left: auto;

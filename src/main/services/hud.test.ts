@@ -234,3 +234,52 @@ describe('HudController — the bare-send card', () => {
     expect(onAction).toHaveBeenCalledWith('apply-send')
   })
 })
+
+/**
+ * The card that proposes nothing.
+ *
+ * "Summarize all my tasks which I need to complete" used to arrive as a diff
+ * card with Apply, offering to write the summary into the notes it had just
+ * read — and ⏎ means Apply on every other card, so the keystroke that dismisses
+ * a card would have pasted it in. There is nothing here to apply, and unlike
+ * the send card there is nothing at risk either, so ⏎ is free to mean "done".
+ */
+describe('HudController — the answer card', () => {
+  const answerCard = {
+    kind: 'answer' as const,
+    app: 'Notes',
+    text: 'Three tasks: the ACT agent, the rag→mcp conversion, and wiring real config.'
+  }
+
+  it('never delivers an apply, whatever asks for one', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(answerCard, onAction)
+
+    h.fire('Return')
+    expect(onAction).not.toHaveBeenCalledWith('apply')
+    expect(onAction).not.toHaveBeenCalledWith('apply-send')
+  })
+
+  /** ⏎ closes it. A Done button whose hint did nothing would be a printed lie. */
+  it('reads ⏎ as done', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(answerCard, onAction)
+
+    h.fire('Return')
+    expect(onAction).toHaveBeenCalledWith('cancel')
+    expect(h.controller.hasCard).toBe(false)
+  })
+
+  it('cannot be talked into a commit it does not have', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(answerCard, onAction)
+
+    // The downgrade path: apply-send becomes apply, which becomes cancel here.
+    h.controller.act('apply-send')
+    expect(onAction).toHaveBeenCalledWith('cancel')
+    expect(onAction).not.toHaveBeenCalledWith('apply-send')
+  })
+})

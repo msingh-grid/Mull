@@ -46,7 +46,22 @@ export interface CommandIntent {
   transcript: string
 }
 
-export type Intent = DictateIntent | EditIntent | CommandIntent
+/**
+ * A question about what was on screen, answered and shown — never written.
+ *
+ * Its own kind rather than an `EditIntent` target, because every target there
+ * names somewhere text ended up. This one has no such place: the row exists to
+ * record that Mull read a window (and photographed it) and what it said back,
+ * and `undoable` is false for the simplest possible reason.
+ */
+export interface AskIntent {
+  kind: 'ask'
+  /** What the user wanted to know, in their own words. */
+  question: string
+  transcript: string
+}
+
+export type Intent = DictateIntent | EditIntent | CommandIntent | AskIntent
 
 // ---------------------------------------------------------------------------
 // Journal — every action Mull takes is recorded and undoable (M2).

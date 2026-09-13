@@ -9,7 +9,7 @@ import type { JournalEntryView } from '@shared/types'
  * nobody checks twice.
  */
 
-export type RowKind = 'dictation' | 'edit' | 'command' | 'failed' | 'undone'
+export type RowKind = 'dictation' | 'edit' | 'command' | 'answer' | 'failed' | 'undone'
 
 export function rowKind(entry: JournalEntryView): RowKind {
   if (entry.status === 'undone') return 'undone'
@@ -19,6 +19,11 @@ export function rowKind(entry: JournalEntryView): RowKind {
       return 'edit'
     case 'command':
       return 'command'
+    // Nothing was typed and nothing was changed: Mull read the window and said
+    // something back. Labelling it "Dictation" — which is what `default` did
+    // before this row kind existed — describes the one thing it did not do.
+    case 'ask':
+      return 'answer'
     default:
       return 'dictation'
   }
@@ -28,6 +33,7 @@ export const KIND_LABEL: Record<RowKind, string> = {
   dictation: 'Dictation',
   edit: 'Edit',
   command: 'Command',
+  answer: 'Answer',
   failed: 'Failed',
   undone: 'Undone'
 }

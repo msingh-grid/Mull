@@ -1,5 +1,13 @@
 import type { JSX } from 'react'
-import type { DiffCard, DiffSegment, HudCard, PlanCard, PlanStepState, SendCard } from '@shared/hud'
+import type {
+  AnswerCard,
+  DiffCard,
+  DiffSegment,
+  HudCard,
+  PlanCard,
+  PlanStepState,
+  SendCard
+} from '@shared/hud'
 import type { HudAction } from '@shared/ipc'
 import { Btn } from './atoms'
 
@@ -182,6 +190,41 @@ function SendCardView({
   )
 }
 
+/**
+ * An answer, and nothing to do with it.
+ *
+ * The one card with no commit of any kind. "Summarize the tasks I need to
+ * finish" used to come back as a diff card with an **Apply** that would write
+ * the summary into the note being read — and ⏎, which means Apply everywhere
+ * else, would do it by reflex. There is nothing here to apply, so the card says
+ * so in the place every other card puts its warning.
+ */
+function AnswerCardView({
+  card,
+  onAction
+}: {
+  card: AnswerCard
+  onAction?: (action: HudAction) => void
+}): JSX.Element {
+  return (
+    <div className="card">
+      <div className="card-title">
+        <span>Answer{card.app ? ` · ${card.app}` : ''}</span>
+      </div>
+      <div className="card-body is-answer">{card.text}</div>
+      <div className="card-actions">
+        {/* `cancel`, not `apply`: closing is the only thing this card does. The
+            ⏎ hint is honest because the HUD reads Return as done here — see
+            `acceptsApply` in services/hud.ts. */}
+        <Btn kind="primary" hint="⏎" onClick={() => onAction?.('cancel')}>
+          Done
+        </Btn>
+        <span className="undo-promise">nothing was written</span>
+      </div>
+    </div>
+  )
+}
+
 export function CardView({
   card,
   onAction
@@ -191,5 +234,6 @@ export function CardView({
 }): JSX.Element {
   if (card.kind === 'diff') return <DiffCardView card={card} onAction={onAction} />
   if (card.kind === 'send') return <SendCardView card={card} onAction={onAction} />
+  if (card.kind === 'answer') return <AnswerCardView card={card} onAction={onAction} />
   return <PlanCardView card={card} onAction={onAction} />
 }

@@ -101,6 +101,12 @@ export class HudController {
       this.options.log?.('warn', 'hud: apply-send on a card with no commit — applying only')
       action = 'apply'
     }
+    // An answer card proposes nothing, so there is no "yes" for ⏎ to be —
+    // but there is also nothing at stake in closing it, and a Done button
+    // whose ⏎ hint did nothing would be a lie printed on the card. Return
+    // means done here, and it can only ever mean done: this card has no text,
+    // no target and no commit to reach.
+    if (action === 'apply' && this.card?.kind === 'answer') action = 'cancel'
     // …and the other way round. Swallowed rather than downgraded to a cancel:
     // a card that vanished because the user brushed ⏎ is a card they have to
     // ask for again, and this one is one keystroke from an irreversible act.
@@ -157,14 +163,18 @@ function offersCommit(card: HudCard | null): boolean {
 }
 
 /**
- * Does ⏎ mean anything on this card?
+ * Does ⏎ mean Apply on this card?
  *
- * On every card but one it means Apply. The bare-send card has nothing to
- * apply — it proposes no text — so ⏎ does nothing there. It stays *claimed*
- * rather than released, which is the point: Mull holds Return globally while a
- * card is open, and letting it through to Slack would send the very message the
- * card is still asking about.
+ * On most cards it does. Two do not, and for opposite reasons:
+ *
+ *   send    has nothing to apply, and ⏎ must stay *claimed and inert* — Mull
+ *           holds Return globally while a card is open, and letting it through
+ *           to Slack would send the very message the card is asking about.
+ *   answer  has nothing to apply either, but nothing is at risk, so ⏎ is
+ *           translated to a cancel in `act` before it reaches here. That is
+ *           the whole difference between a card that proposes an irreversible
+ *           act and one that proposes nothing at all.
  */
 function acceptsApply(card: HudCard | null): boolean {
-  return card !== null && card.kind !== 'send'
+  return card !== null && card.kind !== 'send' && card.kind !== 'answer'
 }

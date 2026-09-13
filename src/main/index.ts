@@ -56,6 +56,7 @@ import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
 import { SculptLane } from './pipeline/sculpt'
 import { NavigateLane } from './pipeline/navigate'
+import { AskLane } from './pipeline/ask'
 import { ActionExecutor } from './pipeline/actions'
 import { IntentRouter } from './pipeline/intent'
 import { appliedText, diffText } from './pipeline/diff'
@@ -96,6 +97,7 @@ let detectedLogin = false
 let captures: CaptureStore | null = null
 let sculpt: SculptLane | null = null
 let navigate: NavigateLane | null = null
+let ask: AskLane | null = null
 let intent: IntentRouter | null = null
 let settings: SettingsStore | null = null
 let permissions: PermissionsService | null = null
@@ -545,6 +547,26 @@ async function bootstrap(): Promise<void> {
     log: logFn
   })
 
+  // Questions about the window in front of you. Shares the engine's `answer`
+  // turn with the navigation lane — a navigation is this with a walk in front
+  // of it — and shares nothing else with any lane that writes, because it has
+  // no target and its card has no Apply.
+  ask = new AskLane({
+    engine,
+    journal: journal ?? undefined,
+    captures,
+    onJournalChanged: notifyJournalChanged,
+    trace: () => pipeline?.currentTrace() ?? new Trace(),
+    log: logFn,
+    hud: {
+      openCard: (card, onAction) => hud?.openCard(card, onAction),
+      updateCard: (card) => hud?.updateCard(card),
+      closeCard: () => hud?.closeCard(),
+      update: (patch) => void pipeline?.patchState(patch),
+      announce: (phase, notice) => void pipeline?.announce(phase, notice)
+    }
+  })
+
   // Decides dictate-vs-edit. `useModel` is read per utterance, so switching to
   // rules-only in Settings takes effect on the next thing you say.
   intent = new IntentRouter({
@@ -567,6 +589,7 @@ async function bootstrap(): Promise<void> {
       captures: captures ?? undefined,
       sculpt,
       navigate,
+      ask: ask ?? undefined,
       intent,
       // Read per utterance, so changing it in Settings takes effect on the
       // next thing you say rather than the next launch.

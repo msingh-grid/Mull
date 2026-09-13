@@ -126,7 +126,8 @@ body.window {
   flex: none;
 }
 .journal-row .kind.edit,
-.journal-row .kind.command { background: var(--ins-wash); color: var(--ins); }
+.journal-row .kind.command,
+.journal-row .kind.answer { background: var(--ins-wash); color: var(--ins); }
 .journal-row .kind.failed,
 .journal-row .kind.undone { background: var(--del-wash); color: var(--del); }
 

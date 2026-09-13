@@ -132,6 +132,22 @@ export type ClassifiedIntent =
    */
   | { kind: 'compose'; instruction: string }
   /**
+   * Tell me something about what is on screen. Write nothing.
+   *
+   * The sibling of `compose`, and the distinction is the whole reason it
+   * exists: both read the window and produce sentences, but one produces text
+   * the user wants *in their document* and the other produces text they want to
+   * *read*. "Summarize the tasks I need to finish" was routed to `compose` for
+   * as long as this was one route, which put an **Apply** button under a
+   * summary of somebody's own notes, offering to paste it back into them — one
+   * reflexive ⏎ from doing it, since ⏎ means Apply on every other card.
+   *
+   * So the two routes end differently by construction: a compose ends in a diff
+   * card with Apply, an ask ends in an `AnswerCard`, which has no target, no
+   * commit and nothing to write with.
+   */
+  | { kind: 'ask'; question: string }
+  /**
    * Go and look somewhere else in this application, then come back.
    *
    * The fourth route, and the only one that moves before it answers. It exists

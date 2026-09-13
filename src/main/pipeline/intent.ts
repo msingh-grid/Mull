@@ -277,6 +277,14 @@ function toRoute(
     return { kind: 'compose', instruction: intent.instruction.trim() || transcript }
   }
 
+  if (intent.kind === 'ask') {
+    // Nothing on screen to answer from. Unlike a compose — which could at least
+    // invent something plausible — an answer with no material is a card with
+    // nothing on it, so the words go in as dictation instead.
+    if (!context.hasScreen) return { kind: 'dictate', text: transcript }
+    return { kind: 'ask', question: intent.question.trim() || transcript }
+  }
+
   if (intent.kind === 'navigate') {
     // Nothing to navigate *from*: with no readable window there is no list of
     // things to press and no way to tell whether we arrived. Dictating the

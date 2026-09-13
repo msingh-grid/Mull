@@ -48,11 +48,34 @@ Answer with one JSON object and nothing else:
 {"intent":"edit","target":"selection","instruction":"<what they asked for>"}
 {"intent":"edit","target":"document","instruction":"<what they asked for>"}
 {"intent":"compose","instruction":"<what they asked for>"}
+{"intent":"ask","question":"<what they want to know>"}
 {"intent":"navigate","goal":"<where to go, and what to find out there>"}
 
 Choose "edit" when the words ask for something to be done TO the text shown to you — rewrite, shorten, fix, translate, change the tone, turn into a list. Use target "selection" when a selection is shown, otherwise "document" (the whole field).
 
-Choose "compose" when the words ask for something NEW to be written, using what is on screen — "reply to this", "draft an answer", "reply to Priya saying I'll have it by five", "write back declining". There is nothing to rewrite; the result goes where the cursor is. Only choose it when a <screen> block is shown, because a reply needs something to reply to.
+Choose "compose" when the words ask for something NEW to be **written**, using what is on screen — "reply to this", "draft an answer", "reply to Priya saying I'll have it by five", "write back declining". There is nothing to rewrite; the result is text, and it goes where the cursor is. Only choose it when a <screen> block is shown, because a reply needs something to reply to.
+
+Choose "ask" when the words ask to **know** something about what is on screen, rather than to have something written — "summarize this thread", "summarize all the tasks I need to finish", "what did they decide about pricing", "which of these emails need a reply", "catch me up", "is there anything here I've missed". The answer is shown to the user to read. Nothing is written anywhere.
+
+"ask" and "compose" are the same shape of work pointed at different ends, and the question that separates them is: **would the user want this text put into their document?**
+
+  "reply to this"                      compose — it is a message, it goes in the box
+  "draft a response declining"         compose
+  "write a summary of this at the top" compose — they said to write it somewhere
+  "summarize this thread"              ask     — they want to know what it says
+  "what did they decide"               ask
+  "which of these need a reply"        ask
+  "turn this into bullet points"       edit    — the text already there becomes a list
+
+Getting this wrong in the "compose" direction is the expensive mistake: it offers to paste an answer into somebody's document, one reflexive Return away from doing it. When the words do not plainly ask for something to be written, choose "ask".
+
+"question" is what the user wants to know, in their own words, cleaned of filler. It is read by something that has not seen this conversation, so make it a whole question rather than a bare topic.
+
+Ask for exactly as much as they asked for. Do not narrow a broad request to the first specific thing you can see on screen — a request to summarize a thread is a request about the whole thread, not about whichever topic happens to be in it.
+
+  said:     "summarize this thread"
+  question: "What does this thread say?"
+  NOT:      "What is the status of the terms doc redlines?"   ← they asked about all of it
 
 Choose "navigate" ONLY when the user names a specific place or person that is not in <screen> and would have to be opened first — "what did Priya say about the terms doc" with no Priya anywhere on screen, "check the eng-platform channel", "open the thread about pricing". The tool will go and look, then come back.
 
@@ -60,9 +83,9 @@ This is the only route that presses buttons in someone else's application, so it
 - The user named somewhere else. "This", "these", "here" and "my emails" mean what is already on screen — those are never "navigate".
 - What they named is genuinely absent from <screen>.
 - Reading it would actually answer them.
-Asking you to look over, triage, review or pick out things from what is already visible is "compose", not "navigate" — even when doing it exhaustively would mean opening each one. "Look at my emails and tell me which need a reply" with an inbox on screen is answered from the list that is already there; the user wants an answer, not to be taken somewhere.
+Asking you to look over, triage, review or pick out things from what is already visible is "ask", not "navigate" — even when doing it exhaustively would mean opening each one. "Look at my emails and tell me which need a reply" with an inbox on screen is answered from the list that is already there; the user wants an answer, not to be taken somewhere.
 
-If you are weighing "navigate" against "compose", the answer is "compose": working from the window the user is already looking at is always the cheaper mistake.
+If you are weighing "navigate" against "ask", the answer is "ask": working from the window the user is already looking at is always the cheaper mistake.
 
 "goal" is read by something that has never seen the user's words — it gets only this sentence and a list of what is on screen — and it is also printed on a card the user approves before anything is pressed. So write a whole instruction, not a subject. Name where to go AND what to find out when you arrive. A bare name is useless: "Anil Turaga" says nothing about what to do with him.
 
@@ -105,6 +128,10 @@ const ClassifiedIntentSchema = z.union([
   z.object({
     intent: z.literal('compose'),
     instruction: z.string().min(1)
+  }),
+  z.object({
+    intent: z.literal('ask'),
+    question: z.string().min(1)
   }),
   z.object({
     intent: z.literal('navigate'),
@@ -169,6 +196,10 @@ export function parseClassification(raw: string): ClassifiedIntent {
 
   if (parsed.data.intent === 'compose') {
     return { kind: 'compose', instruction: parsed.data.instruction.trim() }
+  }
+
+  if (parsed.data.intent === 'ask') {
+    return { kind: 'ask', question: parsed.data.question.trim() }
   }
 
   if (parsed.data.intent === 'navigate') {

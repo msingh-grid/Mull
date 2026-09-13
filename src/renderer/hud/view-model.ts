@@ -127,10 +127,12 @@ function stateClassFor(state: HudState): string {
 }
 
 function labelFor(state: HudState): string {
-  // A finished read-only plan is not a preview: there is no Apply on it and
-  // nothing is waiting on the user. What is on screen is the thing they asked
-  // for, so the label says so rather than inviting a decision that does not
-  // exist.
+  // Neither of these is a preview. A preview is a proposal about something
+  // that has not happened yet, and both of these have already happened — an
+  // answer card proposes nothing at all, and a finished read-only plan has no
+  // Apply and nothing waiting on the user. Labelling them PREVIEW invites a
+  // decision that does not exist.
+  if (state.card?.kind === 'answer') return 'ANSWER'
   if (state.card?.kind === 'plan' && state.card.answer && !state.card.running) return 'FOUND'
   // Otherwise a card on screen is a proposal waiting to be judged, whatever the
   // phase says. Deciding this from `phase` alone meant every lane had to

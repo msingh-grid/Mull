@@ -32,6 +32,8 @@ interface Harness {
   sculpted: SculptRequest[]
   /** Every bare-send card the router asked for. */
   sends: Array<{ app: unknown; text: string; transcript: string }>
+  /** Every question the router handed to the lane that writes nothing. */
+  asked: Array<{ question: string; transcript: string }>
 }
 
 function harness(options: {
@@ -59,6 +61,7 @@ function harness(options: {
 
   const sculpted: SculptRequest[] = []
   const sends: Array<{ app: unknown; text: string; transcript: string }> = []
+  const asked: Array<{ question: string; transcript: string }> = []
   // A classifier that answers whatever the test says, or an engine that is
   // down so the local rules have to decide.
   const engine: Engine = {
@@ -91,6 +94,13 @@ function harness(options: {
             }
           }
         : undefined,
+      ask: options.sculpt
+        ? {
+            run: async (request) => {
+              asked.push({ question: request.question, transcript: request.transcript })
+            }
+          }
+        : undefined,
         intent: options.sculpt ? new IntentRouter({ engine, now: () => clockMs }) : undefined,
       screenContext: options.context ? () => ({ mode: options.context as ContextMode }) : undefined,
       onState: (s) => states.push({ ...s }),
@@ -117,7 +127,8 @@ function harness(options: {
     capture,
     clock: { advance: (ms) => { clockMs += ms } },
     sculpted,
-    sends
+    sends,
+    asked
   }
 }
 
@@ -1018,5 +1029,69 @@ describe('DictationPipeline — the two keys', () => {
     const last = h.states[h.states.length - 1]
     expect(last?.phase).not.toBe('thinking')
     expect(last?.stage).toBeNull()
+  })
+})
+
+/**
+ * A question is not a request for text.
+ *
+ * "Summarize all my tasks which I need to complete", spoken over a page of
+ * notes, used to reach the edit lane — which produced a diff card with an Apply
+ * button offering to write the summary into those same notes. ⏎ means Apply on
+ * every other card, so the keystroke that dismisses one would have pasted it in.
+ *
+ * The route now ends somewhere that has no target and nothing to write with,
+ * and these two assertions are the whole guarantee: the ask lane got it, and
+ * neither the edit lane nor the keyboard did.
+ */
+describe('DictationPipeline — asking, which writes nothing', () => {
+  const withNotes = (): FakeSidecar =>
+    new FakeSidecar({
+      accessibility: true,
+      text: 'Tasks:\n- Agent with ACT (later)',
+      caret: 0,
+      selectionLength: 0,
+      context: ['Tasks:', '- Agent with ACT (later)', '- Convert rag function to mcp']
+    })
+
+  async function utterance(h: Harness): Promise<void> {
+    h.pipe.begin('instruct')
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+  }
+
+  it('hands the question to the lane with no target', async () => {
+    const h = harness({
+      sidecar: withNotes(),
+      transcript: 'summarize all my tasks which I need to complete',
+      sculpt: true,
+      context: 'text',
+      classifies: { kind: 'ask', question: 'What are all the tasks I need to complete?' }
+    })
+    await utterance(h)
+
+    expect(h.asked).toHaveLength(1)
+    expect(h.asked[0]?.question).toBe('What are all the tasks I need to complete?')
+    // The user's own words survive for the journal row (sentence-cased by the
+    // cleanup pass, as every transcript is).
+    expect(h.asked[0]?.transcript).toContain('all my tasks which I need to complete')
+    h.pipe.dispose()
+  })
+
+  it('types nothing and offers no edit', async () => {
+    const h = harness({
+      sidecar: withNotes(),
+      transcript: 'summarize all my tasks which I need to complete',
+      sculpt: true,
+      context: 'text',
+      classifies: { kind: 'ask', question: 'What are all the tasks I need to complete?' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted).toEqual([])
+    expect(h.sidecar.insertions).toEqual([])
+    h.pipe.dispose()
   })
 })

@@ -96,6 +96,17 @@ export interface NavigateLaneLike {
   }): Promise<void>
 }
 
+/** Answering a question about the window in front of you. Writes nothing. */
+export interface AskLaneLike {
+  run(request: {
+    question: string
+    transcript: string
+    app: { bundleId: string; name: string } | null
+    context?: ScreenContext | null
+    routedBy?: string
+  }): Promise<void>
+}
+
 export interface DictationDeps {
   sidecar: SidecarApi
   asr: AsrProvider
@@ -107,6 +118,14 @@ export interface DictationDeps {
   sculpt?: SculptLaneLike
   /** Where "go and look somewhere else" goes. Absent = never offered. */
   navigate?: NavigateLaneLike
+  /**
+   * Where questions go. Absent = they fall through to the insertion path.
+   *
+   * Narrowed to one method for the same reason the other two are, though here
+   * the narrowing is almost redundant: the lane has no target and nothing that
+   * writes. That is the point of it.
+   */
+  ask?: AskLaneLike
   /** Decides dictate-vs-edit. Absent = every utterance is dictation. */
   intent?: IntentRouter
   /**
@@ -510,6 +529,27 @@ export class DictationPipeline {
         this.stage('planning')
         await this.deps.navigate.propose({
           goal: routed.route.goal,
+          transcript: text,
+          app: this.state.app ?? routed.snapshot.app,
+          context: routed.snapshot.context,
+          routedBy: routed.by
+        })
+        return
+      }
+
+      // A question about the window in front of them. Nothing is written and
+      // nothing can be: the lane's card has no Apply, because "summarize my
+      // tasks" is a request to know something, not a request for text. See
+      // `pipeline/ask.ts` for what this route cost before it existed.
+      if (routed?.route.kind === 'ask' && this.deps.ask) {
+        this.phase = 'idle'
+        this.trace.step('lane.ask', {
+          question: routed.route.question,
+          screen: routed.snapshot.context?.chars ?? 0
+        })
+        this.stage('reading this window')
+        await this.deps.ask.run({
+          question: routed.route.question,
           transcript: text,
           app: this.state.app ?? routed.snapshot.app,
           context: routed.snapshot.context,

@@ -152,7 +152,33 @@ export interface SendCard {
   commit: CardCommit
 }
 
-export type HudCard = DiffCard | PlanCard | SendCard
+/**
+ * An answer — the card that proposes nothing.
+ *
+ * "Summarize the tasks I need to finish" is not a request for text; it is a
+ * request to know something. Mull used to route it to the composer, which
+ * produced a draft, a diff full of insertion marks, and an **Apply** button
+ * offering to write the summary into the note the user was reading. Pressing
+ * ⏎ out of habit — which is what ⏎ has always meant on a card — would paste
+ * it into their document.
+ *
+ * So the distinction the card makes visible is the one the request already
+ * contained: *do you want this written, or do you want to know it?* A compose
+ * ends in a diff card with Apply. A question ends here, with neither.
+ *
+ * Nothing on this card can write anywhere. There is no `commit`, no target and
+ * no text to insert — which is why ⏎ is free to mean "done" rather than having
+ * to be held inert the way it is on a `SendCard`.
+ */
+export interface AnswerCard {
+  kind: 'answer'
+  /** Whose window this was read from. Named in the title. */
+  app: string | null
+  /** The answer, arriving a sentence at a time. */
+  text: string
+}
+
+export type HudCard = DiffCard | PlanCard | SendCard | AnswerCard
 
 /**
  * What the user's ⏎ / ⌘⏎ / esc do while a card is open.

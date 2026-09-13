@@ -94,6 +94,13 @@ describe('hudView', () => {
     expect(hudView(state({ phase: 'thinking', card: planCard })).label).toBe('PREVIEW')
   })
 
+  /** An answer proposes nothing, so calling it a preview is simply wrong. */
+  it('says ANSWER for the card with nothing to apply', () => {
+    const answer = { kind: 'answer' as const, app: 'Notes', text: 'Three tasks remain.' }
+    expect(hudView(state({ phase: 'thinking', card: answer })).label).toBe('ANSWER')
+    expect(hudView(state({ phase: 'preview', card: answer })).label).toBe('ANSWER')
+  })
+
   it('treats inserting as thinking visually, but says INSERTING', () => {
     const view = hudView(state({ phase: 'inserting' }))
     expect(view.stateClass).toBe('is-thinking')
