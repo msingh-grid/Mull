@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import type { Intent, JournalDraft, JournalEntry, JournalStatus } from '@shared/types'
+import type {
+  CaptureRecord,
+  Intent,
+  JournalDraft,
+  JournalEntry,
+  JournalStatus
+} from '@shared/types'
 import type { InsertionStrategy } from '@shared/sidecar-api'
 import type { SqlDatabase } from './sqlite'
 
@@ -39,7 +45,11 @@ CREATE TABLE IF NOT EXISTS entries (
   caret         INTEGER,
   undoable      INTEGER NOT NULL DEFAULT 0,
   undone_at     INTEGER,
-  intent        TEXT NOT NULL
+  intent        TEXT NOT NULL,
+  -- What Mull could see when it acted (M5a). A receipt: JSON, exactly what was
+  -- sent, and null on rows that read nothing. The JPEG itself lives on disk —
+  -- a quarter of a megabyte of base64 per row would be read by every list query.
+  capture       TEXT
 );
 CREATE INDEX IF NOT EXISTS entries_at ON entries (at DESC);
 CREATE INDEX IF NOT EXISTS entries_undoable ON entries (undoable, at DESC);
@@ -61,6 +71,7 @@ interface Row {
   undoable: number
   undone_at: number | null
   intent: string
+  capture: string | null
 }
 
 export class JournalStore {
@@ -69,6 +80,14 @@ export class JournalStore {
     private readonly now: () => number = () => Date.now()
   ) {
     this.db.exec(SCHEMA)
+    // Added after the table existed in the wild, so the column has to arrive on
+    // databases that predate it. Cheap, idempotent, and quieter than a
+    // migration framework for one nullable column.
+    try {
+      this.db.exec('ALTER TABLE entries ADD COLUMN capture TEXT')
+    } catch {
+      // Already there.
+    }
   }
 
   append(draft: JournalDraft): JournalEntry {
@@ -77,6 +96,10 @@ export class JournalStore {
       id: draft.id ?? randomUUID(),
       at: draft.at ?? this.now(),
       undoneAt: null,
+      // Normalised rather than left undefined, so what `append` hands back is
+      // the same shape `get` reads out. They drifted the moment this column was
+      // added and the round-trip test caught it immediately.
+      capture: draft.capture ?? null,
       // Belt and braces: a caller that asks for an undoable entry without the
       // evidence to support one does not get it.
       undoable: draft.undoable && draft.verified === true && draft.caret !== null
@@ -86,8 +109,8 @@ export class JournalStore {
       .prepare(
         `INSERT INTO entries
            (id, at, kind, status, summary, app_bundle_id, app_name, before_text, after_text,
-            strategy, verified, caret, undoable, undone_at, intent)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            strategy, verified, caret, undoable, undone_at, intent, capture)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         entry.id,
@@ -104,7 +127,8 @@ export class JournalStore {
         entry.caret,
         entry.undoable ? 1 : 0,
         null,
-        JSON.stringify(entry.intent)
+        JSON.stringify(entry.intent),
+        entry.capture ? JSON.stringify(entry.capture) : null
       )
 
     return entry
@@ -207,6 +231,17 @@ function toEntry(row: Row): JournalEntry {
     verified: row.verified === null ? null : row.verified === 1,
     caret: row.caret,
     undoable: row.undoable === 1,
-    undoneAt: row.undone_at
+    undoneAt: row.undone_at,
+    capture: parseCapture(row.capture)
+  }
+}
+
+/** A malformed receipt is no receipt. Never a reason to lose the entry. */
+function parseCapture(raw: string | null): CaptureRecord | null {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as CaptureRecord
+  } catch {
+    return null
   }
 }

@@ -37,6 +37,17 @@ export function journalPath(): string {
   return join(userDataDir(), 'journal.db')
 }
 
+/**
+ * Screenshots kept as evidence for journal rows.
+ *
+ * On disk rather than in the database on purpose: a JPEG is a couple of hundred
+ * kilobytes, and every list query would read it. Pruned to the most recent few
+ * — this is a receipt you check after the fact, not an archive.
+ */
+export function capturesDir(): string {
+  return join(userDataDir(), 'captures')
+}
+
 /** User settings. Small, hand-editable, and never required to exist. */
 export function settingsPath(): string {
   return join(userDataDir(), 'settings.json')

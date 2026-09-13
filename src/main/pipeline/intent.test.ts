@@ -302,17 +302,17 @@ describe('IntentRouter — composing a reply', () => {
 })
 
 /**
- * Giving up on a classifier that cannot keep up (M5a).
+ * Giving up on a classifier that cannot keep up — and taking it back.
  *
  * A timeout is the worst outcome available: the user waits the whole budget and
- * then receives the answer the local rules had instantly. Measured on the
- * subscription lane with window context attached — warm p50 5.4s, max 17.2s,
- * against a 4.5s budget — that is not an edge case, it is the common case. The
- * classifications themselves were right 6/6, so this is the harness being the
- * wrong shape for the critical path, not the model being wrong.
+ * then receives the answer the local rules had instantly. So giving up has to
+ * stay possible.
  *
- * Same discipline `InsertionService` already applies to a strategy an app
- * proves it does not support: stop trying it, and remember.
+ * But the first version gave up after two, against a 4.5s budget measured at
+ * p50 5.4s — so it demoted itself inside the first two instructions of every
+ * session, permanently, and a real log showed fourteen consecutive utterances
+ * answered by the rules with the model never once consulted. The budget is 20s
+ * now and the patience is five, and the demotion expires.
  */
 describe('IntentRouter — an engine that cannot answer in time', () => {
   function slowEngine(): Engine & { asked: ClassifyRequest[] } {
@@ -322,19 +322,42 @@ describe('IntentRouter — an engine that cannot answer in time', () => {
     })
   }
 
-  it('stops asking after two timeouts, and stops waiting with it', async () => {
+  it('keeps asking through four timeouts, and stops after the fifth', async () => {
     const engine = slowEngine()
     const router = new IntentRouter({ engine, timeoutMs: 10 })
 
-    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
-    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+    for (let i = 0; i < 5; i += 1) {
+      expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+    }
 
-    const third = await router.decide(INPUT)
-    expect(third.by).toBe('rules')
-    expect(third.fallbackReason).toBe('too-slow')
-    // The engine is not even consulted, which is the whole point: two
-    // utterances to learn, none after that.
-    expect(engine.asked.length).toBe(2)
+    const sixth = await router.decide(INPUT)
+    expect(sixth.by).toBe('rules')
+    expect(sixth.fallbackReason).toBe('too-slow')
+    // Five utterances to learn, none after that — and the point of five rather
+    // than two is that a slow minute is not a broken engine.
+    expect(engine.asked.length).toBe(5)
+  })
+
+  /**
+   * The bug this whole change exists to fix: a bad stretch used to be
+   * permanent. A flaky connection, a rate limit, a laptop waking up — and the
+   * classifier was off until the app relaunched, with nothing on screen to say
+   * so. The network problem should not outlive the network problem.
+   */
+  it('takes the demotion back once the wait is served', async () => {
+    const engine = slowEngine()
+    let clock = 0
+    const router = new IntentRouter({ engine, timeoutMs: 10, now: () => clock })
+    for (let i = 0; i < 5; i += 1) await router.decide(INPUT)
+    expect((await router.decide(INPUT)).fallbackReason).toBe('too-slow')
+    expect(engine.asked.length).toBe(5)
+
+    clock += 4 * 60_000
+    expect((await router.decide(INPUT)).fallbackReason).toBe('too-slow')
+
+    clock += 2 * 60_000
+    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+    expect(engine.asked.length).toBe(6)
   })
 
   it('does not give up on an engine that is merely erroring', async () => {
@@ -353,15 +376,14 @@ describe('IntentRouter — an engine that cannot answer in time', () => {
   it('forgets the moment the engine is swapped', async () => {
     const engine = slowEngine()
     const router = new IntentRouter({ engine, timeoutMs: 10 })
-    await router.decide(INPUT)
-    await router.decide(INPUT)
+    for (let i = 0; i < 5; i += 1) await router.decide(INPUT)
     expect((await router.decide(INPUT)).fallbackReason).toBe('too-slow')
 
     // Signing in with an API key is exactly this: a lane that answers in a
     // fraction of the time the harness takes.
     router.reset()
     expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
-    expect(engine.asked.length).toBe(3)
+    expect(engine.asked.length).toBe(6)
   })
 
   it('a single answer in time clears the count', async () => {
@@ -382,12 +404,14 @@ describe('IntentRouter — an engine that cannot answer in time', () => {
     }
     const router = new IntentRouter({ engine, timeoutMs: 20 })
 
-    await router.decide(INPUT)
+    for (let i = 0; i < 4; i += 1) await router.decide(INPUT)
+    // One answer in time, and the count starts over.
     slow = false
     await router.decide(INPUT)
     slow = true
-    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
-    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+    for (let i = 0; i < 5; i += 1) {
+      expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+    }
     expect((await router.decide(INPUT)).fallbackReason).toBe('too-slow')
   })
 })

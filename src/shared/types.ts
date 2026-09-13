@@ -79,6 +79,40 @@ export interface JournalEntry {
   undoable: boolean
   /** Epoch ms of the undo, if it happened. */
   undoneAt: number | null
+  /**
+   * What Mull could see when it acted. Absent on rows that read nothing.
+   *
+   * This is a receipt, not a feature. "It says it can only see the sidebar"
+   * cannot be argued about from the outside — either the words were in front of
+   * the model or they were not — and until this existed there was no way to
+   * find out which. Everything here is exactly what was sent, with no
+   * re-rendering: if the row shows a wall of sidebar names and three messages,
+   * that is what the model read.
+   */
+  capture?: CaptureRecord | null
+}
+
+/** The evidence behind one entry: what was read, and what was seen. */
+export interface CaptureRecord {
+  /** The window transcript as the model received it, verbatim. */
+  text: string | null
+  /** Blocks harvested, before any budget trimmed them. */
+  blocks: number
+  /** Characters of window text sent. */
+  chars: number
+  /** A budget stopped the walk before the window ran out. */
+  truncated: boolean
+  harvestMs: number
+  windowTitle: string | null
+  /**
+   * Where the JPEG was kept, relative to the captures directory. Null when
+   * there was no picture — and then `imageReason` says why, because "Mull took
+   * no screenshot" and "Mull is not allowed to take screenshots" are different
+   * facts and only one of them is the user's to fix.
+   */
+  imageFile: string | null
+  imageReason: string | null
+  imageBytes: number | null
 }
 
 /** What the store needs to create an entry; the rest it fills in. */

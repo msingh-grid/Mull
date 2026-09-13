@@ -28,8 +28,9 @@ import { justSend, route, type Route, type RouteContext } from './router'
  *   3. **The rules**, when the model could not answer — signed out, offline,
  *      rate limited, timed out, or switched off in Settings. Mull still has to
  *      decide something, and refusing to act is not a decision.
- *   4. **The rules from then on**, once an engine has timed out twice. See
- *      `DEMOTE_AFTER_TIMEOUTS`.
+ *   4. **The rules for a while**, once an engine has timed out five times
+ *      running. Temporary, because a bad network minute should not outlive the
+ *      bad network minute. See `DEMOTE_AFTER_TIMEOUTS` and `DEMOTION_MS`.
  *
  * Never throws. Every failure lands somewhere recoverable: a card the user
  * approves, or text one keystroke undoes.
@@ -71,44 +72,62 @@ export interface IntentRouterDeps {
 /**
  * How long to wait for the decision.
  *
- * Measured, not guessed. A warm Agent SDK turn runs p50 4.2s / min 2.5s to
- * completion — the Claude Code harness, not the model — so a 1.2s budget would
- * have meant the classifier never once answered in time on the subscription
- * lane, and the whole feature would have been rules-with-extra-steps. The
- * API-key lane is much faster and simply finishes early.
+ * **This was 4.5s and it was wrong**, and the way it was wrong is worth
+ * recording because the number outlived its reason.
  *
- * This much silence is only ever spent on an utterance that already looks like
- * it might be an instruction (gate 2 above). Past it, the rules answer.
+ * It was set in M4.1, when classification ran on *every* utterance that might
+ * be an instruction — so the budget was really "how long may ordinary dictation
+ * be held up", and 4.5s was already generous for that. M5b took that job away
+ * from it: ⌥Space dictates with no engine in the loop at all, and only Fn asks.
+ * Nobody moved the number.
+ *
+ * The consequence, from a real session log: `fallbackReason: 'too-slow'` on
+ * fourteen consecutive utterances. The measured subscription lane is p50 5.4s,
+ * max 17.2s with window context attached — so it timed out twice, demoted
+ * itself for the rest of the session, and every decision after that was made by
+ * the local rules. The model had never decided anything. Navigation, which only
+ * the classifier can choose, was unreachable by construction.
+ *
+ * 20s covers the measured distribution with headroom. It is silence the user
+ * asked for by pressing a second key, and the HUD is showing THINKING
+ * throughout — which is a different thing from a pause nobody requested.
+ * The API-key lane answers in a fraction of it and simply finishes early.
  */
-const DEFAULT_TIMEOUT_MS = 4_500
+const DEFAULT_TIMEOUT_MS = 20_000
 
 /**
  * How many timeouts before Mull stops asking this engine.
  *
- * Because a timeout is the worst of both worlds: the user waits the full
- * budget and then gets the rules answer that was available instantly. Paying
- * that once to find out is reasonable. Paying it on every utterance for the
- * rest of the session is not — it is a slower Mull that makes exactly the same
- * decisions.
+ * A timeout is the worst of both worlds — the user waits the full budget and
+ * then gets the rules answer that was available instantly — so giving up has to
+ * remain possible. But it was giving up far too readily: two timeouts against a
+ * budget shorter than the measured median meant it demoted itself within the
+ * first two instructions of every session, permanently, and the rules made
+ * every decision from then on.
  *
- * Measured on the subscription lane with window context attached: warm p50
- * 5.4s, max 17.2s, against a 4.5s budget. The classifications themselves were
- * right every time (6/6, compose and dictate and edit), so this is not the
- * model being wrong — it is the Claude Code harness being the wrong shape for
- * something on the critical path. An API key answers in a fraction of it.
- *
- * The pattern is `InsertionService`'s: try the good strategy, and when an
- * implementation proves it does not work here, stop trying it and remember.
+ * Five, now, and against a budget that actually fits. Five consecutive
+ * timeouts at 20s each is a minute and a half of an engine answering nothing,
+ * which is no longer "it might be slow today" — it is broken.
  */
-const DEMOTE_AFTER_TIMEOUTS = 2
+const DEMOTE_AFTER_TIMEOUTS = 5
+
+/**
+ * And giving up is temporary.
+ *
+ * It used to be permanent: one bad stretch — a flaky connection, a rate limit,
+ * a laptop waking up — and the classifier was off until the app relaunched,
+ * with nothing on screen to say so. A network problem should not outlive the
+ * network problem.
+ */
+const DEMOTION_MS = 5 * 60_000
 
 export class IntentRouter {
   private readonly now: () => number
   private readonly log: NonNullable<IntentRouterDeps['log']>
   private readonly timeoutMs: number
   private consecutiveTimeouts = 0
-  /** Set once this engine has proved it cannot answer in time. */
-  private tooSlow = false
+  /** When this engine gave up, or null. Expires; see `DEMOTION_MS`. */
+  private demotedAt: number | null = null
 
   constructor(private readonly deps: IntentRouterDeps) {
     this.now = deps.now ?? (() => Date.now())
@@ -122,7 +141,17 @@ export class IntentRouter {
    */
   reset(): void {
     this.consecutiveTimeouts = 0
-    this.tooSlow = false
+    this.demotedAt = null
+  }
+
+  /** Is the engine still in the sin bin? Answers no once the wait is served. */
+  private demoted(): boolean {
+    if (this.demotedAt === null) return false
+    if (this.now() - this.demotedAt < DEMOTION_MS) return true
+    this.log('info', 'intent: giving the classifier another go')
+    this.demotedAt = null
+    this.consecutiveTimeouts = 0
+    return false
   }
 
   async decide(input: IntentInput): Promise<RoutedIntent> {
@@ -152,8 +181,9 @@ export class IntentRouter {
 
     if (this.deps.useModel && !this.deps.useModel()) return rules('rules-only')
 
-    // Asked and answered, twice. Waiting again would buy nothing.
-    if (this.tooSlow) return rules('too-slow')
+    // Asked and answered, five times over. Waiting again would buy nothing —
+    // for a few minutes, after which it is worth finding out again.
+    if (this.demoted()) return rules('too-slow')
 
     // Free: `ready()` reads remembered health, it does not probe.
     const state = await this.deps.engine.ready().catch(() => ({ kind: 'local-only' as const }))
@@ -184,10 +214,10 @@ export class IntentRouter {
       if (err instanceof TimeoutError) {
         this.consecutiveTimeouts += 1
         if (this.consecutiveTimeouts >= DEMOTE_AFTER_TIMEOUTS) {
-          this.tooSlow = true
+          this.demotedAt = this.now()
           this.log(
             'warn',
-            'intent: this engine cannot classify inside the budget — using the local rules for the rest of the session'
+            `intent: the classifier has timed out ${this.consecutiveTimeouts} times running — local rules for the next ${DEMOTION_MS / 60_000} minutes`
           )
         }
       }
