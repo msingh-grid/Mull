@@ -290,6 +290,7 @@ describe('SculptLane — the refusals', () => {
         onPartial?.('Following up:')
         throw new Error('rate limited')
       },
+      compose: async () => ({ text: '' }),
       plan: async () => ({ steps: [], context: null })
     }
     const h = harness({ engine: broken })
@@ -308,6 +309,7 @@ describe('SculptLane — the refusals', () => {
       ready: async () => ({ kind: 'ready' }),
       classify: async () => ({ kind: 'dictate' as const }),
       transform: async (request) => ({ text: request.text }),
+      compose: async () => ({ text: '' }),
       plan: async () => ({ steps: [], context: null })
     }
     const h = harness({ engine: unchanged })
@@ -335,6 +337,7 @@ describe('SculptLane — ⏎ while the engine is still writing', () => {
         await finished
         return { text: CANONICAL_SAMPLE.after }
       },
+      compose: async () => ({ text: '' }),
       plan: async () => ({ steps: [], context: null })
     }
     const h = harness({ engine: slow })
@@ -612,5 +615,179 @@ describe('SculptLane — applying in an app with no readable focused element', (
 
     expect(h.sidecar.insertions).toEqual([])
     expect(h.hud.announcements.at(-1)?.notice).toMatch(/selection is gone/i)
+  })
+})
+
+/**
+ * Composing a reply (M5a) — a new route through the same lane and the same card.
+ *
+ * A draft diffs against the empty string, so every segment comes out as an
+ * insertion and the DiffCard renders it as pure writing ink. That is not a
+ * trick: a new reply genuinely is all insertion, and giving it its own card
+ * type would have meant a second renderer to keep in step for no gain.
+ */
+describe('SculptLane — drafting a reply', () => {
+  function draftRequest(): SculptRequest {
+    return {
+      instruction: 'reply saying the redlines will be there by five',
+      transcript: 'reply saying the redlines will be there by five',
+      target: {
+        kind: 'draft' as const,
+        app: APP,
+        start: 0,
+        length: 0,
+        text: '',
+        keystrokesSafe: true
+      },
+      app: APP,
+      context: {
+        app: APP,
+        windowTitle: '#terms-doc',
+        blocks: [
+          {
+            role: 'AXStaticText',
+            text: 'can you confirm the redlines by EOD?',
+            label: null,
+            focused: false,
+            selected: false
+          }
+        ],
+        truncated: false,
+        image: null,
+        imageReason: 'not-requested',
+        chars: 36,
+        harvestMs: 11
+      }
+    }
+  }
+
+  it('says it is writing a reply, not editing anything', async () => {
+    const h = harness()
+    await h.lane.run(draftRequest())
+
+    const chips = h.hud.patches.flatMap((patch) => patch.chips ?? [])
+    expect(chips.find((chip) => chip.id === 'intent')?.label).toBe('Reply')
+    expect((h.hud.cards.at(-1) as DiffCard).app).toBe('Mail — a new reply')
+  })
+
+  it('renders as pure insertion — there is nothing being taken away', async () => {
+    const h = harness()
+    await h.lane.run(draftRequest())
+
+    const final = h.hud.cards.at(-1) as DiffCard
+    expect(final.segments.length).toBeGreaterThan(0)
+    expect(final.segments.every((segment) => segment.kind === 'ins')).toBe(true)
+  })
+
+  it('asks the compose lane, not the edit lane', async () => {
+    const asked: string[] = []
+    const engine: Engine = {
+      name: 'spy',
+      model: null,
+      ready: async () => ({ kind: 'ready' }),
+      classify: async () => ({ kind: 'dictate' }),
+      transform: async () => {
+        asked.push('transform')
+        return { text: 'wrong lane' }
+      },
+      compose: async (request) => {
+        asked.push('compose')
+        // The conversation reaches it; that is the whole point of the route.
+        expect(request.context?.blocks[0]?.text).toContain('redlines by EOD')
+        return { text: 'Confirmed — you will have them by five.' }
+      },
+      plan: async () => ({ steps: [], context: null })
+    }
+
+    const h = harness({ engine })
+    await h.lane.run(draftRequest())
+    expect(asked).toEqual(['compose'])
+  })
+
+  it('inserts at the caret and replaces nothing', async () => {
+    const h = harness({
+      sidecar: new FakeSidecar({
+        accessibility: true,
+        app: { ...APP, pid: 1 },
+        text: '',
+        caret: 0
+      })
+    })
+
+    await h.lane.run(draftRequest())
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.sidecar.insertions.length).toBe(1)
+    // Nothing was replaced, so the journal has no `before` — and undo must
+    // remove the insertion rather than try to restore something that never was.
+    const entry = lastEntry(h.journal)
+    expect(entry.before).toBeNull()
+    expect(entry.status).toBe('applied')
+    expect(entry.summary.startsWith('Reply ·')).toBe(true)
+  })
+
+  /**
+   * Nothing can have moved under a draft, because there was never anything
+   * under it. The app check is the whole guard — it must still be the window
+   * the reply was written for.
+   */
+  it('does not demand a selection that never existed', async () => {
+    const h = harness({
+      sidecar: new FakeSidecar({
+        accessibility: true,
+        app: { ...APP, pid: 1 },
+        text: '',
+        caret: 0
+      })
+    })
+
+    await h.lane.run(draftRequest())
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.hud.announcements.at(-1)?.phase).toBe('applied')
+  })
+
+  it('refuses when the user has moved to another app', async () => {
+    const h = harness({
+      sidecar: new FakeSidecar({
+        accessibility: true,
+        app: { bundleId: 'com.apple.Notes', name: 'Notes', pid: 2 },
+        text: '',
+        caret: 0
+      })
+    })
+
+    await h.lane.run(draftRequest())
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.sidecar.insertions.length).toBe(0)
+    expect(h.hud.announcements.at(-1)?.notice).toContain('switched apps')
+  })
+
+  /**
+   * An empty reply is a failure, not a compliment. The edit lane's "that
+   * already reads well" would be nonsense here — nothing was written at all.
+   */
+  it('says so when the engine drafts nothing', async () => {
+    const engine: Engine = {
+      name: 'mute',
+      model: null,
+      ready: async () => ({ kind: 'ready' }),
+      classify: async () => ({ kind: 'dictate' }),
+      transform: async () => ({ text: '' }),
+      compose: async () => ({ text: '' }),
+      plan: async () => ({ steps: [], context: null })
+    }
+
+    const h = harness({ engine })
+    await h.lane.run(draftRequest())
+
+    expect(h.hud.announcements.at(-1)).toMatchObject({
+      phase: 'error',
+      notice: 'Mull couldn’t draft anything from what’s on screen.'
+    })
   })
 })

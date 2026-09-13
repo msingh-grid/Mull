@@ -62,6 +62,7 @@ function harness(options: {
       options.classifies === 'offline' ? { kind: 'signed-out' } : { kind: 'ready' },
     classify: async () => options.classifies as ClassifiedIntent,
     transform: async () => ({ text: '' }),
+    compose: async () => ({ text: '' }),
     plan: async () => ({ steps: [], context: null })
   }
 

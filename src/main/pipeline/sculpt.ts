@@ -77,6 +77,18 @@ export interface SculptDeps {
 }
 
 const INTENT_CHIP: HudChip = { kind: 'intent', label: 'Edit', id: 'intent' }
+const DRAFT_CHIP: HudChip = { kind: 'intent', label: 'Reply', id: 'intent' }
+
+/**
+ * What this lane is doing, in the user's words.
+ *
+ * "Edit declined" on a card that wrote a new message would be a small lie in
+ * the one place Mull cannot afford them — the journal is the record someone
+ * checks when they are trying to work out what happened.
+ */
+function laneNoun(target: EditTarget): 'Edit' | 'Reply' {
+  return target.kind === 'draft' ? 'Reply' : 'Edit'
+}
 
 /** State carried between `run` and the card's answer, which can arrive first. */
 interface Session {
@@ -117,7 +129,9 @@ export class SculptLane {
         ? 'selection'
         : request.target.kind === 'document'
           ? 'whole field'
-          : 'to cursor'
+          : request.target.kind === 'draft'
+            ? 'a new reply'
+            : 'to cursor'
     const appName = request.app?.name ?? null
     const cardApp = appName ? `${appName} — ${scope}` : scope
 
@@ -126,26 +140,45 @@ export class SculptLane {
       transcript: request.instruction,
       partial: false,
       notice: null,
-      chips: [INTENT_CHIP, { kind: 'dict', label: cardApp, id: 'target' }]
+      chips: [
+        request.target.kind === 'draft' ? DRAFT_CHIP : INTENT_CHIP,
+        { kind: 'dict', label: cardApp, id: 'target' }
+      ]
     })
 
     // Started before the card is opened so the first token can land in it, but
     // never awaited here — the card must be on screen (and escapable) while
     // the engine is still writing.
-    const stream = this.deps.engine
-      .transform(
-        {
-          instruction: request.instruction,
-          text: before,
-          app: request.app,
-          context: request.context ?? null
-        },
-        (partial) => {
-          if (session.firstTokenMs === null) session.firstTokenMs = this.now() - session.startedAt
-          const { segments, changes } = diffText(before, partial)
-          this.deps.hud.updateCard({ kind: 'diff', app: cardApp, segments, changes })
-        }
-      )
+    const onPartial = (partial: string): void => {
+      if (session.firstTokenMs === null) session.firstTokenMs = this.now() - session.startedAt
+      const { segments, changes } = diffText(before, partial)
+      this.deps.hud.updateCard({ kind: 'diff', app: cardApp, segments, changes })
+    }
+
+    // Two lanes, one card. A draft diffs against the empty string, so every
+    // segment comes out as an insertion and the existing DiffCard renders it as
+    // pure writing ink — which is exactly what a new reply is. No second card
+    // type, no second renderer, no second thing to keep in step.
+    const stream = (
+      request.target.kind === 'draft'
+        ? this.deps.engine.compose(
+            {
+              instruction: request.instruction,
+              app: request.app,
+              context: request.context ?? null
+            },
+            onPartial
+          )
+        : this.deps.engine.transform(
+            {
+              instruction: request.instruction,
+              text: before,
+              app: request.app,
+              context: request.context ?? null
+            },
+            onPartial
+          )
+    )
       .then((result) => result.text)
       .catch((err: unknown) => {
         // Swallowed into `failure` rather than rethrown: the card's answer
@@ -169,7 +202,7 @@ export class SculptLane {
 
     if (session.failure) {
       this.deps.hud.closeCard()
-      this.fail(request, session, `The engine couldn’t finish that edit: ${session.failure}`)
+      this.fail(request, session, `The engine couldn’t finish that: ${session.failure}`)
       return
     }
 
@@ -177,6 +210,10 @@ export class SculptLane {
     if (final.changes === 0) {
       // An honest outcome, and a common one on text that is already tight.
       // Showing an empty card would ask the user to approve nothing.
+      //
+      // It means something different for a draft, though: nothing changed
+      // against an empty string is nothing written, which is a failure rather
+      // than a compliment about the user's prose.
       this.deps.hud.closeCard()
       this.record(request, session, {
         outcome: 'refused',
@@ -185,7 +222,12 @@ export class SculptLane {
         changes: 0,
         insertMs: 0
       })
-      this.deps.hud.announce('applied', 'Nothing to change — that already reads well.')
+      this.deps.hud.announce(
+        request.target.kind === 'draft' ? 'error' : 'applied',
+        request.target.kind === 'draft'
+          ? 'Mull couldn’t draft anything from what’s on screen.'
+          : 'Nothing to change — that already reads well.'
+      )
       return
     }
 
@@ -207,7 +249,7 @@ export class SculptLane {
   ): Promise<void> {
     const after = await stream
     if (session.failure) {
-      this.fail(request, session, `The engine couldn’t finish that edit: ${session.failure}`)
+      this.fail(request, session, `The engine couldn’t finish that: ${session.failure}`)
       return
     }
 
@@ -224,7 +266,7 @@ export class SculptLane {
         after,
         strategyUsed: null,
         status: 'cancelled',
-        summary: `Edit declined · ${request.app?.name ?? 'this app'} · “${summarise(request.instruction)}”`,
+        summary: `${laneNoun(request.target)} declined · ${request.app?.name ?? 'this app'} · “${summarise(request.instruction)}”`,
         verified: null,
         caret: null,
         undoable: false
@@ -255,7 +297,7 @@ export class SculptLane {
         after: null,
         strategyUsed: null,
         status: 'failed',
-        summary: `Edit refused · ${message}`,
+        summary: `${laneNoun(request.target)} refused · ${message}`,
         verified: null,
         caret: null,
         undoable: false
@@ -290,7 +332,7 @@ export class SculptLane {
         after: null,
         strategyUsed: null,
         status: 'failed',
-        summary: `Edit · ${request.app?.name ?? 'this app'} — not applied`,
+        summary: `${laneNoun(request.target)} · ${request.app?.name ?? 'this app'} — not applied`,
         verified: null,
         caret: null,
         undoable: false
@@ -306,7 +348,7 @@ export class SculptLane {
       return
     }
 
-    const summary = `Edit · ${request.app?.name ?? 'this app'} · “${summarise(request.instruction)}”`
+    const summary = `${laneNoun(request.target)} · ${request.app?.name ?? 'this app'} · “${summarise(request.instruction)}”`
     const entry = this.journal({
       intent: {
         kind: 'edit',
@@ -320,7 +362,10 @@ export class SculptLane {
       // one worth keeping.
       // A reference edit replaced nothing, so it has no `before` — and undo
       // must remove the insertion rather than restore anything.
-      before: request.target.kind === 'reference' ? null : outcome.replacedText ?? request.target.text,
+      before:
+        request.target.kind === 'reference' || request.target.kind === 'draft'
+          ? null
+          : outcome.replacedText ?? request.target.text,
       after,
       strategyUsed: outcome.strategyUsed,
       status: 'applied',
@@ -347,7 +392,7 @@ export class SculptLane {
       firstTokenMs: session.firstTokenMs
     })
 
-    this.deps.hud.announce('applied', 'Edit applied.', {
+    this.deps.hud.announce('applied', `${laneNoun(request.target)} applied.`, {
       summary,
       at: this.now(),
       chars: after.length,
@@ -395,9 +440,9 @@ export class SculptLane {
     replacedText: string | null
     reason: string | null
   }> {
-    if (target.kind === 'reference') {
-      // Insert, don't replace. There is nothing here Mull is allowed to
-      // destroy, which also makes this the one path with no `before`.
+    if (target.kind === 'reference' || target.kind === 'draft') {
+      // Insert, don't replace. Nothing here is Mull's to destroy — a reference
+      // is text it may not rewrite, and a draft never had anything under it.
       return this.deps.insertion.insert(after, target.app)
     }
 
@@ -454,7 +499,7 @@ export class SculptLane {
       after: null,
       strategyUsed: null,
       status: 'cancelled',
-      summary: `Edit withheld · ${state.kind === 'signed-out' ? 'no engine' : 'local-only'} · “${summarise(request.instruction)}”`,
+      summary: `${laneNoun(request.target)} withheld · ${state.kind === 'signed-out' ? 'no engine' : 'local-only'} · “${summarise(request.instruction)}”`,
       verified: null,
       caret: null,
       undoable: false
@@ -482,7 +527,7 @@ export class SculptLane {
       after: null,
       strategyUsed: null,
       status: 'failed',
-      summary: `Edit failed · “${summarise(request.instruction)}”`,
+      summary: `${laneNoun(request.target)} failed · “${summarise(request.instruction)}”`,
       verified: null,
       caret: null,
       undoable: false

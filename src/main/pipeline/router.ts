@@ -34,11 +34,19 @@ export interface RouteContext {
   hasSelection: boolean
   /** Did the focused field hold any text? An empty one has nothing to edit. */
   hasFieldText: boolean
+  /**
+   * Could Mull read the window around the caret (M5a)? A compose acts on this
+   * rather than on the field, which is why an empty box stopped being proof
+   * that there was nothing to do.
+   */
+  hasScreen?: boolean
 }
 
 export type Route =
   | { kind: 'dictate'; text: string }
   | { kind: 'edit'; instruction: string; target: 'selection' | 'document' }
+  /** Write something new from what is on screen. No `before`; lands at the caret. */
+  | { kind: 'compose'; instruction: string }
 
 /**
  * The fast path, as its own predicate so `IntentRouter` can check it before
@@ -47,6 +55,66 @@ export type Route =
 export function nothingToEdit(context: RouteContext): boolean {
   return !context.hasSelection && !context.hasFieldText
 }
+
+/**
+ * Is this worth asking about at all?
+ *
+ * The gate, and the place where the "dictation never waits" invariant now
+ * lives. Its history, because each narrowing was paid for:
+ *
+ *   M4    dictation never waits.
+ *   M4.1  …when there is nothing to edit. A rules table cannot tell "make my
+ *         last message less apologetic" from prose, so the model decides — but
+ *         only when there is text in front of the caret.
+ *   M5a   …unless the words themselves ask for something. An empty composer
+ *         used to be proof there was nothing to do. It is now the single most
+ *         likely place for "reply saying I'll have it by five".
+ *
+ * What did not change: ordinary speech has neither an instruction verb nor a
+ * compose verb, so it still never waits. That is most of what anyone dictates.
+ */
+export function worthAsking(transcript: string, context: RouteContext): boolean {
+  if (!nothingToEdit(context) && mightBeInstruction(transcript)) return true
+  return context.hasScreen === true && mightBeCompose(transcript)
+}
+
+/**
+ * Could these words be asking Mull to *write* something?
+ *
+ * A narrow list, and narrower than it first looks. "Tell her I'll be late" and
+ * "say that we're moving the date" are left out on purpose: they are the most
+ * natural way to dictate a message, not to request one, and putting them here
+ * would make the commonest utterance in a chat window pay seconds.
+ *
+ * What is left are verbs that are almost never prose in a composer. Nobody
+ * types "reply to this" into Slack meaning it literally.
+ */
+export function mightBeCompose(transcript: string): boolean {
+  const raw = transcript.trim()
+  if (!raw) return false
+  // Roomier than the edit ceiling: a compose instruction carries its content
+  // inline — "reply saying I'll have the redlines by five and apologise for the
+  // delay" is one request, not a paragraph of dictation.
+  if (countWords(raw) > MAX_COMPOSE_WORDS) return false
+
+  const body = raw.toLowerCase().replace(PREAMBLE, '').trimStart()
+  if (!body) return false
+  if (/^[\p{L}’']+\s*,/u.test(body)) return false
+  return TIER_C.test(body)
+}
+
+/** See `mightBeCompose`. */
+const MAX_COMPOSE_WORDS = 30
+
+/**
+ * Compose verbs. Standalone by design — "reply" is already about the screen,
+ * so unlike Tier B it needs no deictic to point at.
+ *
+ * `write` and `get` are the two that do need an object, because "write the
+ * numbers down" and "get the deck to Priya" are things people say.
+ */
+const TIER_C =
+  /^(?:repl(?:y|ies)|respond|answer|draft|compose|write (?:back|a reply|an answer|a response)|get back to)\b/u
 
 /**
  * The second fast path: could this *possibly* be an instruction?
@@ -206,6 +274,10 @@ export function looksLikeInstruction(transcript: string): boolean {
  */
 export function route(transcript: string, context: RouteContext): Route {
   const text = transcript.trim()
+  // Compose first: it is the one route that does not need text in the field,
+  // so checking it after the `nothingToEdit` gate would make it unreachable in
+  // exactly the case it exists for — an empty composer under a conversation.
+  if (context.hasScreen && mightBeCompose(text)) return { kind: 'compose', instruction: text }
   if (nothingToEdit(context)) return { kind: 'dictate', text }
   if (!looksLikeInstruction(text)) return { kind: 'dictate', text }
   // With no selection the instruction is about the field in front of the caret.

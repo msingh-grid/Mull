@@ -6,6 +6,7 @@ import { ApiKeyEngine } from './api-key'
 import type {
   ClassifiedIntent,
   ClassifyRequest,
+  ComposeRequest,
   Engine,
   EngineState,
   PlanRequest,
@@ -108,6 +109,11 @@ export class SignedOutEngine implements Engine {
     throw new Error(this.reason ?? 'No engine is connected.')
   }
 
+  async compose(): Promise<TransformResult> {
+    throw new Error(this.reason ?? 'No engine is connected.')
+  }
+
+
   async plan(): Promise<PlanResult> {
     throw new Error(this.reason ?? 'No engine is connected.')
   }
@@ -160,6 +166,10 @@ export class EngineHolder implements Engine {
     onPartial?: (text: string) => void
   ): Promise<TransformResult> {
     return this.inner.transform(request, onPartial)
+  }
+
+  compose(request: ComposeRequest, onPartial?: (text: string) => void): Promise<TransformResult> {
+    return this.inner.compose(request, onPartial)
   }
 
   plan(request: PlanRequest): Promise<PlanResult> {

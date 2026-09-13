@@ -24,11 +24,15 @@ export interface EditIntent {
   /** The user's instruction, e.g. "tighten this up". */
   instruction: string
   /**
-   * What the edit applies to. `reference` is text Mull could read but not
-   * rewrite — a sent message, a web page — so the result was inserted at the
-   * caret rather than replacing anything.
+   * What the edit applies to.
+   *
+   * `reference` is text Mull could read but not rewrite — a sent message, a web
+   * page — so the result was inserted at the caret rather than replacing
+   * anything. `draft` (M5a) replaced nothing at all: it is a reply written from
+   * the conversation on screen, so the row has no `before` and undo removes the
+   * insertion rather than restoring anything.
    */
-  target: 'selection' | 'document' | 'reference'
+  target: 'selection' | 'document' | 'reference' | 'draft'
   /** Raw transcript the instruction was parsed from (for the journal). */
   transcript: string
 }

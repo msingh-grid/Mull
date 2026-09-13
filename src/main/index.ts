@@ -814,6 +814,10 @@ function reloadEngine(): void {
     })
   )
   log.info('engine reloaded', { kind: engine.name, model: engine.model })
+  // A new engine deserves its own chance at the classifier: what was measured
+  // too slow was the old one, and an API key answers far faster than the
+  // subscription lane's harness does.
+  intent?.reset()
   warmEngine()
 }
 

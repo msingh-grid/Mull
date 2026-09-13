@@ -2,6 +2,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type {
   ClassifiedIntent,
   ClassifyRequest,
+  ComposeRequest,
   Engine,
   EngineState,
   PlanRequest,
@@ -18,9 +19,11 @@ import {
   parseClassification
 } from './classify'
 import {
+  COMPOSE_SYSTEM_PROMPT,
   EDIT_SYSTEM_PROMPT,
   cleanEditOutput,
   cleanEditPartial,
+  composeContent,
   editContent,
   maxOutputTokens
 } from './prompts'
@@ -125,6 +128,43 @@ export class ApiKeyEngine implements Engine {
     } catch (err) {
       // Classified and remembered, so the *next* edit knows without asking —
       // then rethrown, because this one still failed and the lane has to say so.
+      this.health.degrade(err)
+      throw err
+    }
+  }
+
+  async compose(
+    request: ComposeRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    try {
+      const stream = this.messages.stream({
+        model: this.model,
+        // A reply is short. Capping it here is not only thrift — it is a hint,
+        // and the prompt asks for the length a person would actually type.
+        max_tokens: 1_024,
+        system: [
+          { type: 'text', text: COMPOSE_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
+        ],
+        messages: [
+          { role: 'user', content: composeContent(request) as Anthropic.MessageParam['content'] }
+        ]
+      })
+
+      if (onPartial) {
+        stream.on('text', (_delta, snapshot) => onPartial(cleanEditPartial(snapshot)))
+      }
+
+      const message = await stream.finalMessage()
+      this.health.recover()
+
+      const text = message.content
+        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+        .map((block) => block.text)
+        .join('')
+
+      return { text: cleanEditOutput(text) }
+    } catch (err) {
       this.health.degrade(err)
       throw err
     }

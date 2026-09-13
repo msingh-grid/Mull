@@ -47,10 +47,13 @@ Answer with one JSON object and nothing else:
 {"intent":"dictate"}
 {"intent":"edit","target":"selection","instruction":"<what they asked for>"}
 {"intent":"edit","target":"document","instruction":"<what they asked for>"}
+{"intent":"compose","instruction":"<what they asked for>"}
 
 Choose "edit" when the words ask for something to be done TO the text shown to you — rewrite, shorten, fix, translate, change the tone, turn into a list. Use target "selection" when a selection is shown, otherwise "document" (the whole field).
 
-Choose "dictate" when the words are the message itself, even if they contain verbs like "make", "fix" or "turn". "Make sure Priya signs off", "turn left at the lights" and "fix the meeting to 3pm" are things a person is saying, not instructions to you.
+Choose "compose" when the words ask for something NEW to be written, using what is on screen — "reply to this", "draft an answer", "reply to Priya saying I'll have it by five", "write back declining". There is nothing to rewrite; the result goes where the cursor is. Only choose it when a <screen> block is shown, because a reply needs something to reply to.
+
+Choose "dictate" when the words are the message itself, even if they contain verbs like "make", "fix" or "turn". "Make sure Priya signs off", "turn left at the lights" and "fix the meeting to 3pm" are things a person is saying, not instructions to you. "Tell her I'll be late" and "say we're moving the date" are dictation too — the user is speaking the message, not asking you to write one.
 
 When it could honestly be either, answer "dictate". Typing an instruction by mistake is a visible nuisance the user can undo in one keystroke; routing someone's sentence into an edit makes it vanish from where they were looking.
 
@@ -65,6 +68,10 @@ const ClassifiedIntentSchema = z.union([
   z.object({
     intent: z.literal('edit'),
     target: z.enum(['selection', 'document']),
+    instruction: z.string().min(1)
+  }),
+  z.object({
+    intent: z.literal('compose'),
     instruction: z.string().min(1)
   })
 ])
@@ -123,6 +130,10 @@ export function parseClassification(raw: string): ClassifiedIntent {
 
   const parsed = ClassifiedIntentSchema.safeParse(value)
   if (!parsed.success || parsed.data.intent === 'dictate') return { kind: 'dictate' }
+
+  if (parsed.data.intent === 'compose') {
+    return { kind: 'compose', instruction: parsed.data.instruction.trim() }
+  }
 
   return {
     kind: 'edit',

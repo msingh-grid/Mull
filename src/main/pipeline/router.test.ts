@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { looksLikeInstruction, route } from './router'
+import { looksLikeInstruction, mightBeCompose, route, worthAsking } from './router'
 
 /**
  * The fixture table docs/PLAN.md asks for.
@@ -207,5 +207,138 @@ describe('the sentence from docs/M4-VERIFY.md', () => {
     ]) {
       expect(looksLikeInstruction(said), said).toBe(true)
     }
+  })
+})
+
+/**
+ * The compose gate (M5a), and the third narrowing of the invariant it caused.
+ *
+ *   M4    dictation never waits.
+ *   M4.1  …when there is nothing to edit.
+ *   M5a   …unless the words themselves ask for something.
+ *
+ * An empty composer used to be proof there was nothing to do. It is now the
+ * single most likely place for "reply saying I'll have it by five". What did
+ * not change is the thing that matters: ordinary speech has no compose verb
+ * either, so it still never waits.
+ */
+describe('mightBeCompose', () => {
+  const COMPOSE = [
+    'reply to this',
+    'reply saying I will have the redlines by five',
+    'reply to Priya and say it is on the way',
+    'respond to this politely',
+    'answer her question',
+    'draft a reply',
+    'draft something back declining',
+    'write back and say we need another week',
+    'get back to him about the invoice',
+    'could you reply to this saying yes'
+  ]
+
+  for (const transcript of COMPOSE) {
+    it(`asks about: “${transcript}”`, () => {
+      expect(mightBeCompose(transcript)).toBe(true)
+    })
+  }
+
+  /**
+   * The two deliberate omissions. "Tell her I'll be late" is the most natural
+   * way to *dictate* a message into a chat window, not to request one — and
+   * putting it in TIER_C would make the commonest utterance in Slack pay
+   * several seconds of classification.
+   */
+  const DICTATION = [
+    'tell her I will be late',
+    'say that we are moving the date',
+    'let them know the deck is ready',
+    'and I will send the deck tonight',
+    'thanks so much, that really helped',
+    'sounds good, Tuesday works for me',
+    'answering that question took me all morning',
+    'replying to everyone is going to take a while'
+  ]
+
+  for (const transcript of DICTATION) {
+    it(`does not ask about: “${transcript}”`, () => {
+      expect(mightBeCompose(transcript)).toBe(false)
+    })
+  }
+
+  it('has room for the content a compose carries inline', () => {
+    // Unlike an edit instruction, a compose contains its own message, so the
+    // 14-word ceiling that suits "tighten this up" would cut it off.
+    expect(
+      mightBeCompose(
+        'reply saying I will have the redlines by five and apologise for the delay again'
+      )
+    ).toBe(true)
+  })
+
+  it('still refuses a paragraph', () => {
+    expect(mightBeCompose(`reply ${'and again '.repeat(30)}`)).toBe(false)
+  })
+})
+
+describe('worthAsking — the invariant, as one predicate', () => {
+  const EMPTY = { hasSelection: false, hasFieldText: false, hasScreen: false }
+  const EMPTY_WITH_SCREEN = { hasSelection: false, hasFieldText: false, hasScreen: true }
+  const FIELD = { hasSelection: false, hasFieldText: true, hasScreen: true }
+
+  it('never waits on ordinary speech into an empty box', () => {
+    expect(worthAsking('and I will send the deck tonight', EMPTY_WITH_SCREEN)).toBe(false)
+  })
+
+  it('never waits on ordinary speech into a half-written message', () => {
+    expect(worthAsking('and I will send the deck tonight', FIELD)).toBe(false)
+  })
+
+  /** The case M5a exists for: an empty composer under a conversation. */
+  it('asks about a reply into an empty box, when it can see the window', () => {
+    expect(worthAsking('reply saying I will have it by five', EMPTY_WITH_SCREEN)).toBe(true)
+  })
+
+  it('does not ask about a reply when it cannot see anything to reply to', () => {
+    expect(worthAsking('reply saying I will have it by five', EMPTY)).toBe(false)
+  })
+
+  it('still asks about an edit instruction over text', () => {
+    expect(worthAsking('tighten this up', FIELD)).toBe(true)
+  })
+
+  it('does not ask about an edit instruction with nothing to edit', () => {
+    expect(worthAsking('tighten this up', EMPTY_WITH_SCREEN)).toBe(false)
+  })
+})
+
+describe('route — the offline fallback knows about compose', () => {
+  it('routes a reply to compose when the window was read', () => {
+    expect(
+      route('reply saying it is on the way', {
+        hasSelection: false,
+        hasFieldText: false,
+        hasScreen: true
+      })
+    ).toEqual({ kind: 'compose', instruction: 'reply saying it is on the way' })
+  })
+
+  it('types it when there is no window to reply to', () => {
+    expect(
+      route('reply saying it is on the way', {
+        hasSelection: false,
+        hasFieldText: false,
+        hasScreen: false
+      })
+    ).toMatchObject({ kind: 'dictate' })
+  })
+
+  /**
+   * Compose is checked before the `nothingToEdit` gate. Checking it after would
+   * make it unreachable in exactly the case it exists for.
+   */
+  it('prefers compose over an edit of the half-written text', () => {
+    expect(
+      route('reply to this', { hasSelection: false, hasFieldText: true, hasScreen: true })
+    ).toMatchObject({ kind: 'compose' })
   })
 })

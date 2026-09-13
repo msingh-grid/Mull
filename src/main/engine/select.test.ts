@@ -82,6 +82,7 @@ describe('EngineHolder', () => {
       ready: async () => ({ kind: 'ready' }),
       classify: async () => ({ kind: 'dictate' as const }),
       transform: async () => ({ text: '' }),
+      compose: async () => ({ text: '' }),
       plan: async () => ({ steps: [], context: null }),
       dispose: async () => {
         disposed += 1

@@ -26,6 +26,7 @@ function engineThat(options: FakeEngineOptions = {}): Engine & { asked: Classify
       return options.answer ?? { kind: 'dictate' }
     },
     transform: async () => ({ text: '' }),
+    compose: async () => ({ text: '' }),
     plan: async () => ({ steps: [], context: null })
   }
 }
@@ -174,6 +175,7 @@ describe('IntentRouter — the fallback', () => {
         throw new Error('and so does classify')
       },
       transform: async () => ({ text: '' }),
+      compose: async () => ({ text: '' }),
       plan: async () => ({ steps: [], context: null })
     }
     const decision = await new IntentRouter({ engine }).decide(INPUT)
@@ -223,4 +225,202 @@ describe('IntentRouter — words that could not be an instruction', () => {
       expect(engine.asked.length).toBe(1)
     })
   }
+})
+
+/**
+ * Compose (M5a) — the route that needs no text in the field, only something on
+ * screen to answer.
+ */
+describe('IntentRouter — composing a reply', () => {
+  const WINDOW = {
+    app: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack' },
+    windowTitle: '#terms-doc',
+    blocks: [
+      {
+        role: 'AXStaticText',
+        text: 'can you confirm the redlines by EOD?',
+        label: null,
+        focused: false,
+        selected: false
+      }
+    ],
+    truncated: false,
+    image: null,
+    imageReason: 'not-requested',
+    chars: 36,
+    harvestMs: 11
+  }
+
+  const EMPTY_COMPOSER = {
+    ...INPUT,
+    transcript: 'reply saying I will have them by five',
+    fieldText: null,
+    context: WINDOW
+  }
+
+  it('routes a reply into an empty composer, which M4.1 would have typed', async () => {
+    const engine = engineThat({
+      answer: { kind: 'compose', instruction: 'say the redlines will be there by five' }
+    })
+
+    const decision = await new IntentRouter({ engine }).decide(EMPTY_COMPOSER)
+
+    expect(decision.by).toBe('model')
+    expect(decision.route).toEqual({
+      kind: 'compose',
+      instruction: 'say the redlines will be there by five'
+    })
+  })
+
+  it('asks, even though the field is empty', async () => {
+    const engine = engineThat()
+    await new IntentRouter({ engine }).decide(EMPTY_COMPOSER)
+    expect(engine.asked.length).toBe(1)
+  })
+
+  /**
+   * The invariant survives the narrowing. An empty box plus ordinary speech is
+   * still the fast path, screenshot or no screenshot.
+   */
+  it('still types ordinary speech into an empty box without asking', async () => {
+    const engine = engineThat()
+    const decision = await new IntentRouter({ engine }).decide({
+      ...EMPTY_COMPOSER,
+      transcript: 'and I will send the deck tonight'
+    })
+
+    expect(decision.by).toBe('fast-path')
+    expect(engine.asked).toEqual([])
+  })
+
+  /**
+   * A compose with nothing to compose from would be a card proposing text
+   * invented out of nothing — which is the one thing this app must not do.
+   */
+  it('refuses to compose when it cannot see anything', async () => {
+    const engine = engineThat({
+      answer: { kind: 'compose', instruction: 'reply politely' }
+    })
+    const decision = await new IntentRouter({ engine }).decide({
+      ...INPUT,
+      transcript: 'reply to this',
+      fieldText: 'half a sentence',
+      context: null
+    })
+    expect(decision.route).toMatchObject({ kind: 'dictate' })
+  })
+
+  it('sends the window text to the classifier, but never the picture', async () => {
+    const engine = engineThat()
+    await new IntentRouter({ engine }).decide({
+      ...EMPTY_COMPOSER,
+      context: {
+        ...WINDOW,
+        image: {
+          mediaType: 'image/jpeg' as const,
+          dataBase64: 'AAAA',
+          width: 1400,
+          height: 900,
+          bytes: 1024
+        },
+        imageReason: null
+      }
+    })
+    // Classification is already p50 4.2s on the subscription lane; an image
+    // would make the one call the user waits through blind even slower. The
+    // text arrives, the picture is stripped before the request is built.
+    expect(engine.asked[0]?.context?.blocks).toHaveLength(1)
+    expect(engine.asked[0]?.context?.image).toBeNull()
+  })
+})
+
+/**
+ * Giving up on a classifier that cannot keep up (M5a).
+ *
+ * A timeout is the worst outcome available: the user waits the whole budget and
+ * then receives the answer the local rules had instantly. Measured on the
+ * subscription lane with window context attached — warm p50 5.4s, max 17.2s,
+ * against a 4.5s budget — that is not an edge case, it is the common case. The
+ * classifications themselves were right 6/6, so this is the harness being the
+ * wrong shape for the critical path, not the model being wrong.
+ *
+ * Same discipline `InsertionService` already applies to a strategy an app
+ * proves it does not support: stop trying it, and remember.
+ */
+describe('IntentRouter — an engine that cannot answer in time', () => {
+  function slowEngine(): Engine & { asked: ClassifyRequest[] } {
+    return engineThat({
+      takes: 60,
+      answer: { kind: 'edit', target: 'document', instruction: 'never arrives' }
+    })
+  }
+
+  it('stops asking after two timeouts, and stops waiting with it', async () => {
+    const engine = slowEngine()
+    const router = new IntentRouter({ engine, timeoutMs: 10 })
+
+    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+
+    const third = await router.decide(INPUT)
+    expect(third.by).toBe('rules')
+    expect(third.fallbackReason).toBe('too-slow')
+    // The engine is not even consulted, which is the whole point: two
+    // utterances to learn, none after that.
+    expect(engine.asked.length).toBe(2)
+  })
+
+  it('does not give up on an engine that is merely erroring', async () => {
+    // A rate limit or a dropped connection is a different problem and may clear
+    // on its own; only a lane that is structurally too slow gets demoted.
+    const engine = engineThat({ answer: new Error('rate limited') })
+    const router = new IntentRouter({ engine })
+
+    await router.decide(INPUT)
+    await router.decide(INPUT)
+    await router.decide(INPUT)
+
+    expect(engine.asked.length).toBe(3)
+  })
+
+  it('forgets the moment the engine is swapped', async () => {
+    const engine = slowEngine()
+    const router = new IntentRouter({ engine, timeoutMs: 10 })
+    await router.decide(INPUT)
+    await router.decide(INPUT)
+    expect((await router.decide(INPUT)).fallbackReason).toBe('too-slow')
+
+    // Signing in with an API key is exactly this: a lane that answers in a
+    // fraction of the time the harness takes.
+    router.reset()
+    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+    expect(engine.asked.length).toBe(3)
+  })
+
+  it('a single answer in time clears the count', async () => {
+    let slow = true
+    const engine: Engine & { asked: ClassifyRequest[] } = {
+      asked: [],
+      name: 'sometimes',
+      model: null,
+      ready: async () => ({ kind: 'ready' }),
+      classify: async (request) => {
+        engine.asked.push(request)
+        if (slow) await new Promise((resolve) => setTimeout(resolve, 60))
+        return { kind: 'dictate' }
+      },
+      transform: async () => ({ text: '' }),
+      compose: async () => ({ text: '' }),
+      plan: async () => ({ steps: [], context: null })
+    }
+    const router = new IntentRouter({ engine, timeoutMs: 20 })
+
+    await router.decide(INPUT)
+    slow = false
+    await router.decide(INPUT)
+    slow = true
+    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+    expect((await router.decide(INPUT)).fallbackReason).toBe('timed-out')
+    expect((await router.decide(INPUT)).fallbackReason).toBe('too-slow')
+  })
 })

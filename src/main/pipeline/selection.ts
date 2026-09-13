@@ -64,12 +64,18 @@ export interface FocusSnapshot {
 }
 
 export interface EditTarget {
-  kind: 'selection' | 'document' | 'reference'
+  /**
+   * `draft` is the M5a addition and the odd one out: it replaces nothing. There
+   * is no `before`, `text` is empty, and the result is inserted at the caret.
+   * It is what a compose produces — a reply written from the conversation on
+   * screen rather than from any text the user pointed at.
+   */
+  kind: 'selection' | 'document' | 'reference' | 'draft'
   app: { bundleId: string; name: string } | null
   /** Meaningful for `document` only; the other two write by selection. */
   start: number
   length: number
-  /** Never empty — an edit with nothing to act on is not a target. */
+  /** What will be replaced. Empty only for `draft`, which replaces nothing. */
   text: string
   /**
    * May a keystroke strategy (paste, type) be used to write this?
@@ -223,8 +229,26 @@ export function hasEditableText(snapshot: FocusSnapshot): {
  */
 export function editTarget(
   snapshot: FocusSnapshot,
-  kind: 'selection' | 'document'
+  kind: 'selection' | 'document' | 'draft'
 ): EditTargetResult {
+  if (kind === 'draft') {
+    // A draft needs somewhere to land, and that is the only requirement — there
+    // is nothing to read back, nothing to preserve, nothing that can have
+    // moved. If AX cannot see a focused field the insertion chain will still
+    // paste at the caret, which is why this does not refuse on `field`.
+    return {
+      ok: true,
+      target: {
+        kind: 'draft',
+        app: snapshot.app,
+        start: 0,
+        length: 0,
+        text: '',
+        keystrokesSafe: true
+      }
+    }
+  }
+
   if (kind === 'selection') {
     const selection = snapshot.selection
     if (!selection?.text) {
@@ -313,6 +337,11 @@ export async function stillMatches(
       return { ok: false, reason: 'different-app' }
     }
   }
+
+  // A draft replaces nothing, so nothing can have changed under it. The app
+  // check above is the whole guard: it must still be the window the reply was
+  // written for.
+  if (target.kind === 'draft') return { ok: true }
 
   if (target.kind !== 'document') {
     // Re-read it the way it was found, so a selection held outside the focused

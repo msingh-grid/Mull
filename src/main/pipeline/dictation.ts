@@ -336,8 +336,14 @@ export class DictationPipeline {
       const routed = await this.decide(text)
       let hint: string | null = null
 
-      if (routed?.route.kind === 'edit' && this.deps.sculpt) {
-        const target = editTarget(routed.snapshot, routed.route.target)
+      if (
+        (routed?.route.kind === 'edit' || routed?.route.kind === 'compose') &&
+        this.deps.sculpt
+      ) {
+        const target = editTarget(
+          routed.snapshot,
+          routed.route.kind === 'compose' ? 'draft' : routed.route.target
+        )
         if (target.ok) {
           // Idle before handing off: the lane owns the panel from here, and a
           // new utterance must be able to interrupt it.

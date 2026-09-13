@@ -50,6 +50,18 @@ export interface TransformResult {
 }
 
 /**
+ * Write something new from what is on screen.
+ *
+ * No `text`, and that absence is the whole difference from `transform`: there
+ * is nothing to rewrite and nothing to preserve. The material is `context`.
+ */
+export interface ComposeRequest {
+  instruction: string
+  app: { bundleId: string; name: string } | null
+  context?: ScreenContext | null
+}
+
+/**
  * What the classifier is shown: what was said, and what is on screen to say it
  * about. Never called when there is neither a selection nor field text — see
  * the fast path in `src/main/pipeline/router.ts`.
@@ -82,7 +94,16 @@ export interface ClassifyRequest {
  */
 export type ClassifiedIntent =
   | { kind: 'dictate' }
-  | { kind: 'edit'; target: 'selection' | 'document'; instruction: string }
+  | { kind: 'edit'; target: 'selection' | 'document'; instruction: string; send?: boolean }
+  /**
+   * Write something new from what is on screen — a reply, a summary, an answer.
+   *
+   * The third route, and structurally different from the other two: there is no
+   * `before`. An edit rewrites text that exists; a compose produces text that
+   * does not, out of the conversation the user is looking at. It lands at the
+   * caret.
+   */
+  | { kind: 'compose'; instruction: string; send?: boolean }
 
 export interface PlanRequest {
   instruction: string
@@ -116,6 +137,12 @@ export interface Engine {
    * the difference between an instrument that is working and one that is hung.
    */
   transform(request: TransformRequest, onPartial?: (text: string) => void): Promise<TransformResult>
+  /**
+   * Draft something new. Same streaming contract as `transform` — the card
+   * fills in as it arrives — but the result replaces nothing, so what the user
+   * sees is all insertion.
+   */
+  compose(request: ComposeRequest, onPartial?: (text: string) => void): Promise<TransformResult>
   plan(request: PlanRequest): Promise<PlanResult>
   dispose?(): Promise<void>
 }

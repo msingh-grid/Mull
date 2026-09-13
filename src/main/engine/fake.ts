@@ -1,5 +1,6 @@
 import type {
   ClassifiedIntent,
+  ComposeRequest,
   Engine,
   EngineState,
   PlanRequest,
@@ -30,6 +31,10 @@ export const CANONICAL_SAMPLE = {
     'I’m so sorry to bother you again, but I was just wondering if maybe we still need your sign-off on the terms doc whenever you get a chance, no rush at all.',
   after: 'Following up: we still need your sign-off on the terms doc by Friday.'
 } as const
+
+/** The same sample's other half: what a drafted reply looks like (M5a). */
+export const CANONICAL_DRAFT =
+  'Confirmed — the redlines are with legal now, you’ll have them by five.'
 
 /**
  * Hedges, longest first so the greedy pass takes the biggest bite. These are
@@ -103,6 +108,28 @@ export class FakeEngine implements Engine {
       }
     }
 
+    return { text }
+  }
+
+  /**
+   * A plausible reply, streamed the same way. It never reads the context — the
+   * fake exists so the HUD can be developed without an engine, and inventing a
+   * reply from a real conversation is precisely the judgement it must not fake.
+   */
+  async compose(
+    request: ComposeRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    const text = CANONICAL_DRAFT
+    if (onPartial) {
+      const words = text.split(/(\s+)/)
+      let sofar = ''
+      for (const word of words) {
+        sofar += word
+        onPartial(sofar)
+        if (this.chunkMs > 0) await this.sleep(this.chunkMs)
+      }
+    }
     return { text }
   }
 

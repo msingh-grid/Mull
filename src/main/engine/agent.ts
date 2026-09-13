@@ -2,6 +2,7 @@ import { query, type Options, type Query, type SDKUserMessage } from '@anthropic
 import type {
   ClassifiedIntent,
   ClassifyRequest,
+  ComposeRequest,
   Engine,
   EngineState,
   PlanRequest,
@@ -17,9 +18,11 @@ import {
   parseClassification
 } from './classify'
 import {
+  COMPOSE_SYSTEM_PROMPT,
   EDIT_SYSTEM_PROMPT,
   cleanEditOutput,
   cleanEditPartial,
+  composeContent,
   editContent,
   type PromptBlock
 } from './prompts'
@@ -75,6 +78,7 @@ export class AgentEngine implements Engine {
   private readonly health: EngineHealth
   private readonly edit: AgentSession
   private readonly classifier: AgentSession
+  private readonly composer: AgentSession
 
   constructor(options: AgentEngineOptions) {
     this.model = options.model
@@ -97,6 +101,12 @@ export class AgentEngine implements Engine {
       model: CLASSIFIER_MODEL,
       systemPrompt: CLASSIFIER_SYSTEM_PROMPT
     })
+    this.composer = new AgentSession({
+      ...shared,
+      label: 'compose',
+      model: options.model,
+      systemPrompt: COMPOSE_SYSTEM_PROMPT
+    })
   }
 
   async ready(): Promise<EngineState> {
@@ -104,9 +114,14 @@ export class AgentEngine implements Engine {
   }
 
   /**
-   * Bring both subprocesses up before anyone is waiting on them. Safe to call
-   * repeatedly and safe to ignore — a cold session still works, it is just
+   * Bring the two hot subprocesses up before anyone is waiting on them. Safe to
+   * call repeatedly and safe to ignore — a cold session still works, it is just
    * slower once.
+   *
+   * The composer is deliberately **not** warmed. Every warm session is a Claude
+   * Code subprocess sitting in memory, and composing is much rarer than editing
+   * — a user who never asks for a reply should not pay for one. It spins up on
+   * first use and stays warm after that.
    */
   warm(): void {
     this.edit.warm()
@@ -145,6 +160,24 @@ export class AgentEngine implements Engine {
     }
   }
 
+  async compose(
+    request: ComposeRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    try {
+      const text = await this.composer.ask(
+        composeContent(request),
+        onPartial ? (partial) => onPartial(cleanEditPartial(partial)) : undefined
+      )
+      this.health.recover()
+      return { text: cleanEditOutput(text) }
+    } catch (err) {
+      this.health.degrade(err)
+      this.composer.reset()
+      throw err
+    }
+  }
+
   async plan(_request: PlanRequest): Promise<PlanResult> {
     throw new Error('Mull can’t plan commands yet.')
   }
@@ -152,6 +185,7 @@ export class AgentEngine implements Engine {
   async dispose(): Promise<void> {
     this.edit.reset()
     this.classifier.reset()
+    this.composer.reset()
   }
 }
 
