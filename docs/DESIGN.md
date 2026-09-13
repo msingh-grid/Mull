@@ -108,7 +108,16 @@ Primary = filled `--ins`; secondary = ghost with `--hairline`; destructive-confi
 Template glyph (monochrome, macOS-tinted): a small ink point. States: idle = hollow ring; listening = filled (system tint); working = filled + trailing dot; attention = filled with ochre dot badge. No custom colors in the menu bar beyond the badge.
 
 ### 6.8 Journal / Settings / Onboarding windows
-Normal windows on `--paper`; headings serif `--fs-title`; section rules `--hairline`; prose `--fs-body`. Onboarding steps are a numbered manuscript: one step per page, live-verified state shown as the plan card's step states (·/…/✓). These windows follow system appearance (light/dark). **The HUD follows system appearance too** (default); a "page in the dark" toggle (HUD stays paper-light in dark mode) may ship later as a setting — the token architecture supports it via `data-theme="light"` scoped to the HUD window.
+Normal windows on `--paper`; headings serif `--fs-title`; section rules `--hairline`; prose `--fs-body`. Onboarding steps are a numbered manuscript: one step per page, live-verified state shown as the plan card's step states (·/…/✓).
+
+**Onboarding flow** (prototype: `design/onboarding.html`) — five pages, footer nav with ink progress ticks + "Step n of 5", Back ghost / Continue filled `--ins` with ⏎ hint:
+1. *A thinking layer for your Mac* — value prop + three tenets (on-device, preview-before-change, ⌥Z undo), with the real idle HUD embedded as an object so the user meets the instrument at rest.
+2. *Every change shows its marks* — a **live** diff-card demo (brief's canonical sample); Apply/Cancel actually work; undo promise printed in the same breath.
+3. *Three permissions, each with a reason* — Microphone / Accessibility / Input Monitoring as plan-style step rows (·/…/✓ state cells per §6.4), each stating its reason; each Grant button deep-links System Settings and the ✓ comes from live permission polling, never from the click. Secure-input pause disclosed up front via a warn chip.
+4. *Your ears, kept local* — whisper model download with mono tabular progress; copy frames privacy as architecture ("the transcript never crosses the network").
+5. *Try it here* — rehearsal sandbox: a practice note + real HUD; user holds ⌥Space (the actual hotkey once Input Monitoring is granted), speaks, watches idle → listening → thinking → applied, sees text land at the caret and the journal ghost with ⌥Z.
+
+Pages the user can't complete yet (permission denied, no model) never block Continue — rows stay `·` and the app degrades gracefully; onboarding is re-enterable from Settings. These windows follow system appearance (light/dark). **The HUD follows system appearance too** (default); a "page in the dark" toggle (HUD stays paper-light in dark mode) may ship later as a setting — the token architecture supports it via `data-theme="light"` scoped to the HUD window.
 
 ## 7. Interaction rules (from the brief, binding)
 

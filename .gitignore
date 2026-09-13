@@ -15,3 +15,6 @@ npm-debug.log*
 # local env
 .env
 .env.local
+
+# swift sidecar build artifacts
+mull-mac/.build/
