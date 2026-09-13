@@ -956,4 +956,28 @@ describe('DictationPipeline — the two keys', () => {
     expect(plain.states.flatMap((s) => s.chips ?? []).some((chip) => chip.id === 'ask')).toBe(false)
     plain.pipe.dispose()
   })
+
+  /**
+   * The privacy claim, tested rather than asserted in a comment.
+   *
+   * ⌥Space never reaches an engine, so a window transcript taken during one of
+   * those holds has no consumer — it would be harvested, photographed, held in
+   * memory and dropped. For a while it was, on every single press, which is a
+   * screenshot of the user's screen taken for nothing and recorded nowhere.
+   */
+  it('reads nothing at all while ⌥Space is held, not even the text', async () => {
+    const plain = harness({ sidecar: withThread('hello'), sculpt: true, context: 'text+screen' })
+    plain.pipe.begin('dictate')
+    await settle()
+    expect(plain.sidecar.calls.some((call) => call.method === 'windowContext')).toBe(false)
+    plain.pipe.dispose()
+  })
+
+  it('reads the window when Fn is held, which is the key that asks', async () => {
+    const asking = harness({ sidecar: withThread('hello'), sculpt: true, context: 'text+screen' })
+    asking.pipe.begin('instruct')
+    await settle()
+    expect(asking.sidecar.calls.some((call) => call.method === 'windowContext')).toBe(true)
+    asking.pipe.dispose()
+  })
 })

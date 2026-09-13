@@ -545,6 +545,7 @@ async function bootstrap(): Promise<void> {
       bench,
       insertion,
       journal: journal ?? undefined,
+      captures: captures ?? undefined,
       sculpt,
       navigate,
       intent,

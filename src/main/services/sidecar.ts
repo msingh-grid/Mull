@@ -475,6 +475,10 @@ export class FakeSidecar implements SidecarApi {
    * apart from typing into one), then Accessibility.
    */
   async windowContext(p: SidecarParams<'windowContext'>) {
+    // Recorded, because "was the window read at all" is a question tests ask —
+    // ⌥Space must not read one — and a fake that answers it silently would let
+    // that assertion pass for the wrong reason.
+    this.calls.push({ method: 'windowContext' })
     const app = (await this.frontmostApp()).app
     const empty = (reason: string) => ({
       app,
@@ -533,6 +537,7 @@ export class FakeSidecar implements SidecarApi {
    * transcribing its text, so secure input refuses the whole verb.
    */
   async uiTargets(_p: SidecarParams<'uiTargets'>) {
+    this.calls.push({ method: 'uiTargets' })
     const app = (await this.frontmostApp()).app
     const empty = (reason: string) => ({
       app,

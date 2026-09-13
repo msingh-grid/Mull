@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { ContextMode, ScreenContext } from '@shared/context'
 import type { HudChip } from '@shared/hud'
 import {
@@ -26,6 +27,7 @@ import type { IntentRouter } from './intent'
 import { wantsSend } from './router'
 import type { HotkeyIntent } from '../services/hotkey'
 import type { JournalStore } from '../store/journal'
+import type { CaptureStore } from '../store/captures'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 
 /**
@@ -114,6 +116,12 @@ export interface DictationDeps {
   screenContext?: () => { mode: ContextMode; excluded?: readonly string[] }
   /** Where applied and failed actions are written down. Optional in tests. */
   journal?: JournalStore
+  /**
+   * Where the evidence is kept. Paired with `journal`: any hold that reads the
+   * window must leave a row that can show what it read, or the capture is
+   * unaccountable.
+   */
+  captures?: CaptureStore
   onState: (state: HudState) => void
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   now?: () => number
@@ -216,12 +224,20 @@ export class DictationPipeline {
     // What is in front of the caret, read while the user is still speaking.
     // Taking it here is what lets the routing decision cost nothing extra, and
     // what lets the fast path know there is nothing to edit without asking.
+    // The window is read only when the user pressed the key that asks. ⌥Space
+    // types what it hears and never reaches an engine, so reading the screen
+    // during one of those holds — let alone photographing it — would be a
+    // capture with no consumer and no journal row to account for it.
     this.focusPromise = captureFocus(
       this.deps.sidecar,
       this.log,
-      this.deps.screenContext?.()
+      intent === 'instruct' ? this.deps.screenContext?.() : undefined
     )
     void this.focusPromise.then((snapshot) => {
+      // Kept whether or not the utterance is still live: if the window was read
+      // it has to be accountable, and an utterance abandoned halfway is exactly
+      // the case where nobody would otherwise look.
+      this.seeing = snapshot.context
       if (this.phase !== 'capturing') return
       // Announced before the user finishes speaking, so they can see what Mull
       // is looking at in time to change their mind (docs/DESIGN.md §7.5).
@@ -673,15 +689,33 @@ export class DictationPipeline {
    * Write one row. Journalling must never be the reason an utterance fails, so
    * a broken store is logged and swallowed — the text is already on screen.
    */
+  /**
+   * Write the row — with the receipt, if this utterance read anything.
+   *
+   * Fn can end in plain dictation: the classifier answers `dictate`, or it is
+   * unreachable and the fallback types the words. Those holds still read the
+   * window, so they still owe the user a row that says what was read. Without
+   * this, the only way to capture a screen with no journal entry to account for
+   * it would be to ask a question the model then declined to act on — which is
+   * exactly the case someone checking up on Mull would try first.
+   */
   private journal(draft: JournalDraft): JournalEntry | null {
     if (!this.deps.journal) return null
     try {
-      return this.deps.journal.append(draft)
+      const id = draft.id ?? randomUUID()
+      return this.deps.journal.append({
+        ...draft,
+        id,
+        capture: draft.capture ?? this.deps.captures?.save(id, this.seeing) ?? null
+      })
     } catch (err) {
       this.log('error', 'journal write failed', err)
       return null
     }
   }
+
+  /** The window this utterance read, if it read one. See `journal`. */
+  private seeing: ScreenContext | null = null
 
   dispose(): void {
     this.clearTimers()

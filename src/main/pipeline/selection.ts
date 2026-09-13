@@ -115,6 +115,16 @@ const CONTEXT_CHARS = 8_192
 export async function captureFocus(
   sidecar: SidecarApi,
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void,
+  /**
+   * How much of the screen this utterance may read. **Omit it entirely and
+   * nothing is read at all** — which is what ⌥Space does.
+   *
+   * That distinction is the whole privacy story of the capture. ⌥Space never
+   * consults an engine (see `DictationPipeline.decide`), so a window transcript
+   * taken during one of those holds has no consumer: it would be harvested,
+   * photographed, held in memory and dropped. For a while it was, on every
+   * single press, which is a screenshot of the user's screen taken for nothing.
+   */
   context?: { mode: ContextMode; excluded?: readonly string[] }
 ): Promise<FocusSnapshot> {
   const empty: FocusSnapshot = { app: null, selection: null, field: null, context: null }
