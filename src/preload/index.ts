@@ -51,6 +51,8 @@ export interface MullApi {
     recent: (limit?: number) => Promise<JournalEntryView[]>
     /** The diff marks for one entry; computed in main, never here. */
     detail: (id: string) => Promise<{ segments: DiffSegment[] } | null>
+    /** The screenshot kept for one entry, as a data URL. Null if there isn't one. */
+    capture: (id: string) => Promise<string | null>
     /** Same path as ⌥Z; the result message is also shown on the HUD. */
     undoLast: () => Promise<{ ok: boolean; message: string }>
     /** Undo one specific entry, with the same refusal gates as ⌥Z. */
@@ -140,6 +142,7 @@ const api: MullApi = {
     recent: (limit) => ipcRenderer.invoke(IPC.journalRecent, limit) as Promise<JournalEntryView[]>,
     detail: (id) =>
       ipcRenderer.invoke(IPC.journalDetail, id) as Promise<{ segments: DiffSegment[] } | null>,
+    capture: (id) => ipcRenderer.invoke(IPC.journalCapture, id) as Promise<string | null>,
     undoLast: () =>
       ipcRenderer.invoke(IPC.journalUndo) as Promise<{ ok: boolean; message: string }>,
     undoEntry: (id) =>

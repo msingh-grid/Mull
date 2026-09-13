@@ -117,6 +117,14 @@ export const IPC = {
   journalUndoEntry: 'mull:journal:undo-entry',
   /** journal window -> main: the marks for one entry, diffed in main. */
   journalDetail: 'mull:journal:detail',
+  /**
+   * journal window -> main: the screenshot kept for one entry, as a data URL.
+   *
+   * Separate from `journalDetail` because it is a couple of hundred kilobytes
+   * and only wanted when a row is open and the user clicks to look. The
+   * transcript rides on the entry itself; only the picture costs anything.
+   */
+  journalCapture: 'mull:journal:capture',
   /** main -> journal window: the journal changed; re-read it. */
   journalChanged: 'mull:journal:changed',
 

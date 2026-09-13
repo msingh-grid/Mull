@@ -20,6 +20,97 @@ import './windows.css'
  * The expanded row is reflected in `?entry=` so a row can be linked to.
  */
 
+/**
+ * What Mull could see when it acted.
+ *
+ * The receipt, and it exists because of a complaint no one could settle from
+ * the outside: *"most of the time it refuses, saying it can only see headers,
+ * or sometimes the sidebar."* Either the words were in front of the model or
+ * they were not, and there was no way to find out which — the harvest went into
+ * a prompt and was gone.
+ *
+ * So this shows the transcript **exactly as it was sent**, not a fresh read:
+ * by now the user has clicked something and the window has moved on, so
+ * re-reading it would answer a different question.
+ *
+ * The picture is loaded only when asked for. It is a couple of hundred
+ * kilobytes and it is a photograph of someone's screen; neither is a thing to
+ * put on screen by default in a window they opened to check an undo.
+ */
+function WhatMullSaw({ entry }: { entry: JournalEntryView }): JSX.Element | null {
+  const capture = entry.capture
+  const [image, setImage] = useState<string | null>(null)
+  const [showing, setShowing] = useState(false)
+
+  useEffect(() => {
+    if (!showing || image) return
+    let cancelled = false
+    void window.mull?.journal.capture(entry.id).then((data) => {
+      if (!cancelled) setImage(data ?? null)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [showing, image, entry.id])
+
+  if (!capture) return null
+
+  return (
+    <details className="saw">
+      <summary>
+        What Mull saw · {capture.blocks} blocks · {capture.chars} chars
+        {capture.truncated ? ' · cut short' : ''} · {capture.harvestMs}ms
+      </summary>
+
+      {capture.windowTitle ? <div className="saw-title">{capture.windowTitle}</div> : null}
+
+      {capture.text ? (
+        <pre className="saw-text">{capture.text}</pre>
+      ) : (
+        <div className="why">Mull read no text from this window.</div>
+      )}
+
+      <div className="saw-shot">
+        {capture.imageFile ? (
+          showing ? (
+            image ? (
+              <img src={image} alt="The window Mull was looking at" />
+            ) : (
+              <div className="why">…</div>
+            )
+          ) : (
+            <button type="button" className="link" onClick={() => setShowing(true)}>
+              Show the screenshot ({Math.round((capture.imageBytes ?? 0) / 1024)} KB)
+            </button>
+          )
+        ) : (
+          // The two cases that look identical in an empty box and are not at
+          // all the same thing. Only one of them is the user's to fix.
+          <div className="why">{describeNoPicture(capture.imageReason)}</div>
+        )}
+      </div>
+    </details>
+  )
+}
+
+/** Why there is no picture, in a sentence that says whose problem it is. */
+function describeNoPicture(reason: string | null): string {
+  switch (reason) {
+    case 'no-screen-recording':
+      return 'No screenshot — Mull doesn’t have Screen Recording permission. System Settings → Privacy & Security → Screen Recording, then relaunch Mull.'
+    case 'not-requested':
+      return 'No screenshot — this action didn’t need one.'
+    case 'not-retaken-mid-plan':
+      return 'No screenshot — the picture is taken once, when you speak, not on every step of a plan.'
+    case 'capture-failed':
+      return 'Mull has the permission but the capture failed.'
+    case 'could-not-save':
+      return 'A screenshot was taken and sent, but Mull couldn’t keep a copy.'
+    default:
+      return reason ? `No screenshot — ${reason}.` : 'No screenshot.'
+  }
+}
+
 function Detail({ entry }: { entry: JournalEntryView }): JSX.Element {
   const [segments, setSegments] = useState<DiffSegment[] | null>(null)
 
@@ -45,6 +136,7 @@ function Detail({ entry }: { entry: JournalEntryView }): JSX.Element {
         <div className="card-body">This entry didn’t change any text.</div>
       )}
       {affordance.why ? <div className="why">{affordance.why}</div> : null}
+      <WhatMullSaw entry={entry} />
       <div className="meta">
         <span>{new Date(entry.at).toLocaleString()}</span>
         <span>strategy: {entry.strategyUsed ?? 'none'}</span>

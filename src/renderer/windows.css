@@ -192,6 +192,65 @@ body.window {
   font-variant-numeric: tabular-nums;
 }
 
+/* "What Mull saw" — a receipt, kept folded. It is a transcript of someone's
+   window and a photograph of their screen, so it opens only when asked. */
+.saw {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.saw > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.saw > summary::-webkit-details-marker { display: none; }
+.saw > summary::before {
+  content: '▸ ';
+  color: var(--ink-3);
+}
+.saw[open] > summary::before { content: '▾ '; }
+.saw > summary:hover { color: var(--ink-2); }
+.saw-title {
+  margin-top: 8px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+/* The transcript is shown verbatim, wrapped rather than clipped: the whole
+   point is to be able to read what was and was not in it. */
+.saw-text {
+  margin-top: 6px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 9px;
+  background: var(--paper-recessed);
+  border-radius: var(--r-inner);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.saw-shot { margin-top: 8px; }
+.saw-shot img {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-inner);
+}
+.saw-shot .link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ins);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 .toast {
   margin-top: 10px;
   font-size: 12px;

@@ -9,6 +9,7 @@ import {
   systemPreferences
 } from 'electron'
 import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import log from 'electron-log/main'
 import {
   CAPTURE_SAMPLE_RATE,
@@ -21,7 +22,14 @@ import {
 import type { PlanStep } from '@shared/hud'
 import type { JournalEntryView } from '@shared/types'
 import type { SidecarApi } from '@shared/sidecar-api'
-import { benchPath, credentialsPath, journalPath, resolveSidecarPath, settingsPath } from './locations'
+import {
+  benchPath,
+  capturesDir,
+  credentialsPath,
+  journalPath,
+  resolveSidecarPath,
+  settingsPath
+} from './locations'
 import { Bench } from './bench'
 import { selectAsrProvider } from './asr'
 import { FakeSidecar, SidecarClient } from './services/sidecar'
@@ -41,6 +49,7 @@ import { PermissionsService } from './services/permissions'
 import { downloadModel, modelStatus } from './services/model'
 import { SettingsStore } from './store/settings'
 import { JournalStore } from './store/journal'
+import { CaptureStore } from './store/captures'
 import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
 import { SculptLane } from './pipeline/sculpt'
@@ -82,6 +91,7 @@ let engine: EngineHolder | null = null
 let demoEngine: Engine | null = null
 let credentials: CredentialsStore | null = null
 let detectedLogin = false
+let captures: CaptureStore | null = null
 let sculpt: SculptLane | null = null
 let navigate: NavigateLane | null = null
 let intent: IntentRouter | null = null
@@ -480,11 +490,14 @@ async function bootstrap(): Promise<void> {
 
   // The edit lane. Its HUD port reads `pipeline` and `hud` at call time, which
   // is what lets it be built before the pipeline that hands work to it.
+  captures = new CaptureStore({ dir: capturesDir(), log: logFn })
+
   sculpt = new SculptLane({
     engine,
     sidecar,
     insertion,
     journal: journal ?? undefined,
+    captures,
     bench,
     onJournalChanged: notifyJournalChanged,
     log: logFn,
@@ -688,6 +701,26 @@ ipcMain.handle(IPC.journalDetail, (_event, id: string) => {
   const entry = journal?.get(id)
   if (!entry) return null
   return { segments: diffText(entry.before ?? '', entry.after ?? '').segments }
+})
+
+/**
+ * The picture Mull was looking at when it acted.
+ *
+ * Read from disk on demand rather than carried on every entry: it is a couple
+ * of hundred kilobytes and the list query would pay for it on every row to show
+ * a one-line summary. Null when there never was one, when it has been pruned
+ * away, or when the file has gone — and the row says which, from the reason
+ * stored beside it.
+ */
+ipcMain.handle(IPC.journalCapture, (_event, id: string) => {
+  const entry = journal?.get(id)
+  const file = captures?.path(entry?.capture?.imageFile ?? null)
+  if (!file) return null
+  try {
+    return `data:image/jpeg;base64,${readFileSync(file).toString('base64')}`
+  } catch {
+    return null
+  }
 })
 
 ipcMain.handle(IPC.journalUndo, () => runUndo())

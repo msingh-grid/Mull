@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { ScreenContext } from '@shared/context'
 import type { CardCommit, HudAction, HudCard, HudChip } from '@shared/hud'
 import type { HudState } from '@shared/ipc'
@@ -9,6 +10,7 @@ import { describeInsertionReason, type InsertionService } from '../services/inse
 import { sendChord, type SendChord } from '../services/send-table'
 import { describeSend, Sender, type SendOutcome } from '../services/sender'
 import type { JournalStore } from '../store/journal'
+import type { CaptureStore } from '../store/captures'
 import { summarise } from './cleanup'
 import { diffText } from './diff'
 import { describeTargetCheck, stillMatches, type EditTarget } from './selection'
@@ -81,6 +83,12 @@ export interface SculptDeps {
   insertion: InsertionService
   hud: SculptHud
   journal?: JournalStore
+  /**
+   * Where the evidence is kept: the window transcript that went into the
+   * prompt, and the picture if there was one. Optional — without it a row
+   * simply cannot explain itself, which is what every row did before M5a.
+   */
+  captures?: CaptureStore
   bench?: Bench
   onJournalChanged?: () => void
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
@@ -141,6 +149,8 @@ export class SculptLane {
   }
 
   async run(request: SculptRequest): Promise<void> {
+    // The receipt for every row this request writes. See `journal`.
+    this.seeing = request.context ?? null
     const session: Session = {
       answered: false,
       failure: null,
@@ -781,10 +791,27 @@ export class SculptLane {
   }
 
   /** Journalling must never be why an edit fails; the text is already placed. */
+  /**
+   * Write the row, and staple the receipt to it.
+   *
+   * `seeing` is the window this request was decided from, stashed on the way in
+   * rather than threaded through ten call sites. The lane is serial — one
+   * request at a time, by construction — so there is exactly one answer to
+   * "what was Mull looking at" at any moment.
+   *
+   * The id is minted here rather than inside `append` because the picture is
+   * filed under it, and a screenshot that cannot be tied back to a row is a
+   * screenshot of nothing in particular.
+   */
   private journal(draft: JournalDraft): JournalEntry | null {
     if (!this.deps.journal) return null
     try {
-      const entry = this.deps.journal.append(draft)
+      const id = draft.id ?? randomUUID()
+      const entry = this.deps.journal.append({
+        ...draft,
+        id,
+        capture: draft.capture ?? this.deps.captures?.save(id, this.seeing) ?? null
+      })
       this.deps.onJournalChanged?.()
       return entry
     } catch (err) {
@@ -792,6 +819,9 @@ export class SculptLane {
       return null
     }
   }
+
+  /** The window the request in flight was decided from. See `journal`. */
+  private seeing: ScreenContext | null = null
 
   private record(
     request: SculptRequest,
