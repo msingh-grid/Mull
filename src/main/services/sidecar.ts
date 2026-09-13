@@ -589,8 +589,11 @@ export class FakeSidecar implements SidecarApi {
    * changing the list after the scan.
    */
   retarget(targets: Array<string | UiTarget>): void {
+    // The scan itself is *not* forgotten. The real sidecar still holds its
+    // element handles after the window moves — what changes is what they read
+    // back as, which is how a press learns it is looking at somebody else now.
+    // Clearing it here would report `stale-scan` and hide the case worth testing.
     this.liveTargets = targets
-    this.scanned = null
   }
   private liveTargets: Array<string | UiTarget> | null = null
   /** The list as of the last scan — what a press is entitled to expect. */
@@ -808,8 +811,21 @@ export class FakeSidecar implements SidecarApi {
   async secureInputState() {
     return { active: this.overrides.secureInput ?? false, pid: null }
   }
-  async activateApp() {
-    return { activated: false, reason: 'not-running' }
+  /**
+   * Which apps the pretend machine is running. Null means "all of them".
+   *
+   * This returned a flat refusal until Stage 5, which was fine while nobody
+   * called it — `activateApp` has been in the contract since M2 and had no
+   * caller until `restore`. A test that wants the refusal sets this to `[]`.
+   */
+  running: string[] | null = null
+  activated: string[] = []
+  async activateApp(p: SidecarParams<'activateApp'>) {
+    if (this.running !== null && !this.running.includes(p.bundleId)) {
+      return { activated: false, reason: 'not-running' }
+    }
+    this.activated.push(p.bundleId)
+    return { activated: true, reason: null }
   }
   async keyChord(p: SidecarParams<'keyChord'>) {
     this.chords.push({ key: p.key, modifiers: [...(p.modifiers ?? [])] })
