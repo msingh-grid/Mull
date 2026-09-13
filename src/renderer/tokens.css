@@ -1,7 +1,200 @@
-/*
- * Design tokens — EMPTY PLACEHOLDER.
- *
- * Filled in Phase D3 from docs/DESIGN.md once the user picks a direction
- * board (see docs/PLAN.md, Phase D). Do not add ad-hoc styles here; every
- * value in this file must come from the codified design system.
- */
+/* ============================================================================
+   MULL DESIGN TOKENS — "Studio Paper" (D3, frozen 2026-09-13)
+   Source of truth: docs/DESIGN.md. Extracted from the winning D2 board
+   (design/directions/02-studio-paper.html). Components style through these
+   custom properties only — no raw hex in component CSS.
+
+   Theme model (three states):
+   - bare :root           → light ("paper"), the lead appearance
+   - prefers-color-scheme → dark ("lamplit"), unless data-theme="light"
+   - [data-theme="dark"]  → explicit dark, beats OS setting
+   All contrast pairs verified ≥ 4.5:1 at 11–13px (see docs/DESIGN.md §9).
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* -- surfaces ---------------------------------------------------------- */
+  --paper:          #faf7ef;  /* HUD + panel ground                         */
+  --paper-bright:   #fffdf6;  /* fresh page: diff card, wells, chip ground  */
+  --paper-recessed: #f1ecdf;  /* inset wells, kbd keys                      */
+  --ink:            #2b2418;  /* primary text, intent-chip stamp            */
+  --ink-2:          #5b523f;  /* secondary text                             */
+  --ink-3:          #766c55;  /* tertiary: meta, ghosts, labels (AA @ 11px) */
+  --hairline:       rgba(43, 36, 24, 0.18);
+  --hairline-soft:  rgba(43, 36, 24, 0.10);
+  --selection:      rgba(39, 79, 142, 0.20);
+
+  /* -- semantic hues (the only color spend) ------------------------------ */
+  --del:       #b23a2e;                    /* red pencil: deletions         */
+  --del-wash:  rgba(178, 58, 46, 0.10);
+  --del-line:  rgba(178, 58, 46, 0.72);    /* strikethrough stroke          */
+  --ins:       #274f8e;                    /* writing ink: insertions, Apply,
+                                              command/plan accents          */
+  --ins-wash:  rgba(39, 79, 142, 0.09);
+  --ins-line:  rgba(39, 79, 142, 0.42);    /* insertion underline           */
+  --warn:      #9a6410;                    /* ochre pencil: warnings        */
+  --warn-wash: rgba(154, 100, 16, 0.11);
+  --warn-edge: rgba(154, 100, 16, 0.42);
+  --mem:       #4f6b33;                    /* reading green: memory cites   */
+  --mem-wash:  rgba(79, 107, 51, 0.10);
+  --mem-edge:  rgba(79, 107, 51, 0.42);
+
+  /* -- on-color (text over ink / ins fills) ------------------------------ */
+  --on-ink: #fffdf6;
+  --on-ins: #fffdf6;
+  --ins-hover: #1f4177;
+
+  /* -- type: three voices, strictly cast --------------------------------- */
+  --serif: ui-serif, "New York", "Iowan Old Style", "Palatino", Charter, Georgia, serif;
+  --sans:  -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono:  ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+  --fs-transcript: 13px;    /* serif · the human's words                    */
+  --fs-diff:       12px;    /* mono  · diff + plan body, leading 1.7        */
+  --fs-chip:       11px;    /* sans 600                                     */
+  --fs-journal:    12px;    /* sans 400, tabular numerals for metadata      */
+  --fs-label:      11px;    /* sans 700, uppercase, tracked                 */
+  --fs-kbd:        11px;    /* mono 500                                     */
+  --fs-body:       13.5px;  /* sans · settings/onboarding prose             */
+  --fs-title:      21px;    /* serif 600 · window headings                  */
+  --track-label:   0.10em;
+  --lh-transcript: 1.45;
+  --lh-diff:       1.7;
+  --lh-body:       1.55;
+
+  /* -- geometry ----------------------------------------------------------- */
+  --r-panel: 10px;          /* HUD, windows, stages                         */
+  --r-inner: 7px;           /* diff/plan card, journal row                  */
+  --r-chip:  5px;           /* chips, buttons                               */
+  --r-kbd:   3px;
+  --hud-w:   480px;
+  --hud-pad: 13px 15px 12px;
+  --diff-max-h: 150px;      /* only scrollable region inside the HUD        */
+
+  /* -- elevation ----------------------------------------------------------- */
+  --shadow-hud: 0 0 0 0.5px rgba(43, 36, 24, 0.38),
+                0 18px 44px rgba(35, 26, 12, 0.32),
+                0 4px 12px rgba(35, 26, 12, 0.16);
+  --shadow-row: 0 2px 8px rgba(35, 26, 12, 0.07);
+  --shadow-window: 0 0 0 0.5px rgba(30, 24, 14, 0.22),
+                   0 16px 40px rgba(35, 26, 12, 0.24);
+
+  /* -- motion --------------------------------------------------------------
+     Rules: opacity/transform only; nothing blocks; nothing bounces.        */
+  --t-fast:  140ms;         /* hovers, chip entrances                       */
+  --t-med:   220ms;         /* card entrances, state swaps                  */
+  --ease-out: cubic-bezier(0.22, 0.7, 0.3, 1);
+  --pulse-period: 1.6s;     /* listening orb ping                           */
+  --wave-period:  0.95s;    /* waveform tick cycle                          */
+}
+
+/* ── Dark: "lamplit" — same desk after sundown. Hues keep their exact roles
+     at raised luminance; hairlines lighten; shadows deepen. ─────────────── */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper:          #211c13;
+    --paper-bright:   #2a2418;
+    --paper-recessed: #1a1610;
+    --ink:            #ece5d3;
+    --ink-2:          #bfb397;
+    --ink-3:          #96896c;
+    --hairline:       rgba(236, 229, 211, 0.20);
+    --hairline-soft:  rgba(236, 229, 211, 0.11);
+    --selection:      rgba(143, 176, 232, 0.28);
+
+    --del:       #e0796b;
+    --del-wash:  rgba(224, 121, 107, 0.13);
+    --del-line:  rgba(224, 121, 107, 0.72);
+    --ins:       #8fb0e8;
+    --ins-wash:  rgba(143, 176, 232, 0.12);
+    --ins-line:  rgba(143, 176, 232, 0.48);
+    --warn:      #d2a04f;
+    --warn-wash: rgba(210, 160, 79, 0.13);
+    --warn-edge: rgba(210, 160, 79, 0.45);
+    --mem:       #a3bf7d;
+    --mem-wash:  rgba(163, 191, 125, 0.12);
+    --mem-edge:  rgba(163, 191, 125, 0.45);
+
+    --on-ink: #211c13;      /* intent stamp inverts: cream fill, dark text  */
+    --on-ins: #211c13;
+    --ins-hover: #a3bfef;
+
+    --shadow-hud: 0 0 0 0.5px rgba(0, 0, 0, 0.65),
+                  0 18px 48px rgba(0, 0, 0, 0.55),
+                  0 4px 14px rgba(0, 0, 0, 0.35);
+    --shadow-row: 0 2px 8px rgba(0, 0, 0, 0.30);
+    --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.55),
+                     0 16px 40px rgba(0, 0, 0, 0.50);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper:          #211c13;
+  --paper-bright:   #2a2418;
+  --paper-recessed: #1a1610;
+  --ink:            #ece5d3;
+  --ink-2:          #bfb397;
+  --ink-3:          #96896c;
+  --hairline:       rgba(236, 229, 211, 0.20);
+  --hairline-soft:  rgba(236, 229, 211, 0.11);
+  --selection:      rgba(143, 176, 232, 0.28);
+
+  --del:       #e0796b;
+  --del-wash:  rgba(224, 121, 107, 0.13);
+  --del-line:  rgba(224, 121, 107, 0.72);
+  --ins:       #8fb0e8;
+  --ins-wash:  rgba(143, 176, 232, 0.12);
+  --ins-line:  rgba(143, 176, 232, 0.48);
+  --warn:      #d2a04f;
+  --warn-wash: rgba(210, 160, 79, 0.13);
+  --warn-edge: rgba(210, 160, 79, 0.45);
+  --mem:       #a3bf7d;
+  --mem-wash:  rgba(163, 191, 125, 0.12);
+  --mem-edge:  rgba(163, 191, 125, 0.45);
+
+  --on-ink: #211c13;
+  --on-ins: #211c13;
+  --ins-hover: #a3bfef;
+
+  --shadow-hud: 0 0 0 0.5px rgba(0, 0, 0, 0.65),
+                0 18px 48px rgba(0, 0, 0, 0.55),
+                0 4px 14px rgba(0, 0, 0, 0.35);
+  --shadow-row: 0 2px 8px rgba(0, 0, 0, 0.30);
+  --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.55),
+                   0 16px 40px rgba(0, 0, 0, 0.50);
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: var(--selection); color: var(--ink); }
+button { font: inherit; cursor: pointer; }
+button:focus-visible,
+[tabindex]:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--ins);
+  outline-offset: 2px;
+}
+
+/* The HUD window itself is transparent; the panel paints its own paper. */
+body.hud-window { background: transparent; }
+
+/* ── Reduced motion ──────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
