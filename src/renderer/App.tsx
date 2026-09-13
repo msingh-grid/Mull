@@ -22,6 +22,20 @@ import { Hud } from './components/Hud'
  */
 export default function App(): JSX.Element {
   const [state, setState] = useState<HudState>(IDLE_HUD_STATE)
+  /**
+   * A clock, ticking only while something is in flight.
+   *
+   * Main pushes state on change, and a wait is precisely the period when
+   * nothing changes — so without this the working line's counter would freeze
+   * at the moment it was set, which is worse than having no counter at all.
+   * Stopped when there is no stage, so an idle HUD re-renders never.
+   */
+  const [tick, setTick] = useState(() => Date.now())
+  useEffect(() => {
+    if (!state.stage) return
+    const timer = setInterval(() => setTick(Date.now()), 500)
+    return () => clearInterval(timer)
+  }, [state.stage])
   const bridge = window.mull as typeof window.mull | undefined
   const dragging = useRef(false)
 
@@ -107,7 +121,7 @@ export default function App(): JSX.Element {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        <Hud state={state} onAction={onAction} />
+        <Hud state={state} now={tick} onAction={onAction} />
       </div>
     </div>
   )

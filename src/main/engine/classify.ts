@@ -54,7 +54,15 @@ Choose "edit" when the words ask for something to be done TO the text shown to y
 
 Choose "compose" when the words ask for something NEW to be written, using what is on screen — "reply to this", "draft an answer", "reply to Priya saying I'll have it by five", "write back declining". There is nothing to rewrite; the result goes where the cursor is. Only choose it when a <screen> block is shown, because a reply needs something to reply to.
 
-Choose "navigate" when the words ask about something that is NOT on the screen you were shown, but is plainly somewhere else in the same application — another conversation, another channel, another message, another file. "What did Priya say about the terms doc" with no Priya anywhere in <screen>; "check the eng-platform channel"; "what was in the thread about pricing". The tool will go and look, then come back. Only choose it when a <screen> block is shown and what the user is asking about is genuinely absent from it — if the answer is right there, this is "compose".
+Choose "navigate" ONLY when the user names a specific place or person that is not in <screen> and would have to be opened first — "what did Priya say about the terms doc" with no Priya anywhere on screen, "check the eng-platform channel", "open the thread about pricing". The tool will go and look, then come back.
+
+This is the only route that presses buttons in someone else's application, so it is the last resort and never the safe guess. Three rules, and all three must hold:
+- The user named somewhere else. "This", "these", "here" and "my emails" mean what is already on screen — those are never "navigate".
+- What they named is genuinely absent from <screen>.
+- Reading it would actually answer them.
+Asking you to look over, triage, review or pick out things from what is already visible is "compose", not "navigate" — even when doing it exhaustively would mean opening each one. "Look at my emails and tell me which need a reply" with an inbox on screen is answered from the list that is already there; the user wants an answer, not to be taken somewhere.
+
+If you are weighing "navigate" against "compose", the answer is "compose": working from the window the user is already looking at is always the cheaper mistake.
 
 "send" counts as asking for something to be written when a message follows it: "send that I'll have the code done in two days", "send them a written message about the delay". The user is describing a message they want written and sent, not speaking one. But "send the deck tonight" and "send Priya the numbers" name a thing being sent rather than a message to write, and those are dictation.
 

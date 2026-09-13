@@ -225,6 +225,11 @@ export class SculptLane {
     // Started before the card is opened so the first token can land in it, but
     // never awaited here — the card must be on screen (and escapable) while
     // the engine is still writing.
+    const stage = (text: string | null): void => {
+      this.deps.hud.update({ stage: text, stageAt: text ? this.now() : null })
+    }
+    stage(request.target.kind === 'draft' ? 'writing a draft' : 'editing')
+
     const trace = this.deps.trace?.()
     trace?.step(request.target.kind === 'draft' ? 'compose.ask' : 'edit.ask', {
       engine: this.deps.engine.name,
@@ -243,6 +248,9 @@ export class SculptLane {
         // its own line, because it is the one the user perceives and it is
         // nowhere near the total.
         trace?.step('engine.firstToken', { ms: session.firstTokenMs })
+        // The word changes the moment the first token lands, which is the
+        // cheapest possible proof that something is happening.
+        stage('writing')
       }
       const { segments, changes } = diffText(before, partial)
       this.deps.hud.updateCard({ kind: 'diff', app: cardApp, segments, changes, commit })
@@ -278,6 +286,7 @@ export class SculptLane {
         // handler awaits this promise too, and an unhandled rejection from a
         // keypress nobody is awaiting would take the process down.
         session.failure = err instanceof Error ? err.message : String(err)
+        stage(null)
         trace?.fail('engine.failed', { ms: this.now() - session.startedAt }, err)
         this.log('error', 'sculpt: the engine failed', err)
         return before
@@ -285,6 +294,7 @@ export class SculptLane {
 
     this.deps.hud.openCard({ kind: 'diff', app: cardApp, segments: [], changes: 0, commit }, (action) => {
       session.answered = true
+      stage(null)
       trace?.step('card.action', { action, whileStreaming: true })
       void this.answer(action, request, stream, session)
     })

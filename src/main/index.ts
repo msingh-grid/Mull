@@ -527,7 +527,8 @@ async function bootstrap(): Promise<void> {
     hud: {
       openCard: (card, onAction) => hud?.openCard(card, onAction),
       updateCard: (card) => hud?.updateCard(card),
-      closeCard: () => hud?.closeCard()
+      closeCard: () => hud?.closeCard(),
+      update: (patch) => void pipeline?.patchState(patch)
     },
     trace: () => pipeline?.currentTrace() ?? new Trace(),
     log: logFn

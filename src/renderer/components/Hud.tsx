@@ -41,8 +41,23 @@ export function Hud({
           )}
           {view.transcript.caret ? <span className="caret" aria-hidden="true" /> : null}
         </div>
-        <div className="state-label">{view.label}</div>
+        <div className="state-label">
+          {view.label}
+          {/* The seconds tick in the label's own column rather than in the
+              working line below, so a long wait grows a number instead of
+              shifting the layout under it. */}
+          {view.stage?.seconds ? (
+            <span className="state-elapsed"> {view.stage.seconds}s</span>
+          ) : null}
+        </div>
       </div>
+
+      {view.stage ? (
+        <div className="stage" role="status" aria-live="polite">
+          <span className="stage-pulse" aria-hidden="true" />
+          {view.stage.text}
+        </div>
+      ) : null}
 
       <Chips chips={view.chips} />
 

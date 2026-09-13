@@ -74,28 +74,32 @@ export interface IntentRouterDeps {
 /**
  * How long to wait for the decision.
  *
- * **This was 4.5s and it was wrong**, and the way it was wrong is worth
- * recording because the number outlived its reason.
+ * This number has been wrong twice, in opposite directions, and both times the
+ * cause was measuring the symptom instead of the disease.
  *
- * It was set in M4.1, when classification ran on *every* utterance that might
- * be an instruction — so the budget was really "how long may ordinary dictation
- * be held up", and 4.5s was already generous for that. M5b took that job away
- * from it: ⌥Space dictates with no engine in the loop at all, and only Fn asks.
- * Nobody moved the number.
+ * It was 4.5s, set in M4.1 when classification ran on every utterance that
+ * might be an instruction — so the budget was really "how long may ordinary
+ * dictation be held up". M5b took that job away (⌥Space dictates with no engine
+ * in the loop; only Fn asks) and nobody moved the number. A real session log
+ * then showed `fallbackReason: 'too-slow'` on fourteen consecutive utterances:
+ * the classifier timed out twice, demoted itself for the session, and the local
+ * rules made every decision after that. The model had never decided anything.
  *
- * The consequence, from a real session log: `fallbackReason: 'too-slow'` on
- * fourteen consecutive utterances. The measured subscription lane is p50 5.4s,
- * max 17.2s with window context attached — so it timed out twice, demoted
- * itself for the rest of the session, and every decision after that was made by
- * the local rules. The model had never decided anything. Navigation, which only
- * the classifier can choose, was unreachable by construction.
+ * The fix at that point was to raise it to 20s, because the lane measured p50
+ * 5.4s / max 17.2s. That was treating the symptom. The real cause was that the
+ * Agent SDK ran **extended thinking** on every turn, and nothing had ever told
+ * it not to — a hundred tokens of deliberation in front of
+ * `{"intent":"compose"}`, on a choice between four words:
  *
- * 20s covers the measured distribution with headroom. It is silence the user
- * asked for by pressing a second key, and the HUD is showing THINKING
- * throughout — which is a different thing from a pause nobody requested.
- * The API-key lane answers in a fraction of it and simply finishes early.
+ *   thinking: harness default    p50 20086ms   min 3866ms   max 33438ms
+ *   thinking: disabled           p50   954ms   min  845ms   max  1219ms
+ *
+ * See `thinking: { type: 'disabled' }` in `engine/agent.ts`. With that in
+ * place, 8s is roughly six times the measured worst case — enough for a cold
+ * session or a bad minute, and short enough that falling back is still a
+ * decision rather than a hang.
  */
-const DEFAULT_TIMEOUT_MS = 20_000
+const DEFAULT_TIMEOUT_MS = 8_000
 
 /**
  * How many timeouts before Mull stops asking this engine.

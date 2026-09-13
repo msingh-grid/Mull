@@ -228,7 +228,33 @@ interface Turn {
   onPartial?: (text: string) => void
   resolve: (text: string) => void
   reject: (error: Error) => void
+  /** Fires if the turn goes quiet. Cleared on every token and on settle. */
+  watchdog: NodeJS.Timeout | null
 }
+
+/**
+ * How long a turn may say nothing before Mull gives up on it.
+ *
+ * Every engine turn used to have **no deadline at all**. Only the classifier
+ * was raced, and only because `IntentRouter` wrapped it from outside — so a
+ * wedged Claude Code subprocess left the HUD on THINKING and a card empty
+ * forever, with no error, no journal row and nothing to press. "It gets stuck
+ * and never gives a final response" is exactly that, and there was no code path
+ * that could ever have ended it.
+ *
+ * Two numbers rather than one total, because a slow answer and a dead one look
+ * completely different on the wire and only one of them deserves to be killed:
+ *
+ *   FIRST_TOKEN  nothing at all has arrived. The subprocess is starting, the
+ *                request is in flight, or it is wedged. Generous — a cold
+ *                session plus a long screen transcript is genuinely slow.
+ *   STALL        tokens were arriving and then stopped. Much tighter: a model
+ *                mid-sentence does not pause for half a minute.
+ *
+ * A model that keeps streaming is never interrupted, however long it takes.
+ */
+const FIRST_TOKEN_TIMEOUT_MS = 60_000
+const STALL_TIMEOUT_MS = 25_000
 
 interface AgentSessionOptions {
   label: string
@@ -273,7 +299,9 @@ class AgentSession {
     const prompts = this.ensure()
 
     return new Promise<string>((resolve, reject) => {
-      this.turn = { text: '', onPartial, resolve, reject }
+      const turn: Turn = { text: '', onPartial, resolve, reject, watchdog: null }
+      this.turn = turn
+      this.arm(turn, FIRST_TOKEN_TIMEOUT_MS, 'said nothing')
       prompts.push({
         type: 'user',
         message: { role: 'user', content },
@@ -281,6 +309,34 @@ class AgentSession {
         session_id: ''
       } as SDKUserMessage)
     })
+  }
+
+  /**
+   * Set the turn's deadline, replacing any previous one.
+   *
+   * On expiry the session is thrown away as well as the turn. A subprocess that
+   * has stopped answering is not one to hand the next utterance to, and the
+   * next `ask` will start a fresh one — the same discipline `transform` already
+   * applies on failure.
+   */
+  private arm(turn: Turn, ms: number, what: string): void {
+    if (turn.watchdog) clearTimeout(turn.watchdog)
+    turn.watchdog = setTimeout(() => {
+      if (this.turn !== turn) return
+      this.turn = null
+      this.options.log(
+        'warn',
+        `engine: the ${this.options.label} turn ${what} for ${Math.round(ms / 1000)}s — giving up`
+      )
+      this.reset()
+      turn.reject(new Error(`Mull's engine stopped responding after ${Math.round(ms / 1000)}s.`))
+    }, ms)
+  }
+
+  /** A turn has settled, one way or the other. Stop watching it. */
+  private static settle(turn: Turn): void {
+    if (turn.watchdog) clearTimeout(turn.watchdog)
+    turn.watchdog = null
   }
 
   reset(): void {
@@ -302,6 +358,21 @@ class AgentSession {
       model: this.options.model,
       includePartialMessages: true,
       permissionMode: 'default',
+      /**
+       * No extended thinking, on any of these lanes.
+       *
+       * Every turn Mull makes is a single-shot transformation with the whole
+       * problem already on the page: rewrite this passage, draft this reply,
+       * pick an index out of a numbered list. None of them is the kind of
+       * multi-step reasoning the budget exists for — and all of them are things
+       * a person is sitting and waiting for.
+       *
+       * Left at the harness default it is pure latency. The classifier is the
+       * clearest case: a hundred output tokens of deliberation in front of
+       * `{"intent":"compose"}` is most of the measured p50 of 5.4s, spent on a
+       * choice between four words.
+       */
+      thinking: { type: 'disabled' },
       env: this.options.oauthToken
         ? { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: this.options.oauthToken }
         : { ...process.env }
@@ -330,6 +401,10 @@ class AgentSession {
             const turn = this.turn
             if (!turn) continue
             turn.text += event.delta.text
+            // Tokens are the proof of life. Once they start, the tighter stall
+            // budget applies — a model mid-sentence does not go quiet for half
+            // a minute, and one that keeps streaming is never interrupted.
+            this.arm(turn, STALL_TIMEOUT_MS, 'went quiet')
             turn.onPartial?.(turn.text)
           }
           continue
@@ -339,6 +414,7 @@ class AgentSession {
           const turn = this.turn
           this.turn = null
           if (!turn) continue
+          AgentSession.settle(turn)
           if (message.subtype === 'success' && !message.is_error) {
             // `result` is the turn's final text; the accumulated deltas are
             // the fallback for a CLI that does not send partials.
@@ -366,6 +442,7 @@ class AgentSession {
   private failInFlight(error: Error): void {
     const turn = this.turn
     this.turn = null
+    if (turn) AgentSession.settle(turn)
     turn?.reject(error)
   }
 }

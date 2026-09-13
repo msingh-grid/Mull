@@ -59,6 +59,24 @@ export interface HudState {
   lastAction: HudLastAction | null
   /** Classification chips, in display order. Empty in idle. */
   chips: HudChip[]
+  /**
+   * What Mull is doing right now, in three or four words.
+   *
+   * THINKING can last twenty seconds — a cold session, a long screen
+   * transcript, a classifier answering at its measured p50 of 5.4s — and for
+   * all of it the panel used to say one unchanging word. That is
+   * indistinguishable from a hang, and the user reasonably reported it as one.
+   *
+   * So this is the same story the log's trace tells, in the one place the user
+   * is already looking: "reading the window", "asking the model", "writing".
+   * Null outside a working phase.
+   */
+  stage: string | null
+  /**
+   * When the current stage began, epoch ms. The panel counts up from it past a
+   * couple of seconds, so a long wait is visibly a wait rather than a freeze.
+   */
+  stageAt: number | null
   /** The open proposal, if any. Nothing applies until the user says so. */
   card: HudCard | null
 }
@@ -71,6 +89,8 @@ export const IDLE_HUD_STATE: HudState = {
   notice: null,
   lastAction: null,
   chips: [],
+  stage: null,
+  stageAt: null,
   card: null
 }
 

@@ -189,8 +189,21 @@ export class DictationPipeline {
       partial: false,
       app: null,
       notice,
-      chips: []
+      chips: [],
+      stage: null,
+      stageAt: null
     })
+  }
+
+  /**
+   * Say what is happening, in three or four words, and start its clock.
+   *
+   * Paired with the trace deliberately: the log line and the panel line are the
+   * same fact told to two audiences, so they cannot drift into disagreeing
+   * about what Mull is doing.
+   */
+  private stage(text: string | null): void {
+    this.setState({ stage: text, stageAt: text ? this.now() : null })
   }
 
   /**
@@ -341,6 +354,7 @@ export class DictationPipeline {
     this.phase = 'processing'
     const captureMs = this.now() - this.startedAt
     this.trace.step('hold.end', { heldMs: captureMs })
+    this.stage('transcribing')
     void this.process(captureMs)
   }
 
@@ -376,6 +390,7 @@ export class DictationPipeline {
     this.trace.step('asr.start', { seconds: audioSeconds, provider: this.deps.asr.name })
 
     this.setState({ phase: 'thinking', partial: false })
+    this.stage('transcribing')
 
     try {
       const asrStart = this.now()
@@ -396,6 +411,10 @@ export class DictationPipeline {
         said: text
       })
       this.setState({ transcript: text })
+      // Only the instruct key waits on anything past this point; ⌥Space is
+      // already on its way to the caret, and naming a stage it will leave in
+      // forty milliseconds is a flicker, not information.
+      if (this.intent === 'instruct') this.stage('working out what you meant')
 
       // Second secure-input check: focus can move while we were transcribing.
       const secure = await this.deps.sidecar.secureInputState({})
@@ -446,6 +465,7 @@ export class DictationPipeline {
       if (routed?.route.kind === 'send' && this.deps.sculpt) {
         this.phase = 'idle'
         this.trace.step('lane.send', { chars: routed.snapshot.field?.text.length ?? 0 })
+        this.stage('reading the box')
         await this.deps.sculpt.sendOnly({
           app: this.state.app ?? routed.snapshot.app,
           text: routed.snapshot.field?.text ?? '',
@@ -461,6 +481,7 @@ export class DictationPipeline {
       if (routed?.route.kind === 'navigate' && this.deps.navigate) {
         this.phase = 'idle'
         this.trace.step('lane.navigate', { goal: routed.route.goal })
+        this.stage('planning')
         await this.deps.navigate.propose({
           goal: routed.route.goal,
           transcript: text,
@@ -488,6 +509,7 @@ export class DictationPipeline {
           // Idle before handing off: the lane owns the panel from here, and a
           // new utterance must be able to interrupt it.
           this.phase = 'idle'
+          this.stage(routed.route.kind === 'compose' ? 'writing a draft' : 'editing')
           this.trace.step(`lane.${routed.route.kind}`, {
             target: target.target.kind,
             before: target.target.text.length,
@@ -573,6 +595,7 @@ export class DictationPipeline {
         return
       }
 
+      this.stage(null)
       this.trace.step('insert.done', {
         strategy: inserted.strategyUsed,
         verified: inserted.verified,

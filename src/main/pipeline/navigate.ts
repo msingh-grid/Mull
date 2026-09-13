@@ -69,6 +69,8 @@ export interface NavigateDeps {
     openCard(card: PlanCard, onAction: (action: 'apply' | 'apply-send' | 'cancel') => void): void
     updateCard(card: PlanCard): void
     closeCard(): void
+    /** Optional: the working line under the label, while a step runs. */
+    update?(patch: { stage: string | null; stageAt: number | null }): void
   }
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   sleep?: (ms: number) => Promise<void>
@@ -157,6 +159,8 @@ export class NavigateLane {
 
     const draw = (): void =>
       this.deps.hud.updateCard(card({ steps: [...steps], running: true, note }))
+    const stage = (text: string | null): void =>
+      this.deps.hud.update?.({ stage: text, stageAt: text ? Date.now() : null })
     draw()
 
     for (let taken = 0; taken < this.maxSteps; taken += 1) {
@@ -167,6 +171,7 @@ export class NavigateLane {
       }
 
       const scanMs = trace.mark()
+      stage(`looking · step ${taken + 1}`)
       scan = await this.scan()
       trace.step('scan', {
         step: taken + 1,
@@ -179,6 +184,7 @@ export class NavigateLane {
         taken === 0 && request.context ? request.context : await this.read(request)
 
       const askMs = trace.mark()
+      stage(`choosing · step ${taken + 1}`)
       let step: NavStep
       try {
         step = await this.deps.engine.navigate({
@@ -214,6 +220,7 @@ export class NavigateLane {
       steps.push({ id, verb: verbOf(step), object: objectOf(step), state: 'running' })
       draw()
 
+      stage(describeStep(step))
       const result = await this.deps.executor.perform(step, scan, {
         app: request.app,
         goal: request.goal
@@ -243,7 +250,9 @@ export class NavigateLane {
     // Always. After a finished plan, a cancelled one and a failed one alike —
     // leaving someone's Slack on a stranger's DM is rude in a way no amount of
     // correctness elsewhere makes up for.
+    stage('putting the window back')
     const back = await this.deps.executor.restore(origin, await this.scan())
+    stage(null)
     trace.step('plan.restore', { ok: back.ok, detail: back.detail, note })
     this.deps.hud.updateCard(
       card({ steps: [...steps], running: false, note: `${note} · ${back.detail}` })

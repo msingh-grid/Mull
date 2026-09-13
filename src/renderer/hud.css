@@ -161,6 +161,44 @@
 .hud.is-preview .state-label { color: var(--ink); }
 .hud.is-blocked .state-label,
 .hud.is-error .state-label { color: var(--warn); }
+/* Not bold, not tracked: the seconds are a reassurance, not a deadline. */
+.state-elapsed {
+  font-weight: 500;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+/* The working line — what Mull is doing right now, under the transcript and
+   above the chips. Present only while something is in flight; a card on screen
+   is its own answer to the same question. */
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  padding-left: 2px;
+  font-size: var(--fs-chip);
+  color: var(--ink-3);
+}
+/* A slow pulse rather than a spinner: the panel already carries one moving
+   thing (the waveform), and two competing rhythms read as busy rather than
+   alive. */
+.stage-pulse {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ins);
+  animation: stage-pulse 1.6s ease-in-out infinite;
+}
+@keyframes stage-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-pulse { animation: none; opacity: 0.7; }
+}
 
 /* ── Last action ghost (idle only) ───────────────────────────────────────── */
 .last-action {

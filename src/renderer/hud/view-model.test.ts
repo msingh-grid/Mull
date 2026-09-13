@@ -113,3 +113,50 @@ describe('relativeTime', () => {
     expect(relativeTime(now + 5_000, now)).toBe('just now')
   })
 })
+
+/**
+ * The working line (docs/DESIGN.md §6.1).
+ *
+ * THINKING can sit unchanged for twenty seconds — a cold session, a long screen
+ * transcript, a classifier answering at its measured p50 of 5.4s. An unchanging
+ * word for that long is indistinguishable from a hang, and it was reported as
+ * one. This is the same fact the log's trace carries, in the place the user is
+ * already looking.
+ */
+describe('the working line', () => {
+  const working = (patch: Partial<HudState>): HudState =>
+    state({ phase: 'thinking', stage: 'asking the model', stageAt: 1_000, ...patch })
+
+  it('says what Mull is doing while it is doing it', () => {
+    expect(hudView(working({}), 1_000).stage).toEqual({
+      text: 'asking the model',
+      seconds: null
+    })
+  })
+
+  /**
+   * A counter that starts at 0s on every step turns a fast pipeline into a
+   * flickering stopwatch, which reads as less confident rather than more.
+   */
+  it('holds the seconds back until there is actually a wait', () => {
+    expect(hudView(working({}), 2_400).stage?.seconds).toBeNull()
+    expect(hudView(working({}), 2_600).stage?.seconds).toBe(1)
+    expect(hudView(working({}), 12_000).stage?.seconds).toBe(11)
+  })
+
+  it('says nothing when nothing is in flight', () => {
+    expect(hudView(state({ phase: 'idle' })).stage).toBeNull()
+  })
+
+  /** A card on screen is its own answer to "what is happening". */
+  it('gives way to a card rather than describing the past', () => {
+    expect(hudView(working({ card: diffCard }), 9_000).stage).toBeNull()
+  })
+
+  it('survives a stage with no clock rather than counting from 1970', () => {
+    expect(hudView(working({ stageAt: null }), 9_000).stage).toEqual({
+      text: 'asking the model',
+      seconds: null
+    })
+  })
+})

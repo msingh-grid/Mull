@@ -19,6 +19,19 @@ export interface HudView {
   /** The accessible state (§8) — decoration is aria-hidden, this is not. */
   label: string
   transcript: { text: string; ghost: boolean; caret: boolean }
+  /**
+   * The working line: what Mull is doing, and how long it has been doing it.
+   *
+   * THINKING alone can sit unchanged for twenty seconds — a cold session, a
+   * long screen transcript, a classifier answering at its measured p50 — and an
+   * unchanging word is indistinguishable from a hang. The user reported it as
+   * one, correctly.
+   *
+   * The seconds appear only once there is something to wait for. A counter that
+   * starts at 0s on every step turns a fast pipeline into a flickering
+   * stopwatch, which reads as less confident rather than more.
+   */
+  stage: { text: string; seconds: number | null } | null
   chips: HudChip[]
   card: HudCard | null
   lastAction: { summary: string; when: string; undoable: boolean } | null
@@ -46,6 +59,7 @@ export function hudView(state: HudState, now = Date.now()): HudView {
     stateClass: stateClassFor(state),
     label,
     transcript: transcriptFor(state),
+    stage: stageFor(state, now),
     chips: state.chips,
     card,
     // The ghost row is an idle-only affordance: while Mull is working, the
@@ -60,6 +74,21 @@ export function hudView(state: HudState, now = Date.now()): HudView {
         : null,
     notice: state.notice,
     interactive: card !== null
+  }
+}
+
+/** Past this, a wait is worth counting out loud. Below it, it is just latency. */
+const COUNT_AFTER_MS = 1_500
+
+function stageFor(state: HudState, now: number): HudView['stage'] {
+  if (!state.stage) return null
+  // A card on screen is its own answer to "what is happening"; the working
+  // line under it would be describing the past.
+  if (state.card) return null
+  const elapsed = state.stageAt === null ? 0 : Math.max(0, now - state.stageAt)
+  return {
+    text: state.stage,
+    seconds: elapsed >= COUNT_AFTER_MS ? Math.floor(elapsed / 1000) : null
   }
 }
 
