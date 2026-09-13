@@ -330,6 +330,13 @@
   opacity: 0.75;
 }
 
+/* The bare-send card quotes the user's own text back at them. Not diff ink —
+   nothing here is Mull's writing, and it must not look like a proposal. */
+.card-body.is-quote {
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+
 /* Every destructive-ish action states its undo path in the same breath (§7.2). */
 .undo-promise {
   margin-left: auto;

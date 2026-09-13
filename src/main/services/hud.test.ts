@@ -198,3 +198,39 @@ describe('HudController — the second commit', () => {
     expect(onAction).not.toHaveBeenCalledWith('apply-send')
   })
 })
+
+describe('HudController — the bare-send card', () => {
+  const sendCard = {
+    kind: 'send' as const,
+    app: 'Slack',
+    text: 'I will get the code done in 2 days.',
+    commit: { label: 'Send', hint: '⏎', warning: 'sending can’t be undone' }
+  }
+
+  it('claims ⌘⏎ for it', () => {
+    const h = harness()
+    h.controller.openCard(sendCard, () => {})
+    expect(h.shortcuts.has('CommandOrControl+Return')).toBe(true)
+  })
+
+  /**
+   * Mull holds Return globally while a card is open. On this card ⏎ means
+   * nothing — but releasing it would let the press reach Slack and send the
+   * very message the card is still asking about, so it stays claimed and is
+   * swallowed.
+   */
+  it('swallows ⏎ rather than letting it through or closing the card', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(sendCard, onAction)
+
+    h.fire('Return')
+    expect(onAction).not.toHaveBeenCalled()
+    expect(h.controller.hasCard).toBe(true)
+    expect(h.shortcuts.has('Return')).toBe(true)
+
+    // esc and ⌘⏎ still work.
+    h.fire('CommandOrControl+Return')
+    expect(onAction).toHaveBeenCalledWith('apply-send')
+  })
+})

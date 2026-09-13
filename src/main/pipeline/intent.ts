@@ -1,6 +1,6 @@
 import type { ScreenContext } from '@shared/context'
 import type { ClassifiedIntent, Engine } from '../engine/types'
-import { route, worthAsking, type Route, type RouteContext } from './router'
+import { justSend, route, worthAsking, type Route, type RouteContext } from './router'
 
 /**
  * IntentRouter — the one call the dictation loop makes to find out what the
@@ -138,6 +138,16 @@ export class IntentRouter {
       classifyMs: null,
       fallbackReason: null
     })
+
+    // "Send the message." Answered here, from the words alone, before any of
+    // the machinery below — there is nothing to write, so there is nothing to
+    // ask a model about, and the one utterance whose whole point is immediacy
+    // must not pay seconds for a classification. It is also, deliberately, a
+    // route the model cannot produce: `ClassifiedIntent` has no `send` variant,
+    // so nothing on screen can talk its way into a keystroke.
+    if (justSend(transcript) && context.hasFieldText) {
+      return { route: { kind: 'send' }, by: 'fast-path', classifyMs: null, fallbackReason: null }
+    }
 
     // One gate now, where there used to be two. It answers: could these words,
     // against what is actually on screen, be asking for anything at all? No

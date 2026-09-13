@@ -30,6 +30,8 @@ interface Harness {
   clock: { advance: (ms: number) => void }
   /** Everything the router handed to the edit lane. */
   sculpted: SculptRequest[]
+  /** Every bare-send card the router asked for. */
+  sends: Array<{ app: unknown; text: string; transcript: string }>
 }
 
 function harness(options: {
@@ -56,6 +58,7 @@ function harness(options: {
   })
 
   const sculpted: SculptRequest[] = []
+  const sends: Array<{ app: unknown; text: string; transcript: string }> = []
   // A classifier that answers whatever the test says, or an engine that is
   // down so the local rules have to decide.
   const engine: Engine = {
@@ -81,6 +84,9 @@ function harness(options: {
             run: async (request) => {
               sculpted.push(request)
               if (options.sculpt === 'throws') throw new Error('the engine exploded')
+            },
+            sendOnly: async (request) => {
+              sends.push(request)
             }
           }
         : undefined,
@@ -109,7 +115,8 @@ function harness(options: {
     rows,
     capture,
     clock: { advance: (ms) => { clockMs += ms } },
-    sculpted
+    sculpted,
+    sends
   }
 }
 
@@ -754,6 +761,106 @@ describe('DictationPipeline — the send wish comes off the transcript', () => {
     await utterance(h)
 
     expect(h.sculpted[0]?.send).toBe(false)
+    h.pipe.dispose()
+  })
+})
+
+/**
+ * The bug report, end to end.
+ *
+ * All three of these were said into a Slack composer and all three were typed
+ * verbatim, because `send` was not a verb Mull knew. The transcripts are copied
+ * out of the journal.
+ */
+describe('DictationPipeline — "send" reaches the right lane', () => {
+  const WRITTEN = 'I will get the code done in 2 days.'
+
+  const withText = (text: string): FakeSidecar =>
+    new FakeSidecar({
+      accessibility: true,
+      text,
+      caret: text.length,
+      selectionLength: 0,
+      context: ['Priya: any word on the code?']
+    })
+
+  async function utterance(h: Harness): Promise<void> {
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+  }
+
+  it('"send that I will get the code done in 2 days" composes, and asks to send', async () => {
+    const h = harness({
+      sidecar: withText(''),
+      transcript: 'Send that I will get the code done in 2 days.',
+      sculpt: true,
+      context: 'text',
+      classifies: {
+        kind: 'compose',
+        instruction: 'send that I will get the code done in 2 days'
+      }
+    })
+    await utterance(h)
+
+    expect(h.sculpted.length).toBe(1)
+    expect(h.sculpted[0]?.target.kind).toBe('draft')
+    expect(h.sculpted[0]?.send).toBe(true)
+    // Nothing was typed into the composer.
+    expect(h.sidecar.insertions).toEqual([])
+    h.pipe.dispose()
+  })
+
+  it('"send the message" opens the send card over what is already written', async () => {
+    const h = harness({
+      sidecar: withText(WRITTEN),
+      transcript: 'Send the message',
+      sculpt: true,
+      context: 'text'
+    })
+    await utterance(h)
+
+    expect(h.sends.length).toBe(1)
+    expect(h.sends[0]).toMatchObject({ text: WRITTEN, transcript: 'Send the message' })
+    expect(h.sculpted).toEqual([])
+    expect(h.sidecar.insertions).toEqual([])
+    h.pipe.dispose()
+  })
+
+  /**
+   * …and it costs nothing. A bare send never reaches the classifier, which is
+   * the difference between an instant keystroke and one that arrives after the
+   * user has already pressed the button themselves.
+   */
+  it('answers a bare send without asking the model', async () => {
+    const h = harness({
+      sidecar: withText(WRITTEN),
+      transcript: 'send it',
+      sculpt: true,
+      context: 'text',
+      // A classifier that would hang if it were ever consulted.
+      classifies: 'offline'
+    })
+    await utterance(h)
+
+    expect(h.sends.length).toBe(1)
+    h.pipe.dispose()
+  })
+
+  it('types "send the message" when the box is empty — those words were a sentence', async () => {
+    const h = harness({
+      sidecar: withText(''),
+      transcript: 'Send the message',
+      sculpt: true,
+      context: 'text',
+      classifies: { kind: 'dictate' }
+    })
+    await utterance(h)
+
+    expect(h.sends).toEqual([])
+    expect(h.sidecar.insertions).toEqual(['Send the message'])
     h.pipe.dispose()
   })
 })

@@ -1058,3 +1058,124 @@ describe('SculptLane — the ledger records the send separately', () => {
     expect(h.rows[0]?.sent).toBeUndefined()
   })
 })
+
+// ---------------------------------------------------------------------------
+// "Send the message" — the card over text that is already written.
+// ---------------------------------------------------------------------------
+
+describe('SculptLane — sendOnly', () => {
+  const WRITTEN = 'I will get the code done in 2 days.'
+
+  function bareHarness(
+    options: { chordEffect?: 'clears' | 'ignores' | 'refuses'; app?: typeof SLACK; text?: string } = {}
+  ): ReturnType<typeof harness> {
+    const app = options.app ?? SLACK
+    const text = options.text ?? WRITTEN
+    const sidecar = new FakeSidecar({
+      accessibility: true,
+      app: { ...app, pid: 7 },
+      text,
+      caret: text.length,
+      chordEffect: options.chordEffect ?? 'ignores'
+    })
+    const h = harness({ sidecar })
+    h.request.app = app
+    return h
+  }
+
+  const call = (h: ReturnType<typeof harness>, text = WRITTEN): Promise<void> =>
+    h.lane.sendOnly({ app: h.request.app, text, transcript: 'send the message' })
+
+  it('shows the text that is about to leave, and no Apply', async () => {
+    const h = bareHarness()
+    await call(h)
+
+    expect(h.hud.opens).toBe(1)
+    const card = h.hud.cards.at(-1)
+    expect(card).toMatchObject({ kind: 'send', app: 'Slack', text: WRITTEN })
+    expect((card as { commit: { hint: string } }).commit).toMatchObject({
+      label: 'Send',
+      hint: '⏎',
+      warning: 'sending can’t be undone'
+    })
+    // Nothing has happened yet. It is a proposal like every other card.
+    expect(h.sidecar.chords).toEqual([])
+  })
+
+  it('never writes any text — the words were a command, not a message', async () => {
+    const h = bareHarness({ chordEffect: 'clears' })
+    await call(h)
+    h.hud.respond('apply-send')
+    await settle()
+
+    expect(h.sidecar.insertions).toEqual([])
+    expect(h.sidecar.chords).toEqual([{ key: 'return', modifiers: [] }])
+  })
+
+  it('refuses in an app whose send chord Mull does not know', async () => {
+    const h = bareHarness({ app: { bundleId: 'com.apple.TextEdit', name: 'TextEdit' } })
+    await call(h)
+
+    expect(h.hud.opens).toBe(0)
+    expect(h.hud.announcements.at(-1)).toMatchObject({ phase: 'blocked' })
+    expect(h.hud.announcements.at(-1)?.notice).toContain('doesn’t know how to send in TextEdit')
+  })
+
+  it('refuses when the box is empty', async () => {
+    const h = bareHarness({ text: '' })
+    await call(h, '')
+
+    expect(h.hud.opens).toBe(0)
+    expect(h.hud.announcements.at(-1)?.notice).toBe('There’s nothing in the box to send.')
+  })
+
+  /**
+   * The card sits on screen for as long as the user takes to decide, and the
+   * composer is live the whole time. What leaves has to be what they approved.
+   */
+  it('re-reads the box before the keystroke and refuses if it moved', async () => {
+    const h = bareHarness({ chordEffect: 'clears' })
+    await call(h)
+    h.sidecar.text = `${WRITTEN} …and one more thing`
+
+    h.hud.respond('apply-send')
+    await settle()
+
+    expect(h.sidecar.chords).toEqual([])
+    expect(h.hud.announcements.at(-1)).toMatchObject({ phase: 'error' })
+    expect(h.hud.announcements.at(-1)?.notice).toContain('changed since Mull read it')
+  })
+
+  it('reports a chord that landed on nothing rather than claiming success', async () => {
+    const h = bareHarness({ chordEffect: 'ignores' })
+    await call(h)
+    h.hud.respond('apply-send')
+    await settle()
+
+    expect(h.hud.announcements.at(-1)).toMatchObject({ phase: 'error' })
+    expect(h.hud.announcements.at(-1)?.notice).toContain('press send yourself')
+    expect(h.journal.recent(10)[0]?.status).toBe('failed')
+  })
+
+  it('writes the send down, and esc writes that down too', async () => {
+    const sent = bareHarness({ chordEffect: 'clears' })
+    await call(sent)
+    sent.hud.respond('apply-send')
+    await settle()
+    expect(sent.journal.recent(10)[0]).toMatchObject({
+      status: 'applied',
+      summary: 'Sent · Slack',
+      undoable: false
+    })
+
+    const cancelled = bareHarness()
+    await call(cancelled)
+    cancelled.hud.respond('cancel')
+    await settle()
+    expect(cancelled.sidecar.chords).toEqual([])
+    expect(cancelled.journal.recent(10)[0]).toMatchObject({
+      status: 'cancelled',
+      summary: 'Send declined · Slack'
+    })
+  })
+})

@@ -7,6 +7,7 @@ import type { Bench } from '../bench'
 import type { Engine, EngineState } from '../engine/types'
 import { describeInsertionReason, type InsertionService } from '../services/insertion'
 import { sendChord, type SendChord } from '../services/send-table'
+import { describeSend, Sender, type SendOutcome } from '../services/sender'
 import type { JournalStore } from '../store/journal'
 import { summarise } from './cleanup'
 import { diffText } from './diff'
@@ -90,6 +91,8 @@ export interface SculptDeps {
 
 const INTENT_CHIP: HudChip = { kind: 'intent', label: 'Edit', id: 'intent' }
 const DRAFT_CHIP: HudChip = { kind: 'intent', label: 'Reply', id: 'intent' }
+/** A `cmd` chip, not an `intent` one: this utterance writes nothing. */
+const SEND_CHIP: HudChip = { kind: 'cmd', label: 'Send', id: 'intent' }
 
 /**
  * What this lane is doing, in the user's words.
@@ -100,35 +103,6 @@ const DRAFT_CHIP: HudChip = { kind: 'intent', label: 'Reply', id: 'intent' }
  */
 function laneNoun(target: EditTarget): 'Edit' | 'Reply' {
   return target.kind === 'draft' ? 'Reply' : 'Edit'
-}
-
-/**
- * What to tell the user about the send, in one sentence.
- *
- * Three outcomes, three sentences, and the middle one is the reason this
- * function exists: Mull must never say "sent" about something it did not watch
- * leave, and must never say "failed" about something that may well have gone.
- * Both mistakes cost the user a duplicate message or a missing one, and neither
- * is recoverable from inside this app.
- */
-function describeSend(outcome: SendOutcome, appName: string | null): string {
-  const where = appName ? ` in ${appName}` : ''
-  if (outcome.sent === true) return `Sent${where}.`
-  if (outcome.sent === 'unknown') {
-    return `Applied — Mull couldn’t confirm the send${where}. Check the window.`
-  }
-  switch (outcome.reason) {
-    case 'different-app':
-      return `You’ve switched apps — the text was applied, but nothing was sent.`
-    case 'chord-refused':
-      return `The text was applied, but Mull couldn’t press send${
-        outcome.detail ? ` (${outcome.detail})` : ''
-      }.`
-    case 'unchanged':
-      return `The text is in${where}, but it didn’t send — press send yourself.`
-    default:
-      return `The text was applied, but nothing was sent.`
-  }
 }
 
 /** State carried between `run` and the card's answer, which can arrive first. */
@@ -147,37 +121,23 @@ interface Session {
   chord: SendChord | null
 }
 
-/**
- * How long to let the app act on the send chord before reading the box back.
- *
- * The same shape of number as `insertion-table.ts`'s `settleMs`, and for the
- * same reason: the keystroke returns the instant the window server accepts it,
- * which says nothing about whether the app has done anything with it yet.
- * Reading too early would report "unchanged" on a send that was simply still in
- * flight, which is the one wrong answer that matters here — it would invite the
- * user to press send again on a message that had already gone.
- */
-const SEND_SETTLE_MS = 320
-
-/** What the read-back found. `unknown` is a real answer and is said out loud. */
-type SendOutcome =
-  | { sent: true }
-  | { sent: false; reason: 'no-chord' | 'different-app' | 'chord-refused'; detail: string | null }
-  /** The chord went in and the composer did not empty. Probably nothing happened. */
-  | { sent: false; reason: 'unchanged'; detail: null }
-  /** Mull could not read the box afterwards, so it will not claim either way. */
-  | { sent: 'unknown' }
-
 export class SculptLane {
   private readonly now: () => number
   private readonly log: NonNullable<SculptDeps['log']>
-  private readonly sleep: NonNullable<SculptDeps['sleep']>
+  private readonly sender: Sender
 
   constructor(private readonly deps: SculptDeps) {
     this.now = deps.now ?? (() => Date.now())
     this.log = deps.log ?? ((): void => {})
-    this.sleep =
-      deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+    // One implementation of the keystroke and the read-back, shared with the
+    // bare-send card. The discipline is the part that must not vary.
+    this.sender = new Sender({
+      sidecar: deps.sidecar,
+      journal: deps.journal,
+      onJournalChanged: deps.onJournalChanged,
+      log: deps.log,
+      sleep: deps.sleep
+    })
   }
 
   async run(request: SculptRequest): Promise<void> {
@@ -337,6 +297,137 @@ export class SculptLane {
       segments: final.segments,
       changes: final.changes,
       commit
+    })
+  }
+
+  /**
+   * "Send the message" — the composer is already full and there is nothing to
+   * write.
+   *
+   * The odd one out in this file: no engine, no diff, no target to re-check.
+   * What it shows is not a proposal but a *reading* — the text Mull found in
+   * the box a moment ago, printed back so the user can see exactly what one
+   * keystroke is about to do. Every other card in Mull answers "is this what
+   * you want me to write?"; this one answers "is this what you want to send?".
+   *
+   * It refuses two ways, and both are sentences rather than silence: an app
+   * with no known send chord (`send-table.ts` has no default), and an empty
+   * box. Neither can be salvaged by guessing.
+   */
+  async sendOnly(request: {
+    app: { bundleId: string; name: string } | null
+    /** What the composer held when the user spoke. Re-read before the keystroke. */
+    text: string
+    transcript: string
+    routedBy?: string
+  }): Promise<void> {
+    const startedAt = this.now()
+    const chord = sendChord(request.app?.bundleId)
+    const name = request.app?.name ?? 'this app'
+
+    if (!chord) {
+      this.deps.hud.announce(
+        'blocked',
+        `Mull doesn’t know how to send in ${name} — press send yourself.`
+      )
+      return
+    }
+    if (!request.text.trim()) {
+      this.deps.hud.announce('blocked', 'There’s nothing in the box to send.')
+      return
+    }
+
+    this.deps.hud.update({
+      phase: 'thinking',
+      transcript: request.transcript,
+      partial: false,
+      notice: null,
+      chips: [SEND_CHIP, { kind: 'dict', label: name, id: 'target' }]
+    })
+
+    this.deps.hud.openCard(
+      {
+        kind: 'send',
+        app: name,
+        text: request.text,
+        commit: { label: 'Send', hint: chord.hint, warning: 'sending can’t be undone' }
+      },
+      (action) => {
+        void this.answerSend(action, request, chord, startedAt)
+      }
+    )
+  }
+
+  private async answerSend(
+    action: HudAction,
+    request: { app: { bundleId: string; name: string } | null; text: string; transcript: string; routedBy?: string },
+    chord: SendChord,
+    startedAt: number
+  ): Promise<void> {
+    if (action !== 'apply-send') {
+      this.journal({
+        intent: { kind: 'command', verb: 'send', args: {}, transcript: request.transcript },
+        app: request.app,
+        before: null,
+        after: null,
+        strategyUsed: null,
+        status: 'cancelled',
+        summary: `Send declined · ${request.app?.name ?? 'this app'}`,
+        verified: null,
+        caret: null,
+        undoable: false
+      })
+      this.deps.hud.announce('applied', 'Cancelled — nothing was sent.')
+      return
+    }
+
+    // Read it again. The card has been on screen for as long as the user took
+    // to decide, and they can type into the box while it is up — what leaves
+    // has to be what they just approved, not what was there when they spoke.
+    const live = await this.deps.sidecar
+      .focusedElement({ contextBytes: 4_096 })
+      .catch(() => null)
+    if (!live?.element) {
+      this.deps.hud.announce('error', 'Mull couldn’t re-read the box, so it didn’t send.')
+      return
+    }
+    if (live.element.text.trim() !== request.text.trim()) {
+      this.deps.hud.announce(
+        'error',
+        'That text has changed since Mull read it — nothing was sent.'
+      )
+      return
+    }
+
+    const outcome = await this.sender.send({
+      app: request.app,
+      chord,
+      text: request.text,
+      transcript: request.transcript
+    })
+    this.deps.hud.announce(
+      outcome.sent === false ? 'error' : 'applied',
+      describeSend(outcome, request.app?.name ?? null)
+    )
+    this.deps.bench?.record({
+      kind: 'edit',
+      engine: 'none',
+      model: 'n/a',
+      app: request.app?.bundleId ?? null,
+      outcome: outcome.sent === false ? 'failed' : 'applied',
+      reason: outcome.sent === true || outcome.sent === 'unknown' ? undefined : outcome.reason,
+      strategy: null,
+      routedBy: request.routedBy,
+      classifyMs: null,
+      instructionChars: request.transcript.length,
+      beforeChars: request.text.length,
+      afterChars: request.text.length,
+      changes: 0,
+      firstTokenMs: null,
+      engineMs: 0,
+      insertMs: 0,
+      totalMs: this.now() - startedAt,
+      sent: outcome.sent === true ? 'yes' : outcome.sent === 'unknown' ? 'unknown' : 'no'
     })
   }
 
@@ -502,7 +593,12 @@ export class SculptLane {
     // row rather than a flag on the one above.
     if (action === 'apply-send' && session.chord) {
       const sendStart = this.now()
-      const sent = await this.send(request, session.chord, after)
+      const sent = await this.sender.send({
+        app: request.app,
+        chord: session.chord,
+        text: after,
+        transcript: request.transcript
+      })
       this.record(request, session, {
         outcome: 'applied',
         after,
@@ -532,117 +628,6 @@ export class SculptLane {
       endedAt: editEndedAt
     })
     this.deps.hud.announce('applied', `${laneNoun(request.target)} applied.`, ghost)
-  }
-
-  // -------------------------------------------------------------------------
-
-  /**
-   * Press the app's send chord, then go and look.
-   *
-   * The read-back is the whole method. `keyChord` reports that the window
-   * server accepted the event, which is not the same claim as "the message
-   * went" — the app may have a different preference set, the composer may not
-   * have had focus, the chord may be bound to something else entirely. Nothing
-   * in macOS will tell us. So Mull re-reads the box it just filled and answers
-   * from what it finds:
-   *
-   *   empty, or no longer holding the draft   -> sent
-   *   still holding the draft                 -> not sent, and say so
-   *   unreadable                              -> unknown, and say that instead
-   *
-   * The third case is a real outcome, not a failure of nerve. Mail's ⌘⇧D closes
-   * the compose window, so there is frequently nothing left to read; claiming
-   * success there would be a guess, and claiming failure would send the user
-   * back to press Return on a message that has already gone.
-   *
-   * The app is checked once more first. Between Apply and this line the user
-   * could have switched windows, and a Return pressed into the wrong app is
-   * precisely the harm this feature has to not cause.
-   */
-  private async send(
-    request: SculptRequest,
-    chord: SendChord,
-    text: string
-  ): Promise<SendOutcome> {
-    const outcome = await this.pressSend(request, chord, text)
-    const ok = outcome.sent === true
-    const name = request.app?.name ?? 'this app'
-
-    this.journal({
-      // A whitelisted verb with a fixed argument list — the same shape M5's
-      // command table will use, and deliberately not an `edit`. A reader
-      // scanning the journal for "what did Mull actually do out there" should
-      // find this row as its own event, not as an adjective on the edit above.
-      intent: {
-        kind: 'command',
-        verb: 'send',
-        args: { app: request.app?.bundleId ?? null, chord: chord.hint },
-        transcript: request.transcript
-      },
-      app: request.app,
-      before: null,
-      after: null,
-      strategyUsed: null,
-      status: ok ? 'applied' : outcome.sent === 'unknown' ? 'applied' : 'failed',
-      summary: ok
-        ? `Sent · ${name}`
-        : outcome.sent === 'unknown'
-          ? `Sent · ${name} — unconfirmed`
-          : `Send failed · ${name} · ${outcome.reason}`,
-      verified: outcome.sent === 'unknown' ? null : ok,
-      caret: null,
-      // Not a claim about how well it went. There is no keystroke that unsends
-      // a message, so there is nothing for ⌥Z to offer and it must not pretend
-      // otherwise — `UndoService` refuses this row by name.
-      undoable: false
-    })
-
-    this.log(ok ? 'info' : 'warn', 'sculpt: send', {
-      app: request.app?.bundleId ?? null,
-      chord: chord.hint,
-      sent: outcome.sent,
-      reason: outcome.sent === true || outcome.sent === 'unknown' ? null : outcome.reason
-    })
-    return outcome
-  }
-
-  /** The mechanics, so `send` can be about the record and this about the keys. */
-  private async pressSend(
-    request: SculptRequest,
-    chord: SendChord,
-    text: string
-  ): Promise<SendOutcome> {
-    if (request.app) {
-      const front = await this.deps.sidecar.frontmostApp({}).catch(() => null)
-      if (front?.app && front.app.bundleId !== request.app.bundleId) {
-        return { sent: false, reason: 'different-app', detail: front.app.name }
-      }
-    }
-
-    const pressed = await this.deps.sidecar
-      .keyChord({ key: chord.key, modifiers: chord.modifiers })
-      .catch((err: unknown) => {
-        this.log('error', 'sculpt: keyChord threw', err)
-        return { sent: false, reason: 'failed' as string | null }
-      })
-    if (!pressed.sent) {
-      return { sent: false, reason: 'chord-refused', detail: pressed.reason }
-    }
-
-    await this.sleep(SEND_SETTLE_MS)
-
-    const composer = await this.deps.sidecar
-      .focusedElement({ contextBytes: 4_096 })
-      .catch(() => null)
-    if (!composer?.element) return { sent: 'unknown' }
-
-    const remaining = composer.element.text
-    if (!remaining.trim()) return { sent: true }
-    // A composer that still holds the draft is a composer that did not send it.
-    // Compared by containment rather than equality because some apps keep a
-    // trailing newline or a quoted header around whatever was typed.
-    if (remaining.includes(text.trim())) return { sent: false, reason: 'unchanged', detail: null }
-    return { sent: true }
   }
 
   // -------------------------------------------------------------------------

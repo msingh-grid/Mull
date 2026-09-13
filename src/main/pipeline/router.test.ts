@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { looksLikeInstruction, mightBeCompose, route, wantsSend, worthAsking } from './router'
+import {
+  justSend,
+  looksLikeInstruction,
+  mightBeCompose,
+  route,
+  wantsSend,
+  worthAsking
+} from './router'
 
 /**
  * The fixture table docs/PLAN.md asks for.
@@ -386,5 +393,96 @@ describe('wantsSend — the only thing that can put a send on a card', () => {
   it('refuses when the send phrase is the whole utterance', () => {
     expect(wantsSend('send it')).toEqual({ send: false, without: 'send it' })
     expect(wantsSend('and send it')).toMatchObject({ send: false })
+  })
+})
+
+/**
+ * The three utterances that produced the bug report, verbatim from the journal.
+ * Every one of them was typed into a Slack composer, because `send` was not a
+ * verb Mull knew anywhere. They are the fixture for this whole section.
+ */
+describe('"send" is a verb Mull hears', () => {
+  const overComposer = { hasSelection: false, hasFieldText: true, hasScreen: true }
+  const emptyBox = { hasSelection: false, hasFieldText: false, hasScreen: true }
+
+  it('treats "send that <message>" as a request to write one', () => {
+    expect(mightBeCompose('Send that I will get the code done in 2 days.')).toBe(true)
+    expect(route('Send that I will get the code done in 2 days.', emptyBox)).toMatchObject({
+      kind: 'compose'
+    })
+    // …and asking for it to be sent is implied by the verb, not by a tail.
+    expect(wantsSend('Send that I will get the code done in 2 days.')).toEqual({
+      send: true,
+      without: 'Send that I will get the code done in 2 days.'
+    })
+  })
+
+  it('treats "send them a message saying …" the same way', () => {
+    expect(mightBeCompose('send them a written message saying I will be late')).toBe(true)
+    expect(wantsSend('send her a note about the delay').send).toBe(true)
+  })
+
+  /**
+   * The other half of the bargain. `send` is an ordinary English verb with an
+   * ordinary object, and a compose that swallows one of these takes someone's
+   * sentence off the screen — the asymmetry at the top of router.ts.
+   */
+  it('leaves "send <a thing>" as dictation', () => {
+    for (const said of [
+      'send the deck tonight',
+      'send Priya the numbers',
+      'and I will send the deck tonight',
+      'send it over when you get a chance to look at the contract'
+    ]) {
+      expect(mightBeCompose(said)).toBe(false)
+      expect(route(said, overComposer)).toMatchObject({ kind: 'dictate' })
+    }
+  })
+})
+
+describe('justSend — the bare send', () => {
+  const overComposer = { hasSelection: false, hasFieldText: true, hasScreen: true }
+  const emptyBox = { hasSelection: false, hasFieldText: false, hasScreen: true }
+
+  it('hears a send command with nothing else in it', () => {
+    for (const said of [
+      'send it',
+      'send the message',
+      'send',
+      'just send it now',
+      'go ahead and send it',
+      'send that',
+      'please send the reply'
+    ]) {
+      expect(justSend(said)).toBe(true)
+    }
+  })
+
+  it('does not hear one where there is a message to write', () => {
+    expect(justSend('send that I will be done in two days')).toBe(false)
+    expect(justSend('send them a written message')).toBe(false)
+    expect(justSend('send the deck tonight')).toBe(false)
+    expect(justSend('reply to this and send it')).toBe(false)
+  })
+
+  it('routes to send only when there is something in the box', () => {
+    expect(route('send the message', overComposer)).toEqual({ kind: 'send' })
+    // An empty composer means those words were a sentence, so they get typed.
+    expect(route('send the message', emptyBox)).toMatchObject({ kind: 'dictate' })
+  })
+
+  /**
+   * It is answered from the words alone, so there is nothing to ask a model
+   * about — and the one utterance whose entire point is immediacy must not pay
+   * seconds for a classification.
+   */
+  it('never goes to the model', () => {
+    expect(worthAsking('send the message', overComposer)).toBe(false)
+    expect(worthAsking('send it', overComposer)).toBe(false)
+  })
+
+  it('is not mistaken for a compose with nothing to compose', () => {
+    expect(mightBeCompose('send the message')).toBe(false)
+    expect(mightBeCompose('send it')).toBe(false)
   })
 })

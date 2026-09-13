@@ -53,6 +53,8 @@ Choose "edit" when the words ask for something to be done TO the text shown to y
 
 Choose "compose" when the words ask for something NEW to be written, using what is on screen — "reply to this", "draft an answer", "reply to Priya saying I'll have it by five", "write back declining". There is nothing to rewrite; the result goes where the cursor is. Only choose it when a <screen> block is shown, because a reply needs something to reply to.
 
+"send" counts as asking for something to be written when a message follows it: "send that I'll have the code done in two days", "send them a written message about the delay". The user is describing a message they want written and sent, not speaking one. But "send the deck tonight" and "send Priya the numbers" name a thing being sent rather than a message to write, and those are dictation.
+
 Choose "dictate" when the words are the message itself, even if they contain verbs like "make", "fix" or "turn". "Make sure Priya signs off", "turn left at the lights" and "fix the meeting to 3pm" are things a person is saying, not instructions to you. "Tell her I'll be late" and "say we're moving the date" are dictation too — the user is speaking the message, not asking you to write one.
 
 When it could honestly be either, answer "dictate". Typing an instruction by mistake is a visible nuisance the user can undo in one keystroke; routing someone's sentence into an edit makes it vanish from where they were looking.

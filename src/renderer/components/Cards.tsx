@@ -1,5 +1,5 @@
 import type { JSX } from 'react'
-import type { DiffCard, DiffSegment, HudCard, PlanCard, PlanStepState } from '@shared/hud'
+import type { DiffCard, DiffSegment, HudCard, PlanCard, PlanStepState, SendCard } from '@shared/hud'
 import type { HudAction } from '@shared/ipc'
 import { Btn } from './atoms'
 
@@ -126,6 +126,45 @@ function PlanCardView({
   )
 }
 
+/**
+ * The bare-send card: "send the message", over a composer already full.
+ *
+ * What it shows is not a proposal — it is the text that is about to leave,
+ * read back out of the app a moment ago. Hence no diff marks and no Apply:
+ * there is nothing to write, only something to check. The body carries the
+ * `is-quote` class so it reads as *their* words rather than Mull's ink.
+ *
+ * ⏎ is deliberately absent from this card. Mull holds Return globally while a
+ * card is open, so an accidental press cannot reach Slack and send the very
+ * message this card is still asking about — it simply does nothing.
+ */
+function SendCardView({
+  card,
+  onAction
+}: {
+  card: SendCard
+  onAction?: (action: HudAction) => void
+}): JSX.Element {
+  return (
+    <div className="card">
+      <div className="card-title">
+        <span>Send{card.app ? ` · ${card.app}` : ''}</span>
+        <span className="count">already written</span>
+      </div>
+      <div className="card-body is-quote">{card.text}</div>
+      <div className="card-actions">
+        <Btn kind="send" hint={card.commit.hint} onClick={() => onAction?.('apply-send')}>
+          {card.commit.label}
+        </Btn>
+        <Btn hint="esc" onClick={() => onAction?.('cancel')}>
+          Cancel
+        </Btn>
+        <span className="undo-promise is-warning">{card.commit.warning}</span>
+      </div>
+    </div>
+  )
+}
+
 export function CardView({
   card,
   onAction
@@ -133,9 +172,7 @@ export function CardView({
   card: HudCard
   onAction?: (action: HudAction) => void
 }): JSX.Element {
-  return card.kind === 'diff' ? (
-    <DiffCardView card={card} onAction={onAction} />
-  ) : (
-    <PlanCardView card={card} onAction={onAction} />
-  )
+  if (card.kind === 'diff') return <DiffCardView card={card} onAction={onAction} />
+  if (card.kind === 'send') return <SendCardView card={card} onAction={onAction} />
+  return <PlanCardView card={card} onAction={onAction} />
 }

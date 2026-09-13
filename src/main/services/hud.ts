@@ -101,6 +101,13 @@ export class HudController {
       this.options.log?.('warn', 'hud: apply-send on a card with no commit — applying only')
       action = 'apply'
     }
+    // …and the other way round. Swallowed rather than downgraded to a cancel:
+    // a card that vanished because the user brushed ⏎ is a card they have to
+    // ask for again, and this one is one keystroke from an irreversible act.
+    if (action === 'apply' && !acceptsApply(this.card)) {
+      this.options.log?.('info', 'hud: ⏎ has no meaning on this card — ignored')
+      return
+    }
     try {
       handler(action)
     } finally {
@@ -143,7 +150,21 @@ export class HudController {
   }
 }
 
-/** Does this card offer a second, heavier commit — today, Apply & send? */
+/** Does this card offer the heavier commit — Apply & send, or a bare Send? */
 function offersCommit(card: HudCard | null): boolean {
+  if (card?.kind === 'send') return true
   return card?.kind === 'diff' && card.commit != null
+}
+
+/**
+ * Does ⏎ mean anything on this card?
+ *
+ * On every card but one it means Apply. The bare-send card has nothing to
+ * apply — it proposes no text — so ⏎ does nothing there. It stays *claimed*
+ * rather than released, which is the point: Mull holds Return globally while a
+ * card is open, and letting it through to Slack would send the very message the
+ * card is still asking about.
+ */
+function acceptsApply(card: HudCard | null): boolean {
+  return card !== null && card.kind !== 'send'
 }

@@ -89,7 +89,30 @@ export interface PlanCard {
   context: string | null
 }
 
-export type HudCard = DiffCard | PlanCard
+/**
+ * Send what is already in the box — the one card that proposes no new text.
+ *
+ * "Send the message", said over a composer the user has already filled. There
+ * is nothing to preview in the usual sense, so what the card shows is *the
+ * thing that is about to go*: Mull reads the composer and prints it back. That
+ * read is the whole safety story here. Every other card can say "here is what I
+ * would write"; this one can only say "here is what you wrote, and this key
+ * sends it".
+ *
+ * It has no Apply. There is nothing to apply, and ⏎ therefore does nothing on
+ * this card — which is also why it must stay claimed: Mull holds Return
+ * globally while a card is open, and letting it through to Slack would send the
+ * message the card is still asking about.
+ */
+export interface SendCard {
+  kind: 'send'
+  app: string | null
+  /** The composer's current contents, read just now. Never rewritten. */
+  text: string
+  commit: CardCommit
+}
+
+export type HudCard = DiffCard | PlanCard | SendCard
 
 /**
  * What the user's ⏎ / ⌘⏎ / esc do while a card is open.

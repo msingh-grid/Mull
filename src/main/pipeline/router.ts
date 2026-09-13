@@ -47,6 +47,11 @@ export type Route =
   | { kind: 'edit'; instruction: string; target: 'selection' | 'document' }
   /** Write something new from what is on screen. No `before`; lands at the caret. */
   | { kind: 'compose'; instruction: string }
+  /**
+   * Send what is already in the composer. The only route that writes no text
+   * at all — it shows the user what is sitting there and offers one keystroke.
+   */
+  | { kind: 'send' }
 
 /**
  * The fast path, as its own predicate so `IntentRouter` can check it before
@@ -74,9 +79,41 @@ export function nothingToEdit(context: RouteContext): boolean {
  * compose verb, so it still never waits. That is most of what anyone dictates.
  */
 export function worthAsking(transcript: string, context: RouteContext): boolean {
+  // A bare send is answered locally and instantly — see `justSend`. Asking the
+  // model about it would add seconds to the one utterance that needs none.
+  if (justSend(transcript) && context.hasFieldText) return false
   if (!nothingToEdit(context) && mightBeInstruction(transcript)) return true
   return context.hasScreen === true && mightBeCompose(transcript)
 }
+
+/**
+ * Is the whole utterance a send command and nothing else?
+ *
+ * "send it", "send the message", "just send that now". There is no message to
+ * write here: the text is already in the composer and the user is asking for
+ * one keystroke. So this never reaches the model — it is answered from the
+ * words alone, which is also what keeps it out of reach of anything on screen.
+ *
+ * Anything with content after the verb falls out and goes to compose instead:
+ * "send that I'll be done in two days" is a message to write, not a key to
+ * press. The difference is the whole reason these are two routes.
+ *
+ * Requires text in the composer at the call site. "Send the message" said into
+ * an empty box is someone dictating a sentence, and it gets typed.
+ */
+export function justSend(transcript: string): boolean {
+  const body = transcript
+    .trim()
+    .toLowerCase()
+    .replace(/[.!]+$/u, '')
+    .replace(PREAMBLE, '')
+    .trimStart()
+  if (!body) return false
+  return BARE_SEND.test(body)
+}
+
+const BARE_SEND =
+  /^(?:go\s+ahead\s+and\s+)?(?:send|fire)(?:\s+(?:it|that|this|them|off|out|now|already))*(?:\s+(?:the|that|this)\s+(?:message|reply|response|answer|email|note|text|dm))?(?:\s+(?:off|out|now|already))*$/u
 
 /**
  * Could these words be asking Mull to *write* something?
@@ -100,7 +137,11 @@ export function mightBeCompose(transcript: string): boolean {
   const body = raw.toLowerCase().replace(PREAMBLE, '').trimStart()
   if (!body) return false
   if (/^[\p{L}’']+\s*,/u.test(body)) return false
-  return TIER_C.test(body)
+  // A bare send is its own route and must not be swallowed as a compose with
+  // nothing to compose — checked here as well as in `route`, so the predicate
+  // is honest on its own.
+  if (BARE_SEND.test(body)) return false
+  return TIER_C.test(body) || SEND_COMPOSE.test(body)
 }
 
 /** See `mightBeCompose`. */
@@ -115,6 +156,27 @@ const MAX_COMPOSE_WORDS = 30
  */
 const TIER_C =
   /^(?:repl(?:y|ies)|respond|answer|draft|compose|write (?:back|a reply|an answer|a response)|get back to)\b/u
+
+/**
+ * "send …" as a request to write something, which is how people actually ask.
+ *
+ * Added after watching three real utterances — "send that I'll get the code
+ * done in 2 days", "send them a written message" — get typed into a Slack
+ * composer verbatim, because `send` was not a verb Mull knew anywhere.
+ *
+ * Narrow, because `send` is also an ordinary English verb with an object.
+ * Exactly two shapes qualify:
+ *
+ *   send that <clause>        "send that I'll be done in two days"
+ *   send … <message-noun> …   "send them a written message saying…"
+ *
+ * "Send the deck tonight" and "send Priya the numbers" match neither, and stay
+ * dictation. That is the asymmetry at the top of this file doing its job: a
+ * missed compose is a sentence that gets typed, and a wrong one is a sentence
+ * that disappears into a card.
+ */
+const SEND_COMPOSE =
+  /^(?:send|shoot)\s+(?:that\b|word\b|(?:\w+\s+){0,3}(?:message|note|reply|response|answer|email|dm|text|update)\b)/u
 
 /**
  * Did the user ask for it to be sent — and what is the request without that?
@@ -144,6 +206,11 @@ const TIER_C =
 export function wantsSend(text: string): { send: boolean; without: string } {
   const raw = text.trim()
   if (!raw) return { send: false, without: '' }
+  // "send that I'll be done in two days" asked for a send in its first word.
+  // Nothing to strip — the verb is part of the request the model is answering,
+  // and removing it would leave an instruction that no longer says what to do.
+  const head = raw.toLowerCase().replace(PREAMBLE, '').trimStart()
+  if (SEND_COMPOSE.test(head)) return { send: true, without: raw }
   const without = raw.replace(SEND_TAIL, '').trim()
   // A transcript that is *only* "send it" is not a compose instruction with a
   // send attached — it is someone dictating, or asking for something Mull has
@@ -322,7 +389,10 @@ export function looksLikeInstruction(transcript: string): boolean {
  */
 export function route(transcript: string, context: RouteContext): Route {
   const text = transcript.trim()
-  // Compose first: it is the one route that does not need text in the field,
+  // A bare send, before anything else. It needs text in the composer and
+  // nothing else at all — not a screen read, not a model, not a selection.
+  if (justSend(text) && context.hasFieldText) return { kind: 'send' }
+  // Compose next: it is the one route that does not need text in the field,
   // so checking it after the `nothingToEdit` gate would make it unreachable in
   // exactly the case it exists for — an empty composer under a conversation.
   if (context.hasScreen && mightBeCompose(text)) return { kind: 'compose', instruction: text }

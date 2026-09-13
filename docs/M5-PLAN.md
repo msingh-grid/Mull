@@ -211,6 +211,65 @@ down with it. And `JournalStore` orders by `at DESC, rowid DESC` rather than by
 id: Apply & send writes two rows inside one millisecond, and ordering by uuid
 showed "Sent · Slack" above or below the reply it sent at random.
 
+### Stage 4.1 — "send" is a verb Mull hears
+
+Stage 4 shipped and did nothing, three times. The journal:
+
+```
+Dictation · Slack · "Send that I will get the code done in 2 days."
+Dictation · Slack · "Send the message"
+Dictation · Slack · "Click the send button and send them a written m…"
+```
+
+All three typed verbatim into the composer. The feature was not broken — it
+never fired. `send` was not a verb Mull knew anywhere: the compose list is
+reply / respond / answer / draft / compose, and `wantsSend` only ever looked at
+the *tail* of an utterance. Stage 4 was built to a phrasing invented in this
+document rather than to how anyone actually talks.
+
+Two routes were added, and the split is the same one Stage 4 already makes
+between writing and acting.
+
+**`send <a message>` is a compose.** "Send that I'll be done in two days",
+"send them a written message saying…". Exactly two shapes qualify — `send that
+<clause>` and `send … <message-noun> …` — because `send` is also an ordinary
+verb with an ordinary object. "Send the deck tonight" and "send Priya the
+numbers" match neither and stay dictation, which is the asymmetry at the top of
+router.ts doing its job. The verb also implies the send, so `wantsSend` now has
+a head form as well as a tail one.
+
+**`send` on its own is its own route**, `{ kind: 'send' }`, and the only one in
+Mull that writes no text at all. It needs text in the composer and nothing else
+— no screen read, no model, no selection — so `IntentRouter` answers it
+synchronously in the first branch of `decide()`. The utterance whose entire
+point is immediacy must not pay four seconds for a classification, and a route
+the model cannot produce is a route nothing on screen can talk its way into.
+
+It gets its own card, because there is nothing to diff:
+
+```
+SEND · Slack                              already written
+I will get the code done in 2 days.
+
+Send ⌘⏎    Cancel esc        sending can't be undone
+```
+
+What the card shows is not a proposal but a *reading*. Every other card in Mull
+asks "is this what you want me to write?"; this one asks "is this what you want
+to send?". It has no Apply, and ⏎ is swallowed rather than released — Mull holds
+Return globally while a card is open, and letting it through would send the very
+message the card is still asking about. The box is read once more immediately
+before the keystroke and the send is refused if it moved.
+
+The keystroke and the read-back moved out of `SculptLane` into
+`services/sender.ts`, shared by both paths. The discipline is the part that must
+not vary between them.
+
+**Still not handled:** "click the send button and send them a written message"
+routes to dictation, because it opens with `click`. Naming a control to press is
+the AX-clicking path this plan declines on purpose (see Stage 5) — and the
+useful half of that sentence, "send them a written message", works on its own.
+
 ## Stage 5 — Reading somewhere else
 
 *"Read abilities to navigate to other chat and gather context."* This is the one

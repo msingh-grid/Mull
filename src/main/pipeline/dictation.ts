@@ -65,6 +65,13 @@ export interface SculptLaneLike {
     routedBy?: string
     classifyMs?: number | null
   }): Promise<void>
+  /** "Send the message" — a card over text that is already written. */
+  sendOnly(request: {
+    app: { bundleId: string; name: string } | null
+    text: string
+    transcript: string
+    routedBy?: string
+  }): Promise<void>
 }
 
 export interface DictationDeps {
@@ -336,6 +343,19 @@ export class DictationPipeline {
       // only an utterance with text in front of it can reach the model.
       const routed = await this.decide(text)
       let hint: string | null = null
+
+      // A bare send writes nothing at all, so it never reaches the insertion
+      // path below — the words were a command, not a message.
+      if (routed?.route.kind === 'send' && this.deps.sculpt) {
+        this.phase = 'idle'
+        await this.deps.sculpt.sendOnly({
+          app: this.state.app ?? routed.snapshot.app,
+          text: routed.snapshot.field?.text ?? '',
+          transcript: text,
+          routedBy: routed.by
+        })
+        return
+      }
 
       if (
         (routed?.route.kind === 'edit' || routed?.route.kind === 'compose') &&
