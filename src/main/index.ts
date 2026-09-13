@@ -3,6 +3,7 @@ import {
   BrowserWindow,
   globalShortcut,
   ipcMain,
+  safeStorage,
   screen,
   shell,
   systemPreferences
@@ -20,7 +21,7 @@ import {
 import type { PlanStep } from '@shared/hud'
 import type { JournalEntryView } from '@shared/types'
 import type { SidecarApi } from '@shared/sidecar-api'
-import { benchPath, journalPath, resolveSidecarPath, settingsPath } from './locations'
+import { benchPath, credentialsPath, journalPath, resolveSidecarPath, settingsPath } from './locations'
 import { Bench } from './bench'
 import { selectAsrProvider } from './asr'
 import { FakeSidecar, SidecarClient } from './services/sidecar'
@@ -39,7 +40,11 @@ import { DictationPipeline } from './pipeline/dictation'
 import { SculptLane } from './pipeline/sculpt'
 import { appliedText, diffText } from './pipeline/diff'
 import { FakeEngine } from './engine/fake'
+import { AgentEngine } from './engine/agent'
+import { detectClaudeCodeLogin, EngineHolder, engineStatus, resolveEngine } from './engine/select'
+import { CredentialsStore, type CredentialKind } from './store/credentials'
 import type { Engine } from './engine/types'
+import type { EngineTestResult } from '@shared/engine'
 import type { AsrProvider } from './asr/types'
 import type { AboutInfo } from '@shared/about'
 import type { PermissionKey } from '@shared/permissions'
@@ -58,7 +63,16 @@ let insertion: InsertionService | null = null
 let hud: HudController | null = null
 let chords: ChordScope | null = null
 let tray: TrayPresence | null = null
-let engine: Engine | null = null
+/** The live edit engine, swappable without a relaunch. */
+let engine: EngineHolder | null = null
+/**
+ * The FakeEngine, kept for the two surfaces that must work with no credentials
+ * at all: the tray's preview demo and onboarding page 2. Both are explicitly
+ * demonstrations; neither pretends to be an engine.
+ */
+let demoEngine: Engine | null = null
+let credentials: CredentialsStore | null = null
+let detectedLogin = false
 let sculpt: SculptLane | null = null
 let settings: SettingsStore | null = null
 let permissions: PermissionsService | null = null
@@ -241,7 +255,8 @@ function notifyJournalChanged(): void {
  * title, because executing commands is M5's and nothing here can run one.
  */
 async function showDemoCard(kind: 'diff' | 'plan'): Promise<void> {
-  if (!hud || !engine) return
+  if (!hud || !demoEngine) return
+  const engine = demoEngine
 
   const { app: target } = await sidecar.frontmostApp({}).catch(() => ({ app: null }))
   const appInfo = target ? { bundleId: target.bundleId, name: target.name } : null
@@ -381,7 +396,22 @@ async function bootstrap(): Promise<void> {
 
   insertion = new InsertionService({ sidecar, log: logFn })
   undo = journal ? new UndoService({ sidecar, journal, log: logFn }) : null
-  engine = new FakeEngine()
+
+  demoEngine = new FakeEngine()
+  credentials = new CredentialsStore({ path: credentialsPath(), safeStorage, log: logFn })
+  detectedLogin = detectClaudeCodeLogin()
+  engine = new EngineHolder(
+    resolveEngine({
+      credentials: credentials.get(),
+      settings: settings.get(),
+      detectedLogin,
+      log: logFn
+    })
+  )
+  log.info('engine', { kind: engine.name, model: engine.model, detectedLogin })
+  // Bring the subprocess up now rather than on the first edit, which is the
+  // one the user is actually waiting for.
+  warmEngine()
 
   chords = new ChordScope({ globalShortcut, log: logFn })
   hud = new HudController({
@@ -613,8 +643,15 @@ ipcMain.handle(IPC.devCard, (_event, kind: 'diff' | 'plan') => showDemoCard(kind
 ipcMain.handle(IPC.settingsGet, () => settings?.get() ?? null)
 
 ipcMain.handle(IPC.settingsSet, (_event, patch: Partial<Settings>) => {
+  const before = settings?.get()
   const next = settings?.set(patch) ?? null
   if (next) {
+    // Which lane and which model are both engine-shaping, so the change has to
+    // reach the holder — otherwise picking "Fast" would keep using the careful
+    // model until the next launch, and quietly.
+    if (before && (before.engine !== next.engine || before.editModel !== next.editModel)) {
+      reloadEngine()
+    }
     // Every window stamps its own theme, so the change has to reach all of
     // them — including the HUD, which has its own "page in the dark" rule.
     for (const win of BrowserWindow.getAllWindows()) {
@@ -653,6 +690,103 @@ async function applyHotkeyChoice(next: Settings): Promise<void> {
   tray?.setStatus(describeHotkeyMode(mode, next.hotkey))
   log.info(`hotkey switched to ${next.hotkey}: mode ${mode}`)
 }
+
+/** A warm subprocess is the difference between 1.2 s and 2 s on the first edit. */
+function warmEngine(): void {
+  const current = engine?.current
+  if (current instanceof AgentEngine) current.warm()
+}
+
+/**
+ * Rebuild the engine from whatever the credentials and settings now say.
+ *
+ * Called after every sign-in, sign-out and model change, so pasting a token
+ * takes effect on the next utterance rather than after a relaunch. The holder
+ * disposes the engine it replaces, so a warm subprocess never outlives the
+ * credential that started it.
+ */
+function reloadEngine(): void {
+  if (!engine || !credentials || !settings) return
+  engine.swap(
+    resolveEngine({
+      credentials: credentials.get(),
+      settings: settings.get(),
+      detectedLogin,
+      log: logFn
+    })
+  )
+  log.info('engine reloaded', { kind: engine.name, model: engine.model })
+  warmEngine()
+}
+
+ipcMain.handle(IPC.engineStatus, async () => {
+  if (!engine || !credentials) return null
+  return engineStatus(engine, credentials.presence(), detectedLogin)
+})
+
+/**
+ * Save a credential.
+ *
+ * The secret arrives, is encrypted, and is never spoken of again: the reply is
+ * the same status object every other caller gets, carrying presence and not
+ * value. A `safeStorage` that cannot encrypt is reported as the refusal it is.
+ */
+ipcMain.handle(IPC.engineSignIn, async (_event, kind: CredentialKind, secret: string) => {
+  if (!credentials) return { ok: false, message: 'Mull hasn’t finished starting up.' }
+  try {
+    credentials.set(kind, secret)
+    reloadEngine()
+    return { ok: true, message: kind === 'api-key' ? 'API key saved.' : 'Token saved.' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // Deliberately not `log.error(err)` — an encryption failure can carry the
+    // input it choked on, and that input is the secret.
+    log.warn(`engine: could not save the ${kind} credential`)
+    return { ok: false, message }
+  }
+})
+
+ipcMain.handle(IPC.engineSignOut, (_event, kind: CredentialKind) => {
+  credentials?.set(kind, null)
+  reloadEngine()
+  return credentials?.presence() ?? null
+})
+
+/**
+ * One real edit, end to end.
+ *
+ * A credential that saved is not a credential that works — the token can be
+ * revoked, the key can be for the wrong workspace, the machine can be offline.
+ * This is the only honest way for the settings pane to show a ✓, and it is the
+ * same rule the permission rows already follow.
+ */
+ipcMain.handle(IPC.engineTest, async (): Promise<EngineTestResult> => {
+  if (!engine) return { ok: false, message: 'Mull hasn’t finished starting up.', firstTokenMs: null }
+  const startedAt = Date.now()
+  let firstTokenMs: number | null = null
+  try {
+    const result = await engine.transform(
+      {
+        instruction: 'Reply with the passage unchanged.',
+        text: 'ready',
+        app: null
+      },
+      () => {
+        firstTokenMs ??= Date.now() - startedAt
+      }
+    )
+    const took = Date.now() - startedAt
+    return {
+      ok: result.text.length > 0,
+      message: `Connected — ${engine.model ?? 'the engine'} answered in ${took} ms.`,
+      firstTokenMs
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log.warn('engine test failed', message)
+    return { ok: false, message, firstTokenMs }
+  }
+})
 
 ipcMain.handle(IPC.permissionsGet, () => permissions?.snapshot() ?? null)
 ipcMain.handle(IPC.permissionsOpen, (_event, key: PermissionKey) => permissions?.open(key))
@@ -711,8 +845,11 @@ ipcMain.handle(IPC.about, async (): Promise<AboutInfo> => {
  * changes.
  */
 ipcMain.handle(IPC.sampleEdit, async () => {
-  if (!engine) return null
-  const result = await engine.transform(
+  // The fake, on purpose. Page 2 teaches what the marks mean, and it has to do
+  // that on a Mac that has never signed in to anything — which is every Mac,
+  // the first time onboarding runs.
+  if (!demoEngine) return null
+  const result = await demoEngine.transform(
     { instruction: 'tighten this up and make it sound less apologetic', text: '', app: null },
     undefined
   )

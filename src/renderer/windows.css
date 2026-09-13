@@ -219,9 +219,17 @@ body.window {
   color: var(--ink-3);
   word-break: break-all;
 }
-.set-control { flex: none; }
+/* A control cell can hold a field and its button (the engine pane's token and
+   key rows), so it lays its children out rather than assuming one child. */
+.set-control {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
 
-select {
+select,
+.set-control input {
   font: inherit;
   font-size: 12.5px;
   color: var(--ink);
@@ -229,6 +237,19 @@ select {
   border: 1px solid var(--hairline);
   border-radius: var(--r-chip);
   padding: 4px 8px;
+}
+
+.set-control input {
+  width: 22ch;
+  /* Secrets are typed here. Dots are narrow; give them room to breathe rather
+     than letting the field look like it swallowed the paste. */
+  letter-spacing: 0.04em;
+}
+
+.set-control input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--ins);
+  outline-offset: 1px;
 }
 
 .mono {

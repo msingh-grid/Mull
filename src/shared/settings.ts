@@ -21,7 +21,20 @@ export const SettingsSchema = z.object({
   hudTheme: z.enum(['follow', 'paper']).default('follow'),
   /** Epoch ms the user finished onboarding; null means they never have. */
   onboardingCompletedAt: z.number().int().nullable().default(null),
-  launchAtLogin: z.boolean().default(false)
+  launchAtLogin: z.boolean().default(false),
+  /**
+   * Which lane serves edits. `auto` prefers the Claude subscription and falls
+   * back to an API key; the other two are explicit choices that refuse rather
+   * than silently using the credential the user didn't pick.
+   */
+  engine: z.enum(['auto', 'subscription', 'api-key']).default('auto'),
+  /**
+   * Careful (Sonnet 5) or fast (Haiku 4.5). Default careful: an edit is
+   * judgement about someone's writing, and the preview makes the judgement
+   * cheap to check. The bench (`npm run bench:engine`) is what tells you
+   * whether fast is worth it on your machine.
+   */
+  editModel: z.enum(['sonnet', 'haiku']).default('sonnet')
 })
 
 export type Settings = z.infer<typeof SettingsSchema>

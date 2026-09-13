@@ -125,6 +125,17 @@ export const IPC = {
   /** main -> requesting renderer: download progress. */
   modelProgress: 'mull:model:progress',
 
+  /** settings -> main: which engine is serving edits, and how it is doing. */
+  engineStatus: 'mull:engine:status',
+  /**
+   * settings -> main: save a credential. The secret goes one way only —
+   * nothing ever sends it back, and `engineStatus` reports presence, not value.
+   */
+  engineSignIn: 'mull:engine:sign-in',
+  engineSignOut: 'mull:engine:sign-out',
+  /** settings -> main: one real round trip, so a saved credential is proven. */
+  engineTest: 'mull:engine:test',
+
   /** settings/onboarding -> main: versions, paths, hotkey mode. */
   about: 'mull:about',
 

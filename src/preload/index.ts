@@ -11,6 +11,7 @@ import type { AboutInfo } from '@shared/about'
 import type { Settings } from '@shared/settings'
 import type { PermissionKey, PermissionsSnapshot } from '@shared/permissions'
 import type { DownloadProgress, ModelStatus } from '@shared/model'
+import type { EngineStatus, EngineTestResult } from '@shared/engine'
 import type { JournalEntryView } from '@shared/types'
 
 /**
@@ -65,6 +66,21 @@ export interface MullApi {
     status: () => Promise<ModelStatus>
     download: () => Promise<{ ok: boolean; message: string }>
     onProgress: (handler: (progress: DownloadProgress) => void) => () => void
+  }
+  /**
+   * The edit engine. Secrets travel one way only: `signIn` sends one, and
+   * nothing here can read one back — `status` reports whether a credential
+   * exists, never what it is.
+   */
+  engine: {
+    status: () => Promise<EngineStatus | null>
+    signIn: (
+      kind: 'subscription' | 'api-key',
+      secret: string
+    ) => Promise<{ ok: boolean; message: string }>
+    signOut: (kind: 'subscription' | 'api-key') => Promise<unknown>
+    /** One real round trip — proof the credential works, not that it saved. */
+    test: () => Promise<EngineTestResult>
   }
   /** Versions and paths, for the about pane and bug reports. */
   about: () => Promise<AboutInfo>
@@ -146,6 +162,17 @@ const api: MullApi = {
       ipcRenderer.on(IPC.modelProgress, listener)
       return () => ipcRenderer.removeListener(IPC.modelProgress, listener)
     }
+  },
+
+  engine: {
+    status: () => ipcRenderer.invoke(IPC.engineStatus) as Promise<EngineStatus | null>,
+    signIn: (kind, secret) =>
+      ipcRenderer.invoke(IPC.engineSignIn, kind, secret) as Promise<{
+        ok: boolean
+        message: string
+      }>,
+    signOut: (kind) => ipcRenderer.invoke(IPC.engineSignOut, kind) as Promise<unknown>,
+    test: () => ipcRenderer.invoke(IPC.engineTest) as Promise<EngineTestResult>
   },
 
   about: () => ipcRenderer.invoke(IPC.about) as Promise<AboutInfo>,

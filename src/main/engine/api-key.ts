@@ -1,0 +1,90 @@
+import Anthropic from '@anthropic-ai/sdk'
+import type { Engine, EngineState, PlanRequest, PlanResult, TransformRequest, TransformResult } from './types'
+import { EngineHealth } from './health'
+import { EDIT_SYSTEM_PROMPT, cleanEditOutput, cleanEditPartial, editPrompt, maxOutputTokens } from './prompts'
+
+/**
+ * ApiKeyEngine — the Messages API directly.
+ *
+ * The lower-latency of the two lanes, and the reason `docs/PLAN.md` asks for a
+ * bench: the edit lane has a 1.2 s first-token budget, and if the subscription
+ * path cannot meet it, this is what the default flips to. It is also the right
+ * shape for a BYOK tier later (docs/04).
+ *
+ * The system prompt is sent as a cached block. It never varies, so from the
+ * second edit onward the model is re-reading it from cache rather than from
+ * the wire — worth doing precisely because first-token time is the budget.
+ */
+
+export interface ApiKeyEngineOptions {
+  apiKey: string
+  model: string
+  /** Injected in tests; anything shaped like the SDK client will do. */
+  client?: Pick<Anthropic['messages'], 'stream'>
+  now?: () => number
+}
+
+export class ApiKeyEngine implements Engine {
+  readonly name = 'api-key'
+  readonly model: string
+  private readonly messages: Pick<Anthropic['messages'], 'stream'>
+  private readonly health: EngineHealth
+
+  constructor(options: ApiKeyEngineOptions) {
+    this.model = options.model
+    this.messages =
+      options.client ??
+      new Anthropic({
+        apiKey: options.apiKey,
+        // Main is a node process, not a browser; this only silences the SDK's
+        // "are you sure you want to expose a key" guard for bundled code.
+        dangerouslyAllowBrowser: false
+      }).messages
+    this.health = new EngineHealth({ now: options.now })
+  }
+
+  async ready(): Promise<EngineState> {
+    return this.health.current()
+  }
+
+  async transform(
+    request: TransformRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    try {
+      const stream = this.messages.stream({
+        model: this.model,
+        max_tokens: maxOutputTokens(request.text),
+        system: [
+          { type: 'text', text: EDIT_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
+        ],
+        messages: [{ role: 'user', content: editPrompt(request.instruction, request.text) }]
+      })
+
+      if (onPartial) {
+        stream.on('text', (_delta, snapshot) => onPartial(cleanEditPartial(snapshot)))
+      }
+
+      const message = await stream.finalMessage()
+      this.health.recover()
+
+      const text = message.content
+        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+        .map((block) => block.text)
+        .join('')
+
+      return { text: cleanEditOutput(text) }
+    } catch (err) {
+      // Classified and remembered, so the *next* edit knows without asking —
+      // then rethrown, because this one still failed and the lane has to say so.
+      this.health.degrade(err)
+      throw err
+    }
+  }
+
+  async plan(_request: PlanRequest): Promise<PlanResult> {
+    // Commands are M5. An empty plan would render as a card proposing nothing,
+    // which is worse than an error nobody currently triggers.
+    throw new Error('Mull can’t plan commands yet.')
+  }
+}

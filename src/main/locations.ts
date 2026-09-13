@@ -42,6 +42,15 @@ export function settingsPath(): string {
   return join(userDataDir(), 'settings.json')
 }
 
+/**
+ * Engine credentials, encrypted by `safeStorage` (src/main/store/credentials.ts).
+ * Beside settings.json rather than inside it: one file is hand-editable and the
+ * other must never be, and keeping them apart makes that obvious on disk.
+ */
+export function credentialsPath(): string {
+  return join(userDataDir(), 'credentials.json')
+}
+
 /** Places whisper.cpp's CLI lands, in preference order. */
 const WHISPER_CLI_CANDIDATES = [
   '/opt/homebrew/bin/whisper-cli',

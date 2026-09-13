@@ -2,7 +2,7 @@
   "name": "mull",
   "version": "0.0.1",
   "private": true,
-  "description": "Mull — macOS voice-first thinking layer (M1 skeleton)",
+  "description": "Mull \u2014 macOS voice-first thinking layer (M1 skeleton)",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -13,6 +13,7 @@
     "check:native": "electron scripts/native-check.cjs",
     "fetch:model": "tsx scripts/fetch-model.ts",
     "smoke": "tsx scripts/smoke.ts",
+    "bench:engine": "tsx scripts/bench-engine.ts",
     "notarize:dryrun": "tsx scripts/notarize-dryrun.ts",
     "pack:local": "npm run build:sidecar && npm run build && tsx scripts/pack-local.ts",
     "test": "vitest run"
@@ -20,6 +21,8 @@
   "author": "",
   "license": "UNLICENSED",
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.270",
+    "@anthropic-ai/sdk": "0.125.0",
     "better-sqlite3": "^13.0.3",
     "diff": "^9.0.0",
     "electron-log": "^5.4.4",

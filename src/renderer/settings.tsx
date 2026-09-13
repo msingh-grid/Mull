@@ -4,6 +4,7 @@ import type { AboutInfo } from '@shared/about'
 import type { ModelStatus } from '@shared/model'
 import type { PermissionsSnapshot } from '@shared/permissions'
 import type { Settings } from '@shared/settings'
+import { SETUP_TOKEN_COMMAND, type EngineStatus } from '@shared/engine'
 import { PermissionRows } from './components/PermissionRows'
 import { applyTheme } from './theme'
 import './tokens.css'
@@ -13,10 +14,12 @@ import './windows.css'
 /**
  * Settings (docs/DESIGN.md §6.8).
  *
- * Four panes, in the order someone actually needs them: the one that unsticks
- * a broken install first, the cosmetic one last. Permissions poll while this
- * window is open — granting happens in System Settings, out of our reach, and
- * the only honest way to know it landed is to keep asking.
+ * Panes in the order someone actually needs them: the one that unsticks a
+ * broken install first, the cosmetic one in the middle, the reference one
+ * last. Permissions poll while this window is open — granting happens in
+ * System Settings, out of our reach, and the only honest way to know it landed
+ * is to keep asking. The engine pane follows the same rule with its Test
+ * button, for the same reason.
  */
 
 const POLL_MS = 1500
@@ -43,6 +46,205 @@ function Row({
 
 function humanBytes(bytes: number): string {
   return `${(bytes / 1_048_576).toFixed(1)} MB`
+}
+
+/**
+ * The engine pane.
+ *
+ * Leads with the subscription because that is the path that asks for nothing:
+ * on a Mac already signed in to Claude Code there is no field to fill at all,
+ * and saying so is the most useful sentence this window contains. The API key
+ * sits underneath as the escape hatch.
+ *
+ * Nothing here can read a secret back. The fields write; the status line
+ * reports "saved" and the model in use, and that is the whole of what a
+ * renderer is told. Test is the only honest ✓ — the same rule the permission
+ * rows follow, for the same reason: a credential that saved is not a
+ * credential that works.
+ */
+function EnginePane({
+  settings,
+  update
+}: {
+  settings: Settings
+  update: (patch: Partial<Settings>) => Promise<void>
+}): JSX.Element {
+  const bridge = window.mull
+  const [status, setStatus] = useState<EngineStatus | null>(null)
+  const [token, setToken] = useState('')
+  const [key, setKey] = useState('')
+  const [message, setMessage] = useState<string | null>(null)
+  const [testing, setTesting] = useState(false)
+  const [copied, setCopied] = useState(false)
+
+  const refresh = useCallback(() => {
+    void bridge?.engine.status().then(setStatus)
+  }, [bridge])
+
+  useEffect(refresh, [refresh])
+
+  const save = async (kind: 'subscription' | 'api-key', secret: string): Promise<void> => {
+    if (!secret.trim()) return
+    const result = await bridge?.engine.signIn(kind, secret)
+    setMessage(result?.message ?? null)
+    // The field is cleared whether or not it worked: there is no reason for a
+    // secret to sit in a text input after it has been handed over.
+    if (kind === 'subscription') setToken('')
+    else setKey('')
+    refresh()
+  }
+
+  const signOut = async (kind: 'subscription' | 'api-key'): Promise<void> => {
+    await bridge?.engine.signOut(kind)
+    setMessage(kind === 'api-key' ? 'API key removed.' : 'Token removed.')
+    refresh()
+  }
+
+  const test = async (): Promise<void> => {
+    setTesting(true)
+    setMessage(null)
+    const result = await bridge?.engine.test()
+    setTesting(false)
+    setMessage(result?.message ?? null)
+    refresh()
+  }
+
+  const copy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(SETUP_TOKEN_COMMAND)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1_600)
+    } catch {
+      // Clipboard denied: the command is on screen and selectable anyway.
+      setMessage(`Copy this and run it in a terminal: ${SETUP_TOKEN_COMMAND}`)
+    }
+  }
+
+  const live =
+    status === null
+      ? 'checking…'
+      : status.state === 'ready'
+        ? `${status.kind === 'agent' ? 'Claude subscription' : 'API key'} · ${status.model ?? '—'}`
+        : status.state === 'signed-out'
+          ? 'not connected'
+          : `paused — ${status.reason ?? 'unavailable'}`
+
+  return (
+    <section className="section">
+      <h2>Engine</h2>
+      <p>
+        Edits — “make this crisp”, “fix the grammar” — need a model. Dictation never does, and
+        keeps working whatever this says.
+      </p>
+
+      <Row label="In use" hint={status?.detectedLogin ? 'Claude Code login found on this Mac' : undefined}>
+        <span className="mono">{live}</span>
+      </Row>
+
+      <Row label="Claude subscription" hint={status?.hasSubscription ? 'token saved' : undefined}>
+        {status?.hasSubscription ? (
+          <button type="button" className="btn ghost" onClick={() => void signOut('subscription')}>
+            Sign out
+          </button>
+        ) : status?.detectedLogin ? (
+          <span className="mono">already signed in</span>
+        ) : (
+          <button type="button" className="btn ghost" onClick={() => void copy()}>
+            {copied ? 'Copied' : 'Copy command'}
+          </button>
+        )}
+      </Row>
+
+      {!status?.hasSubscription && !status?.detectedLogin ? (
+        <>
+          <p>
+            Run <code>{SETUP_TOKEN_COMMAND}</code> in a terminal and paste what it prints. It uses
+            the Claude plan you already pay for; there is nothing extra to buy.
+          </p>
+          <Row label="Token">
+            <input
+              type="password"
+              className="mono"
+              value={token}
+              placeholder="sk-ant-oat…"
+              aria-label="Claude subscription token"
+              onChange={(event) => setToken(event.target.value)}
+            />
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!token.trim()}
+              onClick={() => void save('subscription', token)}
+            >
+              Save
+            </button>
+          </Row>
+        </>
+      ) : null}
+
+      <Row label="API key" hint={status?.hasApiKey ? 'saved' : 'optional'}>
+        {status?.hasApiKey ? (
+          <button type="button" className="btn ghost" onClick={() => void signOut('api-key')}>
+            Sign out
+          </button>
+        ) : (
+          <>
+            <input
+              type="password"
+              className="mono"
+              value={key}
+              placeholder="sk-ant-…"
+              aria-label="Anthropic API key"
+              onChange={(event) => setKey(event.target.value)}
+            />
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={!key.trim()}
+              onClick={() => void save('api-key', key)}
+            >
+              Save
+            </button>
+          </>
+        )}
+      </Row>
+
+      <Row label="Lane" hint="auto prefers your subscription">
+        <select
+          value={settings.engine}
+          onChange={(event) => void update({ engine: event.target.value as Settings['engine'] })}
+        >
+          <option value="auto">Automatic</option>
+          <option value="subscription">Claude subscription</option>
+          <option value="api-key">API key</option>
+        </select>
+      </Row>
+
+      <Row label="Edits" hint="npm run bench:engine measures both">
+        <select
+          value={settings.editModel}
+          onChange={(event) =>
+            void update({ editModel: event.target.value as Settings['editModel'] })
+          }
+        >
+          <option value="sonnet">Careful — Sonnet 5</option>
+          <option value="haiku">Fast — Haiku 4.5</option>
+        </select>
+      </Row>
+
+      <Row label="Connection">
+        <button type="button" className="btn ghost" disabled={testing} onClick={() => void test()}>
+          {testing ? 'Testing…' : 'Test'}
+        </button>
+      </Row>
+
+      {message ? <p className="warn-line">{message}</p> : null}
+      <p>
+        The model is sent your instruction and the text you selected, and returns a proposal. It
+        has no tools, no file access, and one turn — every change still waits for your ⏎.
+      </p>
+    </section>
+  )
 }
 
 function SettingsWindow(): JSX.Element {
@@ -214,6 +416,8 @@ function SettingsWindow(): JSX.Element {
             <p>Checking…</p>
           )}
         </section>
+
+        <EnginePane settings={settings} update={update} />
 
         <section className="section">
           <h2>About</h2>
