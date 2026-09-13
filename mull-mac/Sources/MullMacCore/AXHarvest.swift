@@ -136,8 +136,21 @@ public enum AXHarvest {
     /// is both cheaper and more correct: the application's children include the
     /// menu bar and every other window it owns, none of which is what the user
     /// is looking at.
-    public static func harvest(pid: pid_t, budget: Budget = Budget()) -> Harvest {
+    public static func harvest(
+        pid: pid_t,
+        budget: Budget = Budget(),
+        /// How long to keep waiting for a freshly-enabled Chromium tree. Set on
+        /// the first call and carried through the retries, so the wait is
+        /// bounded in total rather than per attempt. Nil on the first call.
+        treeDeadline: CFAbsoluteTime? = nil
+    ) -> Harvest {
         let startedAt = CFAbsoluteTimeGetCurrent()
+        // Carried, not recomputed: `enableManualAccessibility` only answers
+        // "yes" once per app, so asking it again inside the retry would say no
+        // and end the wait after a single poll. That bug made the whole thing
+        // look like it did not work.
+        let warming = treeDeadline != nil || enableManualAccessibility(pid: pid)
+        let treeDeadline = treeDeadline ?? (startedAt + manualAccessibilityWait)
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, messagingTimeout)
 
@@ -186,11 +199,84 @@ public enum AXHarvest {
             }
         }
 
+        // Chromium populates its tree asynchronously after the switch above is
+        // thrown, and takes its time about it — Slack measured well past a
+        // quarter of a second on a cold tree. So the first harvest of an
+        // Electron app waits and looks again, up to a budget.
+        //
+        // Only ever on the run that actually enabled it, which is once per app
+        // per sidecar launch, and only while the tree is still empty. Every
+        // harvest after that is the 30ms one. It is paid during the hold, with
+        // the user still speaking, which is the one moment there is time to
+        // spend.
+        if warming && blocks.count <= 1 {
+            if CFAbsoluteTimeGetCurrent() < treeDeadline {
+                Thread.sleep(forTimeInterval: manualAccessibilityPoll)
+                return harvest(pid: pid, budget: budget, treeDeadline: treeDeadline)
+            }
+            // Out of patience, not out of tree. Said out loud rather than
+            // returned as an ordinary empty result, because the two mean very
+            // different things to the host: "this window has nothing in it" and
+            // "ask me again in a moment" deserve different answers.
+            return Harvest(
+                blocks: blocks, truncated: true, stoppedBy: "tree-warming",
+                elapsedMs: elapsed(since: startedAt))
+        }
+
         return Harvest(
             blocks: blocks,
             truncated: stoppedBy != "complete",
             stoppedBy: stoppedBy,
             elapsedMs: elapsed(since: startedAt))
+    }
+
+    /// Apps whose accessibility tree has already been switched on this launch.
+    private static var manualAccessibility: Set<pid_t> = []
+    /// How long to block waiting for a Chromium tree that was just switched on.
+    ///
+    /// Short, and deliberately shorter than the tree usually takes. The
+    /// dispatcher is serial — one stdin thread — so every millisecond spent
+    /// sleeping here is a millisecond `focusedElement` and `selectedText` spend
+    /// queued behind it, and those two decide what an edit can even act on.
+    ///
+    /// The host does the patient half: it sees `stoppedBy == "tree-warming"`
+    /// and asks again a moment later, which leaves the queue free in between.
+    /// Measured on a cold Claude Desktop, the tree took ~2s to appear; on a
+    /// cold Slack, under one.
+    private static let manualAccessibilityWait: TimeInterval = 0.6
+    private static let manualAccessibilityPoll: TimeInterval = 0.15
+
+    /// Ask Chromium to build an accessibility tree, and say whether we just did.
+    ///
+    /// This is the whole reason Mull could see nothing in Slack. Chromium — and
+    /// therefore every Electron app: Slack, Discord, VS Code, Notion, Teams —
+    /// does not maintain an accessibility tree at all unless an assistive
+    /// client asks for one. Until then the app element has a window with a
+    /// title and essentially nothing inside it, which is exactly what the
+    /// harvest reported: one block, forty characters, two milliseconds.
+    ///
+    /// `AXManualAccessibility` is Chromium's own opt-in for this, and it is the
+    /// right one to use rather than the older `AXEnhancedUserInterface`: that
+    /// one is the global VoiceOver switch, and some apps change their layout and
+    /// window animations when they see it. This one only turns the tree on.
+    ///
+    /// Set once per process and remembered, because it is not free for the
+    /// target app — Chromium keeps the tree live afterwards, which costs it
+    /// memory and a little CPU on every DOM change. Doing it once, when the user
+    /// first asks Mull to read that app, is a fair trade; doing it on every
+    /// keystroke would not be.
+    ///
+    /// Returns false for apps that are not Chromium: they have no such
+    /// attribute, the write fails harmlessly, and nothing is remembered.
+    @discardableResult
+    private static func enableManualAccessibility(pid: pid_t) -> Bool {
+        if manualAccessibility.contains(pid) { return false }
+        let app = AXUIElementCreateApplication(pid)
+        let result = AXUIElementSetAttributeValue(
+            app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        guard result == .success else { return false }
+        manualAccessibility.insert(pid)
+        return true
     }
 
     // MARK: - One node
@@ -256,9 +342,19 @@ public enum AXHarvest {
         if chromeRoles.contains(node.role) { return nil }
         if text.trimmed.count < minimumBlockChars { return nil }
 
-        // Parents in most trees restate their children. Dropping an exact
-        // repeat of the line before is crude and catches nearly all of it.
-        if let previous, previous.text == text { return nil }
+        // Parents restate their children, and Chromium's do it thoroughly.
+        //
+        // Slack composes one `AXGroup` per message whose label is the whole
+        // thing — "Mohit Singh: You reached Poland? 7:17 PM." — and then hangs
+        // the same words off it again as separate `AXStaticText` children: the
+        // timestamp, the body, each link. Pre-order means the summary arrives
+        // first, so every fragment that follows can be checked against it.
+        //
+        // Containment rather than equality, because the fragments are pieces of
+        // the summary rather than copies of it. This roughly halves the
+        // transcript, and the half it keeps is the better one — the summary is
+        // the only place the *speaker's name* appears.
+        if let previous, previous.text.contains(text.trimmed) { return nil }
 
         return Block(
             role: node.role, text: text, label: label, focused: node.focused, selected: selected)

@@ -33,6 +33,19 @@ import { insertionProfile } from '../services/insertion-table'
 export const CONTEXT_CHARS = 6_000
 
 /**
+ * How patiently to wait for a Chromium accessibility tree. See the loop below.
+ *
+ * 4 × 400ms on top of the sidecar's own 600ms is 2.2s in the worst case, which
+ * is about how long a cold Claude Desktop took to answer and comfortably inside
+ * an ordinary hold. Past that the answer is "this window is empty", which is
+ * wrong but honest, and the next utterance will be right.
+ */
+const TREE_ATTEMPTS = 4
+const TREE_POLL_MS = 400
+
+const delay = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
+
+/**
  * Where the picture is taken and where it is not.
  *
  * Capturing is local and costs a few tens of milliseconds; *sending* costs
@@ -77,13 +90,45 @@ export async function captureContext(
   }
 
   const wantsImage = mode === 'text+screen'
-  const read = await sidecar
-    .windowContext({ maxChars: CONTEXT_CHARS, screenshot: wantsImage })
-    .catch((err: unknown) => {
+  const ask = (screenshot: boolean): Promise<Awaited<
+    ReturnType<SidecarApi['windowContext']>
+  > | null> =>
+    sidecar.windowContext({ maxChars: CONTEXT_CHARS, screenshot }).catch((err: unknown) => {
       log?.('warn', 'context: windowContext failed', err)
       return null
     })
+
+  let read = await ask(wantsImage)
   if (!read) return null
+
+  /**
+   * "Ask me again in a moment."
+   *
+   * An Electron app has no accessibility tree at all until something requests
+   * one, and Chromium then builds it asynchronously — a cold Slack took about a
+   * second, a cold Claude Desktop about two. The sidecar asks, waits briefly,
+   * and says `tree-warming` rather than pretending the window is empty.
+   *
+   * The patient half lives here rather than in Swift because the sidecar's
+   * dispatcher is serial: sleeping in there would queue `focusedElement` and
+   * `selectedText` behind it, and those two decide what an edit can act on.
+   * Polling from this side leaves the queue free between attempts.
+   *
+   * It costs nothing on the common path — this whole function runs during the
+   * hold, while the user is still speaking — and it happens once per app per
+   * launch. If the tree never arrives, what comes back is an honest empty
+   * window rather than a wrong one.
+   */
+  for (let attempt = 0; read.stoppedBy === 'tree-warming' && attempt < TREE_ATTEMPTS; attempt += 1) {
+    log?.('info', 'context: the window is still building its accessibility tree', {
+      app: app.bundleId,
+      attempt
+    })
+    await delay(TREE_POLL_MS)
+    const again = await ask(wantsImage)
+    if (!again) break
+    read = again
+  }
 
   // The sidecar refuses on its own grounds too, and says which. Secure input is
   // the one that matters: reading a password field is its own harm, quite apart

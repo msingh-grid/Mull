@@ -400,6 +400,8 @@ export class FakeSidecar implements SidecarApi {
 
   /** Which chords the pretend tap is watching. Empty when it is stopped. */
   hotkeyTapChords: Array<'opt-space' | 'fn'> = []
+  /** Set once the pretend Chromium tree has finished building. */
+  treeWarmed = false
   /** Every chord that was actually posted into the pretend app, in order. */
   chords: Array<{ key: string; modifiers: string[] }> = []
 
@@ -457,7 +459,9 @@ export class FakeSidecar implements SidecarApi {
       app,
       windowTitle: null,
       blocks: [],
-      truncated: false,
+      // A stopped walk is a truncated one — including `tree-warming`, where the
+      // real sidecar ran out of patience rather than out of tree.
+      truncated: reason !== 'complete',
       stoppedBy: reason,
       harvestMs: 0,
       screenshot: null,
@@ -472,6 +476,12 @@ export class FakeSidecar implements SidecarApi {
         : block
     )
     const stoppedBy = this.overrides.contextStoppedBy ?? 'complete'
+    // "Ask me again": the pretend app answers the first call with a warming
+    // tree and the next one properly, which is what a cold Electron app does.
+    if (stoppedBy === 'tree-warming' && !this.treeWarmed) {
+      this.treeWarmed = true
+      return empty('tree-warming')
+    }
     const wanted = p?.screenshot === true
     const path = this.overrides.screenshotPath
     return {

@@ -82,17 +82,55 @@ export function nothingToEdit(context: RouteContext): boolean {
  * other instruction. Requires text in the composer at the call site.
  */
 export function justSend(transcript: string): boolean {
-  const body = transcript
-    .trim()
+  const words = transcript
     .toLowerCase()
-    .replace(/[.!]+$/u, '')
-    .trim()
-  if (!body) return false
-  return BARE_SEND.test(body)
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+    .split(/\s+/u)
+    .filter(Boolean)
+  if (words.length === 0) return false
+  // At least one of them has to actually be the verb.
+  if (!words.some((word) => word === 'send' || word === 'sent')) return false
+  // The nouns below are also verbs, and an utterance that *opens* with one is
+  // using it that way: "reply to this and send it" is a message to write with
+  // a send attached, not a key to press. Only the object sense qualifies, and
+  // the object sense never leads.
+  if (AMBIGUOUS_HEAD.has(words[0] as string)) return false
+  // …and every single word has to be one of these. One content word and this
+  // is a message to write, not a key to press.
+  return words.every((word) => SEND_VOCABULARY.has(word))
 }
 
-const BARE_SEND =
-  /^(?:(?:go\s+ahead\s+and|just|please|now|ok(?:ay)?)\s+)*(?:send|fire)(?:\s+(?:it|that|this|them|off|out|now|already))*(?:\s+(?:the|that|this)\s+(?:message|reply|response|answer|email|note|text|dm))?(?:\s+(?:off|out|now|already))*$/u
+/** In-vocabulary words that are verbs when they lead. See `justSend`. */
+const AMBIGUOUS_HEAD = new Set(['reply', 'answer', 'text', 'message', 'email', 'note', 'dm'])
+
+/**
+ * The entire vocabulary of "press the send button", and nothing else.
+ *
+ * A whitelist rather than a pattern, because the failure modes point opposite
+ * ways and only one of them is safe. A pattern that is too loose swallows
+ * "send Priya the numbers" and presses a key on someone's behalf; a whitelist
+ * that is too tight merely sends the utterance to the model like any other
+ * instruction, which is where it was going anyway.
+ *
+ * So anything that is not on this list disqualifies the whole utterance. There
+ * is no content word here — no names, no nouns that could be a subject — which
+ * is what makes it impossible for a real message to match by accident.
+ *
+ * It covers the phrasings people actually used: "send it", "send the message",
+ * "just send that now", and — the one that prompted the list — "click the send
+ * button and send the message".
+ */
+const SEND_VOCABULARY = new Set([
+  // the verb, and the ways people reach for a control
+  'send', 'sent', 'fire', 'click', 'press', 'hit', 'tap', 'push', 'submit',
+  // what they are pressing or sending
+  'button', 'message', 'msg', 'reply', 'response', 'answer', 'email', 'note',
+  'text', 'dm', 'it', 'that', 'this', 'them', 'one',
+  // glue
+  'the', 'a', 'and', 'then', 'to', 'on', 'go', 'ahead', 'now', 'off', 'out',
+  'already', 'just', 'please', 'ok', 'okay', 'away', 'right', 'straight',
+  'mull', 'you', 'can'
+])
 
 /**
  * Did the user ask for it to be sent — and what is the request without that?

@@ -166,3 +166,44 @@ describe('isExcluded', () => {
     expect(isExcluded('com.tinyspeck.slackmacgap')).toBe(false)
   })
 })
+
+describe('captureContext — a window still building its accessibility tree', () => {
+  /**
+   * The Slack bug, as a test. An Electron app has no accessibility tree until
+   * something asks for one, and Chromium then builds it asynchronously — so the
+   * first read of a cold app comes back with the window title and nothing else.
+   * Reporting that as "this window is empty" is how Mull ended up composing a
+   * reply to a conversation it could not see.
+   */
+  it('asks again rather than reporting an empty window', async () => {
+    const sidecar = new FakeSidecar({
+      accessibility: true,
+      app: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack', pid: 7 },
+      context: ['Priya: any word on the redlines?', 'Dev: legal has it until Thursday'],
+      contextStoppedBy: 'tree-warming'
+    })
+
+    const context = await captureContext({ sidecar, mode: 'text' })
+
+    expect(context).not.toBeNull()
+    expect(context?.blocks.length).toBe(2)
+    expect(context?.chars).toBeGreaterThan(0)
+  })
+
+  it('gives up honestly when the tree never arrives', async () => {
+    const sidecar = new FakeSidecar({
+      accessibility: true,
+      app: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack', pid: 7 },
+      context: ['Priya: any word on the redlines?'],
+      contextStoppedBy: 'tree-warming'
+    })
+    // Never finishes warming.
+    Object.defineProperty(sidecar, 'treeWarmed', { get: () => false, set: () => {} })
+
+    const context = await captureContext({ sidecar, mode: 'text' })
+
+    // An empty window, said plainly — not a wrong one, and not a hang.
+    expect(context?.blocks).toEqual([])
+    expect(context?.truncated).toBe(true)
+  })
+})
