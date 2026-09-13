@@ -206,19 +206,35 @@ export function editTarget(
     if (!selection?.text) {
       return { ok: false, message: 'Nothing was selected — select the text and try again.' }
     }
+    /**
+     * Is this selection inside the box the caret is in?
+     *
+     * If it is, a keystroke write lands on it — that is what "the caret is in
+     * this field" means — and it can be replaced in place regardless of what
+     * `AXSelectedText` claimed to be settable. Chromium's tree reports a
+     * selection through nodes that are not themselves writable even when the
+     * user is highlighting their own text in a composer, which is how a Slack
+     * message you were drafting got labelled read-only.
+     */
+    const inFocusedField =
+      snapshot.field !== null &&
+      snapshot.field.editable &&
+      snapshot.field.text.includes(selection.text)
+
     // Read-only text becomes a `reference`: the rewrite goes to the caret
     // rather than nowhere. Refusing instead would be technically correct and
     // useless — "select your own sent message and improve it" is a thing people
     // want, and the composer is right there.
+    const writable = selection.editable || inFocusedField
     return {
       ok: true,
       target: {
-        kind: selection.editable ? 'selection' : 'reference',
+        kind: writable ? 'selection' : 'reference',
         app: snapshot.app,
         start: 0,
         length: selection.text.length,
         text: selection.text,
-        keystrokesSafe: selection.source === 'focused'
+        keystrokesSafe: selection.source === 'focused' || inFocusedField
       }
     }
   }
@@ -262,28 +278,33 @@ export async function stillMatches(
   sidecar: SidecarApi,
   target: EditTarget
 ): Promise<TargetCheck> {
-  let live: Awaited<ReturnType<SidecarApi['focusedElement']>>
-  try {
-    live = await sidecar.focusedElement({ contextBytes: CONTEXT_CHARS })
-  } catch {
-    return { ok: false, reason: 'unreadable' }
+  // Same app? Asked of the workspace rather than of an AX element, because
+  // `focusedElement` is not always answered and "which app is in front" always
+  // is. This check used to ride along on the focused-element read, which meant
+  // an app that would not hand one over could never have an edit applied at
+  // all — the Slack case, and the reason Apply appeared to do nothing.
+  if (target.app) {
+    const front = await sidecar.frontmostApp({}).catch(() => null)
+    if (front?.app && front.app.bundleId !== target.app.bundleId) {
+      return { ok: false, reason: 'different-app' }
+    }
   }
-
-  if (target.app && live.app && live.app.bundleId !== target.app.bundleId) {
-    return { ok: false, reason: 'different-app' }
-  }
-  if (!live.element) return { ok: false, reason: 'unreadable' }
 
   if (target.kind !== 'document') {
-    // Re-read the same way it was found, so a selection held outside the
-    // focused element is still checkable.
+    // Re-read it the way it was found, so a selection held outside the focused
+    // element is still checkable.
     const selection = await sidecar.selectedText({}).catch(() => null)
     if (!selection?.text) return { ok: false, reason: 'no-selection' }
     return selection.text === target.text ? { ok: true } : { ok: false, reason: 'text-changed' }
   }
 
   // A document edit rewrites the field's whole value, so the whole value is
-  // what has to be unchanged — including anything typed after the caret.
+  // what has to be unchanged — including anything typed after the caret. This
+  // one genuinely needs the focused element: it is the field.
+  const live = await sidecar
+    .focusedElement({ contextBytes: CONTEXT_CHARS })
+    .catch(() => null)
+  if (!live?.element) return { ok: false, reason: 'unreadable' }
   if (live.element.truncated) return { ok: false, reason: 'text-changed' }
   return live.element.text === target.text ? { ok: true } : { ok: false, reason: 'text-changed' }
 }

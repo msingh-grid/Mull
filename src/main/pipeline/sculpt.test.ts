@@ -548,3 +548,69 @@ describe('SculptLane — a selection that is not where the caret is', () => {
     expect(lastEntry(h.journal).status).toBe('failed')
   })
 })
+
+/**
+ * The third report: the preview was right and Apply did nothing.
+ *
+ * `stillMatches` used to read the focused element first and refuse if it got
+ * nothing back — and an app that will not hand over a focused element is
+ * exactly the case a tree-found selection exists for. So every apply on a
+ * selection in Slack was refused before the selection was ever re-read.
+ */
+describe('SculptLane — applying in an app with no readable focused element', () => {
+  function noFocusHarness(kind: 'selection' | 'reference'): ReturnType<typeof harness> {
+    const sidecar = new FakeSidecar({
+      accessibility: true,
+      app: { ...APP, pid: 1 },
+      text: BEFORE,
+      caret: 0,
+      selectionLength: BEFORE.length,
+      selectionSource: 'tree',
+      // The composer refuses to describe itself, which is what broke this.
+      noFocus: true
+    })
+    const h = harness({ sidecar })
+    h.request.target = {
+      kind,
+      app: APP,
+      start: 0,
+      length: BEFORE.length,
+      text: BEFORE,
+      keystrokesSafe: false
+    }
+    return h
+  }
+
+  it('applies a reference edit instead of refusing', async () => {
+    const h = noFocusHarness('reference')
+    await h.lane.run(h.request)
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.sidecar.insertions.length).toBe(1)
+    expect(lastEntry(h.journal).status).toBe('applied')
+    expect(h.hud.announcements.at(-1)?.notice).toMatch(/applied/i)
+  })
+
+  it('applies a selection edit instead of refusing', async () => {
+    const h = noFocusHarness('selection')
+    await h.lane.run(h.request)
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.sidecar.insertions.length).toBe(1)
+    expect(lastEntry(h.journal).status).toBe('applied')
+  })
+
+  it('still refuses when the selection really is gone', async () => {
+    const h = noFocusHarness('reference')
+    await h.lane.run(h.request)
+    h.sidecar.selectionLength = 0
+
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.sidecar.insertions).toEqual([])
+    expect(h.hud.announcements.at(-1)?.notice).toMatch(/selection is gone/i)
+  })
+})

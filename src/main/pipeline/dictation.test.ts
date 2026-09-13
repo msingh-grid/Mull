@@ -597,7 +597,10 @@ describe('DictationPipeline — a selection that is not in the focused element',
         selectionLength: SENT.length,
         // Found by walking the app's tree, and not writable — a sent message.
         selectionSource: 'tree',
-        selectionEditable: false
+        selectionEditable: false,
+        // …and the caret is somewhere else entirely, which is the whole shape
+        // of the bug: focus on the composer, selection in the transcript above.
+        noFocus: true
       }),
       transcript: 'Can you please make it less apologetic?',
       sculpt: true,

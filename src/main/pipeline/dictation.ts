@@ -557,10 +557,15 @@ export class DictationPipeline {
       transcript: '',
       ...(lastAction !== undefined ? { lastAction } : {})
     })
+    // A success can go as soon as it has registered; a refusal is the only
+    // explanation the user will get and has to survive being read. Losing that
+    // sentence after 1.4s is why an apply that declined looked like an apply
+    // that did nothing.
+    const linger = this.deps.appliedLingerMs ?? (phase === 'applied' ? 1_400 : 6_000)
     this.lingerTimer = setTimeout(() => {
       this.lingerTimer = null
       if (this.phase === 'idle') this.toIdle()
-    }, this.deps.appliedLingerMs ?? 1_400)
+    }, linger)
     return true
   }
 

@@ -178,6 +178,7 @@ tail -3 "$HOME/Library/Application Support/mull/bench.jsonl" | python3 -m json.t
 | Memory chips still cite nothing | the store is M5 | M5 |
 | Undo is still single-step | the journal window makes a stack legible; the stack itself is later | M5 |
 | ~~The router is rules only~~ | closed in M4.1 — the model decides, the rules gate whether to ask and answer offline | done |
+| Whole-field edits need a field accessibility can read | some apps — Slack among them — do not hand over a focused element at all, so "there is text in the box" is invisible and only a **selection** can be edited there. Select the text first and it works. Nothing short of pressing ⌘A in someone else's app would fix it, which is not a thing Mull will do | when those apps expose more |
 | An instruction-shaped utterance waits 2–4 s on the subscription lane | measured: a warm Agent SDK turn is p50 4.2 s to *completion*, which is harness overhead rather than the model. Nothing in the SDK's options fixes it; the API-key lane does, and so does asking less often | when a faster classification path exists |
 | Whole-field edits are AX-only | `replaceRange` with `expect` is the only write exact enough for a whole field; a paste fallback would need ⌘A, and "select everything in whatever has focus, then overwrite it" is not a thing to do on a guess. Selections still degrade to paste and work everywhere | M5 |
 | Menu-bar and app icons are still glyphs | needs real monochrome assets | M6 |
@@ -217,6 +218,13 @@ so Mull concluded there was nothing to edit and typed the question into the box.
       any text field, and ask for a summary.
 - [ ] **An editable selection still replaces in place** — the TextEdit case from
       §3 is unchanged.
+- [ ] **Apply works in Slack.** Select text in the composer, ask for a rewrite,
+      press ⏎. This is the one that was broken: the check that runs before a
+      write asked for the focused element first, and Slack does not provide one,
+      so every apply was refused before the selection was re-read.
+- [ ] **A refusal stays on screen.** Make one happen — select, speak, then click
+      away before pressing ⏎ — and confirm the sentence is readable rather than
+      gone in a blink.
 - [ ] **Your clipboard survives.** Copy `MULL-CLIPBOARD-CANARY`, then do a
       reference edit somewhere AX cannot see the selection; ⌘V afterwards still
       pastes the canary. (Mull may press ⌘C to find the selection; it puts the
