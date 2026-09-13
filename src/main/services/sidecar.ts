@@ -8,6 +8,7 @@ import {
   SidecarNotifications,
   type SidecarNotification,
   type SidecarNotificationName,
+  type ContextBlock,
   type InsertionStrategy,
   type SidecarApi,
   type SidecarMethodName,
@@ -248,6 +249,9 @@ export class SidecarClient extends EventEmitter<SidecarEvents> implements Sideca
   frontmostApp = (p: SidecarParams<'frontmostApp'>) => this.call('frontmostApp', p)
   focusedElement = (p: SidecarParams<'focusedElement'>) => this.call('focusedElement', p)
   selectedText = (p: SidecarParams<'selectedText'>) => this.call('selectedText', p)
+  windowContext = (p: SidecarParams<'windowContext'>) => this.call('windowContext', p)
+  promptScreenRecording = (p: SidecarParams<'promptScreenRecording'>) =>
+    this.call('promptScreenRecording', p)
   insertText = (p: SidecarParams<'insertText'>) => this.call('insertText', p)
   replaceSelection = (p: SidecarParams<'replaceSelection'>) => this.call('replaceSelection', p)
   replaceRange = (p: SidecarParams<'replaceRange'>) => this.call('replaceRange', p)
@@ -351,6 +355,18 @@ export interface FakeSidecarOptions {
    * check against and must rely on the sidecar's own `expect` guard.
    */
   valueUnreadable?: boolean
+  /** Screen Recording, for the picture half of `windowContext`. */
+  screenRecording?: boolean
+  /**
+   * What the pretend window reads as, in order. Given as plain strings for the
+   * common case; a test that cares about roles, focus or selection can pass
+   * whole blocks.
+   */
+  context?: Array<string | ContextBlock>
+  /** Stop the pretend harvest early, as a budget would. */
+  contextStoppedBy?: string
+  /** A pretend JPEG on disk. Absent means the picture was not taken. */
+  screenshotPath?: string
 }
 
 /**
@@ -406,11 +422,66 @@ export class FakeSidecar implements SidecarApi {
   async checkPermissions() {
     return {
       accessibility: this.overrides.accessibility ?? false,
-      inputMonitoring: this.overrides.inputMonitoring ?? false
+      inputMonitoring: this.overrides.inputMonitoring ?? false,
+      screenRecording: this.overrides.screenRecording ?? false
     }
   }
   async promptAccessibility() {
     return { prompted: false, accessibility: this.overrides.accessibility ?? false }
+  }
+  async promptScreenRecording() {
+    return { prompted: false, screenRecording: this.overrides.screenRecording ?? false }
+  }
+
+  /**
+   * What the pretend window reads as.
+   *
+   * Refuses on exactly the two grounds the real verb does, and in the same
+   * order: secure input first (reading a password field is its own harm, quite
+   * apart from typing into one), then Accessibility.
+   */
+  async windowContext(p: SidecarParams<'windowContext'>) {
+    const app = (await this.frontmostApp()).app
+    const empty = (reason: string) => ({
+      app,
+      windowTitle: null,
+      blocks: [],
+      truncated: false,
+      stoppedBy: reason,
+      harvestMs: 0,
+      screenshot: null,
+      screenshotReason: reason
+    })
+    if (this.overrides.secureInput) return empty('secure-input')
+    if (!this.overrides.accessibility) return empty('no-accessibility')
+
+    const blocks: ContextBlock[] = (this.overrides.context ?? []).map((block) =>
+      typeof block === 'string'
+        ? { role: 'AXStaticText', text: block, label: null, focused: false, selected: false }
+        : block
+    )
+    const stoppedBy = this.overrides.contextStoppedBy ?? 'complete'
+    const wanted = p?.screenshot === true
+    const path = this.overrides.screenshotPath
+    return {
+      app,
+      windowTitle: null,
+      blocks,
+      truncated: stoppedBy !== 'complete',
+      stoppedBy,
+      harvestMs: 1,
+      screenshot:
+        wanted && path
+          ? { path, width: 1400, height: 900, bytes: 180_000, elapsedMs: 40 }
+          : null,
+      screenshotReason: !wanted
+        ? 'not-requested'
+        : path
+          ? null
+          : this.overrides.screenRecording
+            ? 'capture-failed'
+            : 'no-screen-recording'
+    }
   }
   async frontmostApp() {
     return {

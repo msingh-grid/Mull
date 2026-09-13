@@ -66,7 +66,13 @@ export const CheckPermissionsResultSchema = z.object({
   /** AXIsProcessTrusted() — gates everything else the sidecar does. */
   accessibility: z.boolean(),
   /** IOHIDCheckAccess for Input Monitoring (needed by the event tap in M3). */
-  inputMonitoring: z.boolean()
+  inputMonitoring: z.boolean(),
+  /**
+   * CGPreflightScreenCaptureAccess() — gates the screenshot half of
+   * `windowContext` (M5a). Defaulted rather than required so the field can be
+   * read from a result that predates it without throwing.
+   */
+  screenRecording: z.boolean().default(false)
 })
 
 export const PromptAccessibilityParamsSchema = z.object({})
@@ -141,6 +147,82 @@ export const SelectedTextResultSchema = z.object({
   /** 'focused' | 'tree' | 'copy'; null when nothing was found. */
   source: z.string().nullable(),
   reason: z.string().nullable()
+})
+
+/**
+ * What is on screen, in both the forms Mull can read it.
+ *
+ * `focusedElement` answers "what is the caret in" and `selectedText` answers
+ * "what is highlighted". Neither answers *"reply to this"*, because "this" is
+ * the conversation above the composer — text nobody selected, in elements
+ * nobody focused. This verb reads that, two ways at once:
+ *
+ *   blocks      the window's Accessibility tree in reading order. Exact text,
+ *               exact names, no OCR in the loop.
+ *   screenshot  one window, rendered. Everything the AX tree has no
+ *               representation for: charts, canvases, PDFs, layout.
+ *
+ * They are complementary rather than redundant. The harvest knows how a name
+ * is spelled; the picture knows what the thing actually looks like.
+ */
+export const ContextBlockSchema = z.object({
+  role: z.string(),
+  text: z.string(),
+  /** The element's own label, when `text` came from its value ("To:"). */
+  label: z.string().nullable(),
+  /** Where the caret is. True even when `text` is empty — an empty composer
+   *  is not nothing, it is the place a reply goes. */
+  focused: z.boolean(),
+  selected: z.boolean()
+})
+export type ContextBlock = z.infer<typeof ContextBlockSchema>
+
+export const WindowContextParamsSchema = z.object({
+  maxChars: z.number().int().positive().max(32_000).optional(),
+  /**
+   * Wall-clock bound on the AX walk. The other budgets bound the work; this
+   * one bounds the *waiting*, because every attribute read is a synchronous
+   * message into another process and an app that has stopped answering will
+   * hang any walk that only counts nodes.
+   */
+  deadlineMs: z.number().int().min(50).max(2_000).optional(),
+  /** Take the picture too. Costs the Screen Recording grant. */
+  screenshot: z.boolean().optional()
+})
+
+export const WindowContextResultSchema = z.object({
+  app: AppRefSchema.nullable(),
+  windowTitle: z.string().nullable(),
+  blocks: z.array(ContextBlockSchema),
+  /** A budget stopped the walk before the tree ran out. */
+  truncated: z.boolean(),
+  /** Which one: 'complete' | 'nodes' | 'chars' | 'deadline' | 'no-window' | 'no-accessibility'. */
+  stoppedBy: z.string(),
+  harvestMs: z.number().int().nonnegative(),
+  /**
+   * A JPEG on disk, not bytes on the wire. Base64 in an ndjson line is a third
+   * bigger than the file and lands in the log; the host reads this path, sends
+   * it, and deletes it.
+   */
+  screenshot: z
+    .object({
+      path: z.string(),
+      width: z.number().int(),
+      height: z.number().int(),
+      bytes: z.number().int(),
+      elapsedMs: z.number().int()
+    })
+    .nullable(),
+  /** Why there is no picture: 'not-requested' | 'no-screen-recording' | … */
+  screenshotReason: z.string().nullable()
+})
+
+export const PromptScreenRecordingParamsSchema = z.object({})
+export const PromptScreenRecordingResultSchema = z.object({
+  prompted: z.boolean(),
+  /** Re-read after prompting. The grant needs a relaunch, so this is usually
+   *  still false immediately after the user clicks Allow — say so, don't lie. */
+  screenRecording: z.boolean()
 })
 
 export const InsertTextParamsSchema = z.object({
@@ -264,11 +346,16 @@ export const KeyChordResultSchema = z.object({
  * moved with it: an AX write now targets the element that holds the selection
  * rather than whatever has focus, because reading from one and writing to the
  * other is how you overwrite the wrong text.
+ * 5 (M5a): `windowContext` — the whole window, as text and as a picture — plus
+ * `promptScreenRecording` and a `screenRecording` field on `checkPermissions`.
+ * The sidecar's deployment target moves to macOS 14 with it: the capture is
+ * `SCScreenshotManager`, and the deprecated `CGWindowListCreateImage` is not a
+ * thing to build a new feature on.
  *
  * The `init` handshake rejects a mismatch, so a stale `mull-mac` binary fails
  * loudly at boot instead of returning shapes the host can't parse.
  */
-export const SIDECAR_PROTOCOL_VERSION = 4
+export const SIDECAR_PROTOCOL_VERSION = 5
 
 // ---------------------------------------------------------------------------
 // Notifications: sidecar -> host, no id, no reply.
@@ -304,6 +391,11 @@ export const SidecarMethods = {
   frontmostApp: { params: FrontmostAppParamsSchema, result: FrontmostAppResultSchema },
   focusedElement: { params: FocusedElementParamsSchema, result: FocusedElementResultSchema },
   selectedText: { params: SelectedTextParamsSchema, result: SelectedTextResultSchema },
+  windowContext: { params: WindowContextParamsSchema, result: WindowContextResultSchema },
+  promptScreenRecording: {
+    params: PromptScreenRecordingParamsSchema,
+    result: PromptScreenRecordingResultSchema
+  },
   insertText: { params: InsertTextParamsSchema, result: InsertTextResultSchema },
   replaceSelection: { params: ReplaceSelectionParamsSchema, result: ReplaceSelectionResultSchema },
   replaceRange: { params: ReplaceRangeParamsSchema, result: ReplaceRangeResultSchema },

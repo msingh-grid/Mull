@@ -14,12 +14,13 @@ import Foundation
 /// Mull decided to write, and the one where being wrong means typing a password
 /// fragment into a chat window.
 
-/// Protocol 3 (M3): adds the hotkey event tap and, with it, the sidecar's
-/// first *notifications* — messages the sidecar sends unprompted. `init`
-/// rejects a mismatch loudly, so a stale binary fails at boot rather than
-/// returning shapes the host cannot parse.
-public let SIDECAR_PROTOCOL_VERSION = 4
-public let SIDECAR_VERSION = "0.4.0"
+/// Protocol 5 (M5a): `windowContext` — the focused window read two ways, as an
+/// Accessibility transcript and as a JPEG — plus `promptScreenRecording` and a
+/// `screenRecording` field on `checkPermissions`. `init` rejects a mismatch
+/// loudly, so a stale binary fails at boot rather than returning shapes the
+/// host cannot parse.
+public let SIDECAR_PROTOCOL_VERSION = 5
+public let SIDECAR_VERSION = "0.5.0"
 
 // MARK: - Param structs (mirror the zod schemas)
 
@@ -40,6 +41,12 @@ struct FocusedElementParams: Decodable {
 
 struct SelectedTextParams: Decodable {
     let allowCopy: Bool?
+}
+
+struct WindowContextParams: Decodable {
+    let maxChars: Int?
+    let deadlineMs: Int?
+    let screenshot: Bool?
 }
 
 struct ReplaceRangeParams: Decodable {
@@ -127,6 +134,61 @@ public struct SelectionLookup {
     }
 }
 
+/// One readable thing in the window, in the order it appears.
+public struct ContextBlockInfo {
+    public let role: String
+    public let text: String
+    public let label: String?
+    public let focused: Bool
+    public let selected: Bool
+    public init(role: String, text: String, label: String?, focused: Bool, selected: Bool) {
+        self.role = role
+        self.text = text
+        self.label = label
+        self.focused = focused
+        self.selected = selected
+    }
+}
+
+public struct ScreenshotInfo {
+    public let path: String
+    public let width: Int
+    public let height: Int
+    public let bytes: Int
+    public let elapsedMs: Int
+    public init(path: String, width: Int, height: Int, bytes: Int, elapsedMs: Int) {
+        self.path = path
+        self.width = width
+        self.height = height
+        self.bytes = bytes
+        self.elapsedMs = elapsedMs
+    }
+}
+
+/// The window, read both ways. `screenshot` is nil whenever the picture was not
+/// taken — not requested, not permitted, or it failed — and `screenshotReason`
+/// always says which, because "no image" and "no image *because*" are different
+/// facts to the host.
+public struct WindowContextInfo {
+    public let blocks: [ContextBlockInfo]
+    public let truncated: Bool
+    public let stoppedBy: String
+    public let harvestMs: Int
+    public let screenshot: ScreenshotInfo?
+    public let screenshotReason: String?
+    public init(
+        blocks: [ContextBlockInfo], truncated: Bool, stoppedBy: String, harvestMs: Int,
+        screenshot: ScreenshotInfo?, screenshotReason: String?
+    ) {
+        self.blocks = blocks
+        self.truncated = truncated
+        self.stoppedBy = stoppedBy
+        self.harvestMs = harvestMs
+        self.screenshot = screenshot
+        self.screenshotReason = screenshotReason
+    }
+}
+
 public enum FocusedElementLookup {
     case found(FocusedElementInfo)
     /// 'no-accessibility' | 'no-focused-element' | 'unreadable'
@@ -164,6 +226,12 @@ public struct InsertOutcome {
 public protocol SystemActions {
     func accessibilityTrusted() -> Bool
     func inputMonitoringGranted() -> Bool
+    /// CGPreflightScreenCaptureAccess() — gates the picture half of
+    /// `windowContext`. Never prompts.
+    func screenRecordingGranted() -> Bool
+    /// Show the Screen Recording prompt. The grant needs a relaunch to take
+    /// effect, so the caller must re-read rather than assume.
+    func promptScreenRecording() -> Bool
     /// 'granted' | 'denied' | 'undetermined' — AVCaptureDevice status for THIS
     /// process; in dev TCC attributes it to the responsible (parent) app.
     func microphoneStatus() -> String
@@ -176,6 +244,9 @@ public protocol SystemActions {
     /// the ⌘C fallback, which presses a key in someone else's app and so is
     /// never taken without the host asking for it.
     func selectedText(allowCopy: Bool) -> SelectionLookup
+    /// The whole focused window, as an Accessibility transcript and — when
+    /// asked and permitted — as a JPEG on disk. A read; it presses nothing.
+    func windowContext(maxChars: Int, deadlineMs: Int, screenshot: Bool) -> WindowContextInfo
     /// Insert at the caret with a concrete strategy ("ax" | "paste" | "type").
     func insert(text: String, strategy: String, settleMs: Int) -> InsertOutcome
     /// Replace the current selection, reporting what was there before.
@@ -240,6 +311,7 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
         .object([
             "accessibility": .bool(system.accessibilityTrusted()),
             "inputMonitoring": .bool(system.inputMonitoringGranted()),
+            "screenRecording": .bool(system.screenRecordingGranted()),
             // Additive field (optional in the zod schema): mic status as seen
             // from this process. The authoritative mic check for capture is
             // Electron-side (systemPreferences.getMediaAccessStatus).
@@ -252,6 +324,82 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
         return .object([
             "prompted": .bool(prompted),
             "accessibility": .bool(system.accessibilityTrusted())
+        ])
+    }
+
+    d.register("promptScreenRecording") { _ in
+        let prompted = system.promptScreenRecording()
+        return .object([
+            "prompted": .bool(prompted),
+            // Re-read rather than echo the click: the grant does not take
+            // effect until relaunch, so this is usually still false. Saying so
+            // is the point — a ✓ never comes from the button.
+            "screenRecording": .bool(system.screenRecordingGranted())
+        ])
+    }
+
+    /// Read the focused window: the AX tree in reading order, and optionally a
+    /// picture of it.
+    ///
+    /// Deliberately *not* behind `blockedReason()`. That guard is for verbs
+    /// that write into another app, and its secure-input clause is about not
+    /// typing a password fragment somewhere. This verb types nothing — but it
+    /// reads, and reading a password field is its own harm, so secure input is
+    /// checked here on its own terms and refuses the whole thing.
+    d.register("windowContext") { raw in
+        let params = try decodeParams(
+            WindowContextParams.self, from: raw,
+            defaultIfMissing: WindowContextParams(
+                maxChars: nil, deadlineMs: nil, screenshot: nil))
+        let (app, title) = system.frontmostApp()
+
+        func empty(_ reason: String) -> JSON {
+            .object([
+                "app": appJSON(app),
+                "windowTitle": optional(title),
+                "blocks": .array([]),
+                "truncated": .bool(false),
+                "stoppedBy": .string(reason),
+                "harvestMs": .int(0),
+                "screenshot": .null,
+                "screenshotReason": .string(reason)
+            ])
+        }
+
+        if system.secureInputActive() { return empty("secure-input") }
+        guard system.accessibilityTrusted() else { return empty("no-accessibility") }
+
+        let info = system.windowContext(
+            maxChars: min(max(params.maxChars ?? 12_000, 200), 32_000),
+            deadlineMs: min(max(params.deadlineMs ?? 350, 50), 2_000),
+            screenshot: params.screenshot ?? false)
+
+        return .object([
+            "app": appJSON(app),
+            "windowTitle": optional(title),
+            "blocks": .array(
+                info.blocks.map { block in
+                    .object([
+                        "role": .string(block.role),
+                        "text": .string(block.text),
+                        "label": optional(block.label),
+                        "focused": .bool(block.focused),
+                        "selected": .bool(block.selected)
+                    ])
+                }),
+            "truncated": .bool(info.truncated),
+            "stoppedBy": .string(info.stoppedBy),
+            "harvestMs": .int(info.harvestMs),
+            "screenshot": info.screenshot.map { shot in
+                JSON.object([
+                    "path": .string(shot.path),
+                    "width": .int(shot.width),
+                    "height": .int(shot.height),
+                    "bytes": .int(shot.bytes),
+                    "elapsedMs": .int(shot.elapsedMs)
+                ])
+            } ?? .null,
+            "screenshotReason": optional(info.screenshotReason)
         ])
     }
 

@@ -68,6 +68,15 @@ public final class RealSystem: SystemActions {
         return true
     }
 
+    public func screenRecordingGranted() -> Bool {
+        Screenshot.permitted()
+    }
+
+    public func promptScreenRecording() -> Bool {
+        Screenshot.requestAccess()
+        return true
+    }
+
     // MARK: - Context
 
     public func frontmostApp() -> (app: AppInfo?, windowTitle: String?) {
@@ -100,6 +109,53 @@ public final class RealSystem: SystemActions {
 
     public func secureInputActive() -> Bool {
         IsSecureEventInputEnabled()
+    }
+
+    /// Read the focused window — text, and optionally a picture of it.
+    ///
+    /// The two halves are independent on purpose: an app with a hostile AX tree
+    /// still photographs, and a Mac without the Screen Recording grant still
+    /// reads. Whichever half fails says why rather than taking the other down
+    /// with it.
+    public func windowContext(maxChars: Int, deadlineMs: Int, screenshot: Bool)
+        -> WindowContextInfo
+    {
+        let (app, title) = frontmostApp()
+        guard let pid = app.map({ pid_t($0.pid) }) else {
+            return WindowContextInfo(
+                blocks: [], truncated: false, stoppedBy: "no-frontmost-app", harvestMs: 0,
+                screenshot: nil, screenshotReason: "no-frontmost-app")
+        }
+
+        let harvest = AXHarvest.harvest(
+            pid: pid,
+            budget: AXHarvest.Budget(
+                maxChars: maxChars, deadline: TimeInterval(deadlineMs) / 1000))
+
+        var shot: ScreenshotInfo?
+        var shotReason: String? = screenshot ? nil : "not-requested"
+        if screenshot {
+            switch Screenshot.frontWindow(pid: pid, expectedTitle: title) {
+            case .success(let capture):
+                shot = ScreenshotInfo(
+                    path: capture.path, width: capture.width, height: capture.height,
+                    bytes: capture.bytes, elapsedMs: capture.elapsedMs)
+            case .failure(let failure):
+                shotReason = failure.rawValue
+            }
+        }
+
+        return WindowContextInfo(
+            blocks: harvest.blocks.map {
+                ContextBlockInfo(
+                    role: $0.role, text: $0.text, label: $0.label, focused: $0.focused,
+                    selected: $0.selected)
+            },
+            truncated: harvest.truncated,
+            stoppedBy: harvest.stoppedBy,
+            harvestMs: harvest.elapsedMs,
+            screenshot: shot,
+            screenshotReason: shotReason)
     }
 
     public func focusedElement(context: Int) -> FocusedElementLookup {

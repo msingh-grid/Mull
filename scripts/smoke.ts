@@ -98,6 +98,35 @@ async function checkSidecar(): Promise<void> {
         : `null (${selected.reason})`
     )
 
+    // M5a: the window, read as text. Cheap and safe to run here — it presses
+    // nothing and writes nothing. `screenshot: false` because smoke must not
+    // photograph whatever the developer happens to have open.
+    const started = Date.now()
+    const context = await client.windowContext({ screenshot: false })
+    const contextChars = context.blocks.reduce((n, b) => n + b.text.length, 0)
+    check(
+      'windowContext reads the focused window',
+      Array.isArray(context.blocks),
+      `${context.blocks.length} blocks, ${contextChars} chars, ${context.harvestMs}ms harvest ` +
+        `(${Date.now() - started}ms round trip), stoppedBy=${context.stoppedBy}`
+    )
+    // The budget is the point: a walk that cannot be bounded is one that can
+    // hang the utterance it was supposed to be free for.
+    check(
+      'and stays inside its deadline',
+      context.harvestMs <= 2_000,
+      `${context.harvestMs}ms`
+    )
+    check(
+      'and does not photograph unless asked',
+      context.screenshot === null && context.screenshotReason === 'not-requested'
+    )
+    todo(
+      'Screen Recording granted',
+      perms.screenRecording,
+      'System Settings → Privacy & Security → Screen Recording — needed for the picture half'
+    )
+
     // A sentinel no real document contains, so the guard is what gets
     // exercised and nothing on this machine can be edited by running smoke.
     const sentinel = 'mull-smoke-sentinel-0d6f1c4a-never-present'

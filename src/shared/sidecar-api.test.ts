@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CheckPermissionsResultSchema,
   InsertTextParamsSchema,
   InsertTextResultSchema,
   FocusedElementParamsSchema,
   ReplaceRangeParamsSchema,
   SidecarMethods,
   SidecarNotifications,
+  WindowContextParamsSchema,
+  WindowContextResultSchema,
   SIDECAR_PROTOCOL_VERSION
 } from './sidecar-api'
 
@@ -53,6 +56,40 @@ describe('sidecar-api zod contract', () => {
     expect(() => ReplaceRangeParamsSchema.parse({ start: -1, length: 5, text: '' })).toThrow()
   })
 
+  it('windowContext bounds what may be asked of another app', () => {
+    // Both ceilings exist because every attribute read is a synchronous message
+    // into someone else's process. A caller cannot ask for an unbounded walk.
+    expect(() => WindowContextParamsSchema.parse({ maxChars: 100_000 })).toThrow()
+    expect(() => WindowContextParamsSchema.parse({ deadlineMs: 60_000 })).toThrow()
+    expect(WindowContextParamsSchema.parse({}).screenshot).toBeUndefined()
+  })
+
+  it('windowContext says why there is no picture, not just that there isn’t one', () => {
+    const result = WindowContextResultSchema.parse({
+      app: null,
+      windowTitle: '#terms-doc',
+      blocks: [
+        { role: 'AXStaticText', text: 'by EOD?', label: null, focused: false, selected: false },
+        { role: 'AXTextArea', text: '', label: 'Message', focused: true, selected: false }
+      ],
+      truncated: false,
+      stoppedBy: 'complete',
+      harvestMs: 13,
+      screenshot: null,
+      screenshotReason: 'no-screen-recording'
+    })
+    expect(result.screenshot).toBeNull()
+    expect(result.screenshotReason).toBe('no-screen-recording')
+    // The empty focused block survives parsing: an empty composer is not
+    // nothing, it is where a reply goes.
+    expect(result.blocks[1]).toMatchObject({ text: '', focused: true })
+  })
+
+  it('checkPermissions gains screenRecording without breaking an older answer', () => {
+    const old = CheckPermissionsResultSchema.parse({ accessibility: true, inputMonitoring: true })
+    expect(old.screenRecording).toBe(false)
+  })
+
   it('applies defaults (focusedElement contextBytes = ±2KB)', () => {
     expect(FocusedElementParamsSchema.parse({})).toEqual({ contextBytes: 2048 })
   })
@@ -65,7 +102,9 @@ describe('sidecar-api zod contract', () => {
       'promptAccessibility',
       'frontmostApp',
       'focusedElement',
-    'selectedText',
+      'selectedText',
+      'windowContext',
+      'promptScreenRecording',
       'insertText',
       'replaceSelection',
       'replaceRange',
@@ -76,7 +115,7 @@ describe('sidecar-api zod contract', () => {
       'stopHotkeyTap'
     ])
     // Bumped whenever a shape changes; the sidecar's `init` refuses a mismatch.
-    expect(SIDECAR_PROTOCOL_VERSION).toBe(4)
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(5)
   })
 })
 
