@@ -48,11 +48,30 @@ function DiffCardView({
         <Btn kind="primary" hint="⏎" onClick={() => onAction?.('apply')}>
           Apply
         </Btn>
+        {/*
+          The second commit, when there is one. Rendered *after* Apply and never
+          as the primary: Apply is what ⏎ has always done on this card, and a
+          send that looked like the default would be one someone pressed by
+          habit. Its warning replaces the undo promise rather than sitting
+          beside it, because "⌥Z undoes after apply" is not true of the button
+          next to it and two promises would be one too many to read (§7.2).
+        */}
+        {card.commit ? (
+          <Btn kind="send" hint={card.commit.hint} onClick={() => onAction?.('apply-send')}>
+            {card.commit.label}
+          </Btn>
+        ) : null}
         <Btn hint="esc" onClick={() => onAction?.('cancel')}>
           Cancel
         </Btn>
-        <span className="undo-promise">
-          <kbd>⌥Z</kbd> undoes after apply
+        <span className={`undo-promise${card.commit ? ' is-warning' : ''}`}>
+          {card.commit ? (
+            card.commit.warning
+          ) : (
+            <>
+              <kbd>⌥Z</kbd> undoes after apply
+            </>
+          )}
         </span>
       </div>
     </div>

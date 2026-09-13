@@ -78,3 +78,48 @@ describe('undoAffordance', () => {
     expect(undoAffordance(entry({ status: 'undone' })).label).toBe('Undone')
   })
 })
+
+describe('a send row', () => {
+  const send = (patch: Partial<JournalEntryView> = {}): JournalEntryView =>
+    entry({
+      intent: { kind: 'command', verb: 'send', args: {}, transcript: 'reply and send it' },
+      before: null,
+      after: null,
+      strategyUsed: null,
+      summary: 'Sent · Slack',
+      caret: null,
+      undoable: false,
+      ...patch
+    })
+
+  it('reads as a command', () => {
+    expect(rowKind(send())).toBe('command')
+  })
+
+  /**
+   * The reason matters more than the disabled state. "This app wouldn't
+   * confirm the text landed" would send someone hunting for a setting; the
+   * true answer is that there is nothing to undo a send with.
+   */
+  it('says it cannot be unsent, rather than blaming the app', () => {
+    expect(undoAffordance(send())).toEqual({
+      enabled: false,
+      label: 'Undo',
+      why: 'Mull can’t unsend a message.'
+    })
+    // …including the send Mull could not confirm, which `verified: null` would
+    // otherwise route into the app-wouldn't-confirm sentence.
+    expect(undoAffordance(send({ verified: null })).why).toBe('Mull can’t unsend a message.')
+  })
+
+  /**
+   * A send that did not go through sent nothing, so the reason is the ordinary
+   * one. Telling someone they cannot unsend a message that never left would be
+   * the wrong worry entirely.
+   */
+  it('does not claim a failed send is unsendable', () => {
+    expect(undoAffordance(send({ status: 'failed' })).why).toBe(
+      'Nothing was changed, so there is nothing to undo.'
+    )
+  })
+})

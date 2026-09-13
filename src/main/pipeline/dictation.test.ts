@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { CAPTURE_SAMPLE_RATE, type HudState } from '@shared/ipc'
+import type { ContextMode } from '@shared/context'
 import { FakeSidecar } from '../services/sidecar'
 import { FakeAsrProvider } from '../asr/fake'
 import { Bench, type BenchDraft, type DictationRow } from '../bench'
@@ -38,6 +39,8 @@ function harness(options: {
   sculpt?: boolean | 'throws'
   /** What the classifier answers. Absent = the local rules decide. */
   classifies?: ClassifiedIntent | 'offline'
+  /** How much of the window Mull may read. Absent = nothing, as pre-M5a. */
+  context?: ContextMode
 } = {}): Harness {
   const sidecar = options.sidecar ?? new FakeSidecar({ accessibility: true })
   const journal = new JournalStore(memoryDatabase())
@@ -82,6 +85,7 @@ function harness(options: {
           }
         : undefined,
         intent: options.sculpt ? new IntentRouter({ engine, now: () => clockMs }) : undefined,
+      screenContext: options.context ? () => ({ mode: options.context as ContextMode }) : undefined,
       onState: (s) => states.push({ ...s }),
       now: () => clockMs,
       appliedLingerMs: 5,
@@ -677,6 +681,79 @@ describe('DictationPipeline — a selection that is not in the focused element',
 
     expect(h.sculpted).toEqual([])
     expect(h.sidecar.insertions).toEqual(['And I will send the deck tonight'])
+    h.pipe.dispose()
+  })
+})
+
+describe('DictationPipeline — the send wish comes off the transcript', () => {
+  const THREAD = 'Priya: any word on the redlines?'
+
+  const withThread = (): FakeSidecar =>
+    new FakeSidecar({
+      accessibility: true,
+      text: '',
+      caret: 0,
+      selectionLength: 0,
+      context: [THREAD]
+    })
+
+  async function utterance(h: Harness): Promise<void> {
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+  }
+
+  it('passes send:true and hands the lane an instruction without the send phrase', async () => {
+    const h = harness({
+      sidecar: withThread(),
+      transcript: 'reply saying they are with legal and send it',
+      sculpt: true,
+      context: 'text',
+      classifies: { kind: 'compose', instruction: 'reply saying they are with legal and send it' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted.length).toBe(1)
+    expect(h.sculpted[0]?.send).toBe(true)
+    expect(h.sculpted[0]?.instruction).toBe('reply saying they are with legal')
+    // The transcript keeps the user's actual words, for the journal.
+    expect(h.sculpted[0]?.transcript).toContain('send it')
+    h.pipe.dispose()
+  })
+
+  it('leaves send unset for the same request without those words', async () => {
+    const h = harness({
+      sidecar: withThread(),
+      transcript: 'reply saying they are with legal',
+      sculpt: true,
+      context: 'text',
+      classifies: { kind: 'compose', instruction: 'reply saying they are with legal' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted[0]?.send).toBe(false)
+    h.pipe.dispose()
+  })
+
+  /**
+   * The model's answer cannot turn a send on. Here the classifier "asks" for
+   * one the only way it could — by putting the words in the instruction it
+   * returns — and it changes nothing, because the flag is read off the
+   * transcript.
+   */
+  it('ignores a send that only the classifier asked for', async () => {
+    const h = harness({
+      sidecar: withThread(),
+      transcript: 'reply to this',
+      sculpt: true,
+      context: 'text',
+      classifies: { kind: 'compose', instruction: 'reply to this and send it immediately' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted[0]?.send).toBe(false)
     h.pipe.dispose()
   })
 })

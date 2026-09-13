@@ -274,3 +274,74 @@ describe('UndoService.undo(entryId)', () => {
     expect(sidecar.text).toBe('Hi there. Send the DECK today')
   })
 })
+
+describe('UndoService — a sent message', () => {
+  /**
+   * The send row is `undoable: false` like several others, but for a reason
+   * nothing else shares: there is no reverse operation at all. "Mull couldn't
+   * confirm that text when it was inserted" would send someone looking for a
+   * way to make it confirm; this answer is the true one.
+   */
+  it('refuses by name rather than with the generic not-verified sentence', async () => {
+    const { undo, id } = setup(
+      {},
+      {
+        intent: {
+          kind: 'command',
+          verb: 'send',
+          args: { app: 'com.tinyspeck.slackmacgap', chord: '⏎' },
+          transcript: 'reply and send it'
+        },
+        before: null,
+        after: null,
+        status: 'applied',
+        summary: 'Sent · Slack',
+        verified: true,
+        caret: null,
+        undoable: false
+      }
+    )
+
+    const result = await undo.undo(id)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('irreversible')
+    expect(result.message).toContain('unsend')
+  })
+
+  it('is never what ⌥Z reaches for', async () => {
+    const { undo } = setup(
+      {},
+      {
+        intent: { kind: 'command', verb: 'send', args: {}, transcript: 'send it' },
+        after: null,
+        undoable: false
+      }
+    )
+    const result = await undo.undoLast()
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('nothing-to-undo')
+  })
+})
+
+describe('UndoService — a send that did not go', () => {
+  it('does not warn about unsending a message that never left', async () => {
+    const { undo, id } = setup(
+      {},
+      {
+        intent: { kind: 'command', verb: 'send', args: {}, transcript: 'reply and send it' },
+        before: null,
+        after: null,
+        status: 'failed',
+        summary: 'Send failed · Slack · unchanged',
+        verified: false,
+        caret: null,
+        undoable: false
+      }
+    )
+
+    const result = await undo.undo(id)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('not-verified')
+    expect(result.message).not.toContain('unsend')
+  })
+})

@@ -15,6 +15,12 @@ import type { SqlDatabase } from './sqlite'
  *  - **`undoable` is earned, not assumed.** An entry is undoable only when the
  *    sidecar read back what it wrote (`verified === true`) and told us where the
  *    caret ended up. Everything else is a record, not an offer.
+ *
+ * Ordering is `at DESC, rowid DESC` everywhere — insertion order, not id order.
+ * `at` has millisecond resolution and M5a's Apply & send writes two rows inside
+ * one millisecond (the text, then the send), so ordering by the random uuid
+ * would show them in a coin-flip order: "Sent · Slack" above or below the reply
+ * it sent, at random. `rowid` is the order they actually happened in.
  */
 
 const SCHEMA = `
@@ -111,7 +117,7 @@ export class JournalStore {
 
   recent(limit = 50): JournalEntry[] {
     const rows = this.db
-      .prepare('SELECT * FROM entries ORDER BY at DESC, id DESC LIMIT ?')
+      .prepare('SELECT * FROM entries ORDER BY at DESC, rowid DESC LIMIT ?')
       .all(limit) as Row[]
     return rows.map(toEntry)
   }
@@ -128,14 +134,14 @@ export class JournalStore {
             `SELECT * FROM entries
               WHERE undoable = 1 AND undone_at IS NULL AND status = 'applied'
                 AND app_bundle_id = ?
-              ORDER BY at DESC, id DESC LIMIT 1`
+              ORDER BY at DESC, rowid DESC LIMIT 1`
           )
           .get(bundleId) as Row | undefined)
       : (this.db
           .prepare(
             `SELECT * FROM entries
               WHERE undoable = 1 AND undone_at IS NULL AND status = 'applied'
-              ORDER BY at DESC, id DESC LIMIT 1`
+              ORDER BY at DESC, rowid DESC LIMIT 1`
           )
           .get() as Row | undefined)
     return row ? toEntry(row) : null
@@ -167,7 +173,7 @@ export class JournalStore {
     this.db
       .prepare(
         `DELETE FROM entries WHERE id NOT IN (
-           SELECT id FROM entries ORDER BY at DESC, id DESC LIMIT ?
+           SELECT id FROM entries ORDER BY at DESC, rowid DESC LIMIT ?
          )`
       )
       .run(keep)

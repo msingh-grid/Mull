@@ -42,6 +42,26 @@ export interface HudChip {
 // Cards — a proposal until the user commits (§7.5). Never auto-applied.
 // ---------------------------------------------------------------------------
 
+/**
+ * A second, heavier commit offered beside Apply.
+ *
+ * Present only when Mull can both write the text *and* do the thing the user
+ * asked for next — today that is "and send it", in an app whose send chord is
+ * on the table in `services/send-table.ts`.
+ *
+ * It carries its own `warning` because it is the first thing in Mull that ⌥Z
+ * cannot take back, and §7.2 says an action states its undo path in the same
+ * breath as itself. Here the undo path is: there isn't one.
+ */
+export interface CardCommit {
+  /** Button text, e.g. 'Apply & send'. */
+  label: string
+  /** The chord printed inside it, e.g. '⌘⏎'. */
+  hint: string
+  /** One clause under the actions, e.g. 'sending can’t be undone'. */
+  warning: string
+}
+
 export interface DiffCard {
   kind: 'diff'
   /** Named in the card title: "EDIT PREVIEW · Mail". */
@@ -49,6 +69,8 @@ export interface DiffCard {
   segments: DiffSegment[]
   /** Counted in main so the title and the body can never disagree. */
   changes: number
+  /** Absent on almost every card. See `CardCommit`. */
+  commit?: CardCommit | null
 }
 
 export type PlanStepState = 'pending' | 'running' | 'done' | 'failed'
@@ -69,5 +91,12 @@ export interface PlanCard {
 
 export type HudCard = DiffCard | PlanCard
 
-/** What the user's ⏎ / esc do while a card is open. */
-export type HudAction = 'apply' | 'cancel'
+/**
+ * What the user's ⏎ / ⌘⏎ / esc do while a card is open.
+ *
+ * `apply-send` is offered only when the card carries a `commit`, and it is
+ * always a separate keystroke from `apply` — never a mode, never a default.
+ * Someone who presses ⏎ out of habit has applied an edit, which is what ⏎ has
+ * always done here; they have not sent a message.
+ */
+export type HudAction = 'apply' | 'apply-send' | 'cancel'

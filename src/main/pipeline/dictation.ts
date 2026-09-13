@@ -23,7 +23,7 @@ import {
   type FocusSnapshot
 } from './selection'
 import type { IntentRouter } from './intent'
-import { mightBeInstruction } from './router'
+import { mightBeInstruction, wantsSend } from './router'
 import type { JournalStore } from '../store/journal'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 
@@ -61,6 +61,7 @@ export interface SculptLaneLike {
     target: EditTarget
     app: { bundleId: string; name: string } | null
     context?: ScreenContext | null
+    send?: boolean
     routedBy?: string
     classifyMs?: number | null
   }): Promise<void>
@@ -345,11 +346,19 @@ export class DictationPipeline {
           routed.route.kind === 'compose' ? 'draft' : routed.route.target
         )
         if (target.ok) {
+          // Did they ask for it to be sent? Read off their own transcript, here,
+          // rather than taken from the classifier's answer — see `wantsSend`.
+          // The instruction is cleaned of the same phrase so the draft does not
+          // end up with "and send it" written into it.
+          const wish = wantsSend(text)
           // Idle before handing off: the lane owns the panel from here, and a
           // new utterance must be able to interrupt it.
           this.phase = 'idle'
           await this.deps.sculpt.run({
-            instruction: routed.route.instruction,
+            instruction: wish.send
+              ? wantsSend(routed.route.instruction).without
+              : routed.route.instruction,
+            send: wish.send,
             transcript: text,
             target: target.target,
             app: this.state.app ?? routed.snapshot.app,

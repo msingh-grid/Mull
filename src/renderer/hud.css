@@ -314,6 +314,15 @@
 .btn.primary:hover { background: var(--ins-hover); }
 .btn.ghost { background: transparent; color: var(--ink-2); border-color: var(--hairline); }
 .btn.ghost:hover { background: var(--paper-recessed); }
+/* The irreversible commit (§7.2). Ochre, because hue always means fact and this
+   one is "you cannot take this back" — not a second Apply in a louder colour.
+   Outlined rather than filled so Apply stays the only solid button on the card. */
+.btn.send {
+  background: var(--warn-wash);
+  color: var(--warn);
+  border-color: var(--warn-edge);
+}
+.btn.send:hover { background: var(--warn-edge); color: var(--on-ins); }
 .btn .k {
   font-family: var(--mono);
   font-size: var(--fs-kbd);
@@ -327,6 +336,8 @@
   font-size: 11px;
   color: var(--ink-3);
 }
+/* "sending can’t be undone" is a fact about the button beside it, not a hint. */
+.undo-promise.is-warning { color: var(--warn); }
 
 kbd {
   font-family: var(--mono);

@@ -21,12 +21,28 @@ export interface GlobalShortcutLike {
   isRegistered?(accelerator: string): boolean
 }
 
-export type ChordAction = 'apply' | 'cancel'
+export type ChordAction = 'apply' | 'apply-send' | 'cancel'
 
-const CHORDS: Array<{ accelerator: string; action: ChordAction }> = [
+/** The two every card has. All-or-nothing: see `hold`. */
+const CORE: Array<{ accelerator: string; action: ChordAction }> = [
   { accelerator: 'Return', action: 'apply' },
   { accelerator: 'Escape', action: 'cancel' }
 ]
+
+/**
+ * The third, claimed only for a card that offers a second commit.
+ *
+ * Best-effort, unlike the core two. ⌘⏎ is a common shortcut inside other apps
+ * (Slack's own "send" when Return is set to newline, among others), so failing
+ * to claim it is an ordinary outcome rather than a broken card — the button is
+ * still there to click, and Apply and Cancel are unaffected. Claiming it
+ * unconditionally would also mean holding someone's ⌘⏎ hostage on every
+ * ordinary edit preview, for a commit that card does not offer.
+ */
+const SEND: { accelerator: string; action: ChordAction } = {
+  accelerator: 'CommandOrControl+Return',
+  action: 'apply-send'
+}
 
 export interface ChordScopeOptions {
   globalShortcut: GlobalShortcutLike
@@ -47,31 +63,43 @@ export class ChordScope {
   }
 
   /**
-   * Claim ⏎ and esc until the returned function is called. Re-holding while
-   * already held simply swaps the handler — a second card replacing a first
-   * must not end up with two registrations and one release.
+   * Claim ⏎ and esc until the returned function is called — and ⌘⏎ too when
+   * `send` is set, for a card that offers a second commit.
+   *
+   * Re-holding while already held simply swaps the handler — a second card
+   * replacing a first must not end up with two registrations and one release.
    */
-  hold(onAction: (action: ChordAction) => void): () => void {
+  hold(onAction: (action: ChordAction) => void, options?: { send?: boolean }): () => void {
     this.onAction = onAction
     if (this.active) return () => this.release()
 
-    for (const chord of CHORDS) {
+    const claim = (chord: { accelerator: string; action: ChordAction }): boolean => {
       try {
         const ok = this.options.globalShortcut.register(chord.accelerator, () => {
           this.onAction?.(chord.action)
         })
         if (ok) this.held.push(chord.accelerator)
         else this.log('warn', `chords: ${chord.accelerator} is claimed by another app`)
+        return ok
       } catch (err) {
         this.log('error', `chords: registering ${chord.accelerator} threw`, err)
+        return false
       }
     }
 
+    const core = CORE.filter((chord) => claim(chord))
+
     // All-or-nothing: a card that can be applied but not cancelled is a trap.
-    if (this.held.length !== CHORDS.length) {
+    if (core.length !== CORE.length) {
       this.log('warn', 'chords: could not claim both ⏎ and esc — releasing both')
       this.release()
       return () => {}
+    }
+
+    // Best-effort, and deliberately after the all-or-nothing check: the card
+    // works without it, and the button is still clickable.
+    if (options?.send && !claim(SEND)) {
+      this.log('warn', 'chords: ⌘⏎ is claimed elsewhere — Apply & send is click-only')
     }
 
     return () => this.release()

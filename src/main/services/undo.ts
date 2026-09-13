@@ -30,6 +30,8 @@ export type UndoReason =
   | 'no-caret'
   | 'text-changed'
   | 'not-verified'
+  /** The action had no reverse at all — a sent message (M5a). */
+  | 'irreversible'
   | 'blocked'
   | 'failed'
 
@@ -96,6 +98,24 @@ export class UndoService {
         entry,
         reason: 'nothing-to-undo',
         message: 'That one has already been undone.'
+      }
+    }
+    if (isSend(entry) && entry.status === 'applied') {
+      // Checked before `undoable`, which is false here too — but for a
+      // different reason, and the difference is the whole message. "Mull
+      // couldn't confirm that text" would send someone looking for a way to
+      // make it confirm. There isn't one: there is no keystroke that unsends a
+      // message, and saying so plainly is the only honest answer.
+      //
+      // Only for a send that actually went. A *failed* send sent nothing, and
+      // telling someone they cannot unsend a message that never left would be
+      // the wrong worry entirely — that row falls through to the ordinary
+      // "nothing to undo" below.
+      return {
+        ok: false,
+        entry,
+        reason: 'irreversible',
+        message: 'Mull can’t unsend that — the message has already gone.'
       }
     }
     if (!entry.undoable) {
@@ -235,6 +255,16 @@ export class UndoService {
     this.log('warn', 'undo refused', { entry: entry.id, reason: lastReason })
     return { ok: false, entry, reason, message: describeUndoFailure(lastReason) }
   }
+}
+
+/**
+ * Is this the journal's record of a send?
+ *
+ * Matched on the intent rather than on `undoable`, because every unreversible
+ * row shares that flag and they do not share an explanation.
+ */
+function isSend(entry: JournalEntry): boolean {
+  return entry.intent.kind === 'command' && entry.intent.verb === 'send'
 }
 
 function utf16Length(text: string): number {

@@ -107,3 +107,38 @@ describe('ChordScope', () => {
     expect(scope.active).toBe(false)
   })
 })
+
+describe('ChordScope — the send chord', () => {
+  it('does not claim ⌘⏎ for an ordinary card', () => {
+    const gs = fakeShortcuts()
+    new ChordScope({ globalShortcut: gs }).hold(() => {})
+    expect(gs.registered.has('CommandOrControl+Return')).toBe(false)
+  })
+
+  it('claims it for a card that offers a second commit, and routes it', () => {
+    const gs = fakeShortcuts()
+    const onAction = vi.fn()
+    const release = new ChordScope({ globalShortcut: gs }).hold(onAction, { send: true })
+    expect(gs.registered.has('CommandOrControl+Return')).toBe(true)
+
+    gs.handlers.get('CommandOrControl+Return')?.()
+    expect(onAction).toHaveBeenCalledWith('apply-send')
+
+    release()
+    expect(gs.registered.size).toBe(0)
+  })
+
+  /**
+   * Best-effort, unlike ⏎ and esc. ⌘⏎ is a common shortcut inside other apps,
+   * and losing it must not take the card's Apply and Cancel down with it — the
+   * button is still clickable.
+   */
+  it('keeps the card usable when ⌘⏎ is claimed elsewhere', () => {
+    const gs = fakeShortcuts(['CommandOrControl+Return'])
+    const scope = new ChordScope({ globalShortcut: gs })
+
+    scope.hold(() => {}, { send: true })
+    expect(scope.active).toBe(true)
+    expect(gs.registered).toEqual(new Set(['Return', 'Escape']))
+  })
+})

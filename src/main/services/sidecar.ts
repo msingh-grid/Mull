@@ -333,6 +333,15 @@ export interface FakeSidecarOptions {
   unreadable?: boolean
   /** Refuse the hotkey tap, as a Mac without Input Monitoring would. */
   hotkeyTap?: boolean
+  /**
+   * What the pretend app does with a chord (M5a, for the send read-back).
+   *
+   * `clears` is an app that sent the message and emptied the composer;
+   * `ignores` is the default and models the chord landing on nothing, which is
+   * exactly the case the read-back exists to catch. `refuses` is the window
+   * server declining the event.
+   */
+  chordEffect?: 'clears' | 'ignores' | 'refuses'
   /** Start with a document and caret, for undo/replaceRange tests. */
   text?: string
   caret?: number
@@ -391,6 +400,8 @@ export class FakeSidecar implements SidecarApi {
 
   /** Which chord the pretend tap is watching, or null when it is stopped. */
   hotkeyTapChord: 'opt-space' | 'fn' | null = null
+  /** Every chord that was actually posted into the pretend app, in order. */
+  chords: Array<{ key: string; modifiers: string[] }> = []
 
   constructor(private readonly overrides: FakeSidecarOptions = {}) {
     this.text = overrides.text ?? ''
@@ -650,8 +661,20 @@ export class FakeSidecar implements SidecarApi {
   async activateApp() {
     return { activated: false, reason: 'not-running' }
   }
-  async keyChord() {
-    return { sent: false, reason: 'no-accessibility' }
+  async keyChord(p: SidecarParams<'keyChord'>) {
+    this.chords.push({ key: p.key, modifiers: [...(p.modifiers ?? [])] })
+    this.calls.push({ method: 'keyChord', text: p.key })
+    const blocked = this.guard()
+    if (blocked) return { sent: false, reason: blocked.reason }
+    if (this.overrides.chordEffect === 'refuses') return { sent: false, reason: 'event-refused' }
+    // An app that acted on it: the composer is now empty, which is what the
+    // read-back looks for.
+    if (this.overrides.chordEffect === 'clears') {
+      this.text = ''
+      this.caret = 0
+      this.selectionLength = 0
+    }
+    return { sent: true, reason: null }
   }
 
   async startHotkeyTap(params: { chord: 'opt-space' | 'fn'; swallow?: boolean }) {

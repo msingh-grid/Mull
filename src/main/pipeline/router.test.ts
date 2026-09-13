@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { looksLikeInstruction, mightBeCompose, route, worthAsking } from './router'
+import { looksLikeInstruction, mightBeCompose, route, wantsSend, worthAsking } from './router'
 
 /**
  * The fixture table docs/PLAN.md asks for.
@@ -340,5 +340,51 @@ describe('route — the offline fallback knows about compose', () => {
     expect(
       route('reply to this', { hasSelection: false, hasFieldText: true, hasScreen: true })
     ).toMatchObject({ kind: 'compose' })
+  })
+})
+
+describe('wantsSend — the only thing that can put a send on a card', () => {
+  it('hears it tacked onto the end of a request', () => {
+    expect(wantsSend('reply saying I’ll have the redlines by five and send it')).toEqual({
+      send: true,
+      without: 'reply saying I’ll have the redlines by five'
+    })
+    expect(wantsSend('draft an answer declining, then send')).toMatchObject({ send: true })
+    expect(wantsSend('reply to this and send it off')).toMatchObject({ send: true })
+    expect(wantsSend('make this less apologetic and send it now')).toMatchObject({
+      send: true,
+      without: 'make this less apologetic'
+    })
+  })
+
+  it('leaves an ordinary request alone', () => {
+    expect(wantsSend('reply to this politely')).toEqual({
+      send: false,
+      without: 'reply to this politely'
+    })
+    expect(wantsSend('tighten this up')).toMatchObject({ send: false })
+    expect(wantsSend('')).toMatchObject({ send: false })
+  })
+
+  /**
+   * The sentence this function exists not to catch. "and I'll send the deck
+   * tonight" is the single most ordinary thing anyone dictates into a chat
+   * window, and it ends in the word "send" plus an object.
+   */
+  it('does not hear a send in speech that merely contains the word', () => {
+    expect(wantsSend('and I’ll send the deck tonight')).toMatchObject({ send: false })
+    expect(wantsSend('reply saying I’ll send Priya the numbers')).toMatchObject({ send: false })
+    expect(wantsSend('tell her I’ll send it')).toMatchObject({ send: false })
+    expect(wantsSend('reply to this and send the contract over')).toMatchObject({ send: false })
+  })
+
+  /**
+   * "send it" on its own is not a request with a send attached — it is a
+   * request with nothing left once the send is removed, which means there is
+   * no draft here to send.
+   */
+  it('refuses when the send phrase is the whole utterance', () => {
+    expect(wantsSend('send it')).toEqual({ send: false, without: 'send it' })
+    expect(wantsSend('and send it')).toMatchObject({ send: false })
   })
 })

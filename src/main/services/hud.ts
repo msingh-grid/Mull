@@ -59,7 +59,13 @@ export class HudController {
   openCard(card: HudCard, onAction: (action: HudAction) => void): void {
     this.card = card
     this.onAction = onAction
-    this.releaseChords = this.options.chords.hold((action) => this.act(action))
+    // ⌘⏎ is claimed only for a card that actually offers a second commit —
+    // there is no point holding someone's shortcut for a button they cannot
+    // see. The card is the single source of truth for both, so the button and
+    // the chord can never disagree about whether the commit exists.
+    this.releaseChords = this.options.chords.hold((action) => this.act(action), {
+      send: offersCommit(card)
+    })
     this.emit()
   }
 
@@ -88,6 +94,13 @@ export class HudController {
   act(action: HudAction): void {
     const handler = this.onAction
     if (!handler) return
+    // A renderer or a stale chord can only ever ask for a commit the open card
+    // is actually offering. Downgraded rather than dropped: the user pressed
+    // something that means "yes", and Apply is the yes this card has.
+    if (action === 'apply-send' && !offersCommit(this.card)) {
+      this.options.log?.('warn', 'hud: apply-send on a card with no commit — applying only')
+      action = 'apply'
+    }
     try {
       handler(action)
     } finally {
@@ -128,4 +141,9 @@ export class HudController {
     }
     this.options.port.send(state)
   }
+}
+
+/** Does this card offer a second, heavier commit — today, Apply & send? */
+function offersCommit(card: HudCard | null): boolean {
+  return card?.kind === 'diff' && card.commit != null
 }

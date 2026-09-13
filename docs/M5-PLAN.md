@@ -175,6 +175,42 @@ words*; and all it does is put a second button on a card. The keypress is the
 actuator. Worst case for injected text is influencing a draft the user reads
 before approving. This gets a test, not just a paragraph.
 
+### As built
+
+Four things ended up firmer than the plan above.
+
+**`ClassifiedIntent` has no `send` field at all.** The plan gave the classifier
+one and then declined to read it. A field the model can set and main merely
+happens not to read today is not a rule — it is a rule waiting to be wired up by
+someone who did not read the comment. `wantsSend()` in `pipeline/router.ts` is
+the only thing that can put a send on a card, and it is shown nothing but the
+user's transcript.
+
+**`wantsSend` requires a conjunction.** Tail-only and narrow: "…and send it",
+"…, then send". The leading `and`/`then`/comma is mandatory, which is what keeps
+"tell her I'll send it" out; the trailing group holds only words that cannot be
+an object, which is what keeps "and I'll send the deck tonight" out. It also
+returns the request with the phrase removed, so the draft does not contain the
+words "and send it". Both sentences are in the fixture table.
+
+**The read-back has three answers, not two.** Empty composer ⇒ sent; still
+holding the draft ⇒ not sent, and the HUD says to press send yourself;
+*unreadable* ⇒ unknown, said out loud. The third is not timidity: Mail's ⌘⇧D
+closes the compose window, so there is often nothing left to read. Claiming
+success there would be a guess and claiming failure would send someone to press
+Return on a message that has already gone.
+
+**The app is checked once more immediately before the chord.** Between Apply and
+⌘⏎ the user can switch windows, and a Return pressed into the wrong app is
+precisely the harm. Same discipline as `stillMatches` before a write.
+
+Two smaller consequences worth recording. `ChordScope.hold` now claims ⌘⏎
+best-effort and only for a card that offers the commit — the core ⏎/esc pair
+stays all-or-nothing, but losing ⌘⏎ to another app must not take a working card
+down with it. And `JournalStore` orders by `at DESC, rowid DESC` rather than by
+id: Apply & send writes two rows inside one millisecond, and ordering by uuid
+showed "Sent · Slack" above or below the reply it sent at random.
+
 ## Stage 5 — Reading somewhere else
 
 *"Read abilities to navigate to other chat and gather context."* This is the one

@@ -91,10 +91,18 @@ export interface ClassifyRequest {
  * The routing decision. `dictate` is the safe answer and the default for every
  * failure — typing an instruction is a nuisance, editing someone's sentence
  * away is not.
+ *
+ * **Note what is absent: there is no `send`.** Whether Mull offers to send a
+ * message is decided in `pipeline/router.ts` from the user's own transcript and
+ * nowhere else. The model is shown other people's writing on every context-
+ * carrying turn, so anything it can set is something a message on screen can
+ * try to talk it into. Classification is a claim about what the user said;
+ * pressing Return in someone's window is not, and the seam between them is this
+ * missing field.
  */
 export type ClassifiedIntent =
   | { kind: 'dictate' }
-  | { kind: 'edit'; target: 'selection' | 'document'; instruction: string; send?: boolean }
+  | { kind: 'edit'; target: 'selection' | 'document'; instruction: string }
   /**
    * Write something new from what is on screen — a reply, a summary, an answer.
    *
@@ -103,7 +111,7 @@ export type ClassifiedIntent =
    * does not, out of the conversation the user is looking at. It lands at the
    * caret.
    */
-  | { kind: 'compose'; instruction: string; send?: boolean }
+  | { kind: 'compose'; instruction: string }
 
 export interface PlanRequest {
   instruction: string

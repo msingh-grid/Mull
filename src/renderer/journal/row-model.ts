@@ -60,6 +60,15 @@ export function undoAffordance(entry: JournalEntryView): UndoAffordance {
   if (entry.status !== 'applied') {
     return { enabled: false, label: 'Undo', why: 'Nothing was changed, so there is nothing to undo.' }
   }
+  // After the status check — a send that failed sent nothing, and the line
+  // above is the right one for it — but before `verified`, which would
+  // otherwise tell someone whose send Mull could not confirm that the *app*
+  // wouldn't confirm the text landed. That sentence invites them to go and
+  // make it confirm. The true answer is the one `UndoService` gives ⌥Z: a sent
+  // message has no reverse operation to offer.
+  if (isSend(entry)) {
+    return { enabled: false, label: 'Undo', why: 'Mull can’t unsend a message.' }
+  }
   if (entry.verified !== true) {
     return {
       enabled: false,
@@ -71,4 +80,9 @@ export function undoAffordance(entry: JournalEntryView): UndoAffordance {
     return { enabled: false, label: 'Undo', why: 'This entry can no longer be undone.' }
   }
   return { enabled: true, label: 'Undo', why: null }
+}
+
+/** The journal's record of a send (M5a). Mirrors the check in `UndoService`. */
+function isSend(entry: JournalEntryView): boolean {
+  return entry.intent.kind === 'command' && entry.intent.verb === 'send'
 }

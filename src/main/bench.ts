@@ -87,6 +87,15 @@ export interface EditRow {
   /** Apply to text on screen; 0 when the proposal was never applied. */
   insertMs: number
   totalMs: number
+  /**
+   * Did this edit end in a send, and did it land? (M5a)
+   *
+   * Absent on every ordinary edit. `'unknown'` is a real value: the chord went
+   * in and Mull could not read the composer afterwards to see what happened.
+   */
+  sent?: 'yes' | 'no' | 'unknown'
+  /** Chord to read-back, including the settle. Excluded from `totalMs`. */
+  sendMs?: number
 }
 
 export type BenchRow = DictationRow | EditRow

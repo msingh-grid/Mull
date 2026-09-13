@@ -152,3 +152,49 @@ describe('HudController', () => {
     expect(h.sent).toHaveLength(0)
   })
 })
+
+describe('HudController — the second commit', () => {
+  const sendable: DiffCard = {
+    kind: 'diff',
+    app: 'Slack',
+    segments: [],
+    changes: 1,
+    commit: { label: 'Apply & send', hint: '⌘⏎', warning: 'sending can’t be undone' }
+  }
+
+  it('claims ⌘⏎ only for a card that carries one', () => {
+    const plain = harness()
+    plain.controller.openCard(card, () => {})
+    expect(plain.shortcuts.has('CommandOrControl+Return')).toBe(false)
+
+    const h = harness()
+    h.controller.openCard(sendable, () => {})
+    expect(h.shortcuts.has('CommandOrControl+Return')).toBe(true)
+  })
+
+  it('delivers apply-send and closes, giving ⌘⏎ back', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(sendable, onAction)
+
+    h.fire('CommandOrControl+Return')
+    expect(onAction).toHaveBeenCalledWith('apply-send')
+    expect(h.controller.hasCard).toBe(false)
+    expect(h.shortcuts.size).toBe(0)
+  })
+
+  /**
+   * The renderer is data-driven and cannot show a button the card does not
+   * carry — but `act()` is also reachable over IPC, and a send that only the
+   * card may authorise must be authorised by the card, not by the caller.
+   */
+  it('downgrades apply-send to apply on a card with no commit', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(card, onAction)
+
+    h.controller.act('apply-send')
+    expect(onAction).toHaveBeenCalledWith('apply')
+    expect(onAction).not.toHaveBeenCalledWith('apply-send')
+  })
+})

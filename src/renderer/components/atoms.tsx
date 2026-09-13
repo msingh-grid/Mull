@@ -20,7 +20,8 @@ export function Btn({
   onClick,
   children
 }: {
-  kind?: 'primary' | 'ghost'
+  /** `send` is the irreversible commit — marked, never made the default. */
+  kind?: 'primary' | 'ghost' | 'send'
   /** The chord printed inside the label — the HUD is never focused (§7.1). */
   hint?: string
   onClick?: () => void
