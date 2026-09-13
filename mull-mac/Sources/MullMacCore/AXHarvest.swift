@@ -88,7 +88,7 @@ public enum AXHarvest {
     /// How long any single AX message may block before the walk gives up on it.
     /// Separate from the overall deadline: this one stops one unresponsive
     /// element from consuming the entire budget by itself.
-    private static let messagingTimeout: Float = 0.25
+    static let messagingTimeout: Float = 0.25
 
     /// Roles that are furniture, not content.
     ///
@@ -243,8 +243,8 @@ public enum AXHarvest {
     /// and asks again a moment later, which leaves the queue free in between.
     /// Measured on a cold Claude Desktop, the tree took ~2s to appear; on a
     /// cold Slack, under one.
-    private static let manualAccessibilityWait: TimeInterval = 0.6
-    private static let manualAccessibilityPoll: TimeInterval = 0.15
+    static let manualAccessibilityWait: TimeInterval = 0.6
+    static let manualAccessibilityPoll: TimeInterval = 0.15
 
     /// Ask Chromium to build an accessibility tree, and say whether we just did.
     ///
@@ -268,8 +268,14 @@ public enum AXHarvest {
     ///
     /// Returns false for apps that are not Chromium: they have no such
     /// attribute, the write fails harmlessly, and nothing is remembered.
+    ///
+    /// Internal rather than private because `AXTargets` walks the same tree for
+    /// a different purpose and meets the same cold Chromium window. One switch,
+    /// one record of having thrown it — two copies would ask twice and remember
+    /// separately, and the second asker would never see the `true` that starts
+    /// the warm-up wait.
     @discardableResult
-    private static func enableManualAccessibility(pid: pid_t) -> Bool {
+    static func enableManualAccessibility(pid: pid_t) -> Bool {
         if manualAccessibility.contains(pid) { return false }
         let app = AXUIElementCreateApplication(pid)
         let result = AXUIElementSetAttributeValue(
@@ -362,7 +368,7 @@ public enum AXHarvest {
 
     // MARK: - Finding the window
 
-    private static func window(of app: AXUIElement) -> AXUIElement? {
+    static func window(of app: AXUIElement) -> AXUIElement? {
         for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
             var value: CFTypeRef?
             if AXUIElementCopyAttributeValue(app, attribute as CFString, &value) == .success,
@@ -389,28 +395,28 @@ public enum AXHarvest {
     // AXValue wrapping an error rather than failing the whole call. So every
     // slot is checked by type, and a wrong type is simply absent.
 
-    private static func string(_ value: CFTypeRef) -> String? {
+    static func string(_ value: CFTypeRef) -> String? {
         guard CFGetTypeID(value) == CFStringGetTypeID() else { return nil }
         return value as? String
     }
 
-    private static func bool(_ value: CFTypeRef) -> Bool? {
+    static func bool(_ value: CFTypeRef) -> Bool? {
         guard CFGetTypeID(value) == CFBooleanGetTypeID() else { return nil }
         return value as? Bool
     }
 
-    private static func elements(_ value: CFTypeRef) -> [AXUIElement] {
+    static func elements(_ value: CFTypeRef) -> [AXUIElement] {
         guard CFGetTypeID(value) == CFArrayGetTypeID(), let array = value as? [AXUIElement]
         else { return [] }
         return array
     }
 
-    private static func clamp(_ text: String, to limit: Int) -> String {
+    static func clamp(_ text: String, to limit: Int) -> String {
         guard text.count > limit else { return text }
         return String(text.prefix(limit)) + "…"
     }
 
-    private static func elapsed(since start: CFAbsoluteTime) -> Int {
+    static func elapsed(since start: CFAbsoluteTime) -> Int {
         Int(((CFAbsoluteTimeGetCurrent() - start) * 1000).rounded())
     }
 }

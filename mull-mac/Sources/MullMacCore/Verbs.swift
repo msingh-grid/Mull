@@ -19,8 +19,11 @@ import Foundation
 /// `screenRecording` field on `checkPermissions`. `init` rejects a mismatch
 /// loudly, so a stale binary fails at boot rather than returning shapes the
 /// host cannot parse.
-public let SIDECAR_PROTOCOL_VERSION = 6
-public let SIDECAR_VERSION = "0.6.0"
+/// Protocol 7 (M5a Stage 5): `uiTargets` — the same window read a third way, as
+/// a numbered list of things that can be pressed or typed into. A read, like
+/// `windowContext`, and under the same guards; nothing here acts.
+public let SIDECAR_PROTOCOL_VERSION = 7
+public let SIDECAR_VERSION = "0.7.0"
 
 // MARK: - Param structs (mirror the zod schemas)
 
@@ -47,6 +50,11 @@ struct WindowContextParams: Decodable {
     let maxChars: Int?
     let deadlineMs: Int?
     let screenshot: Bool?
+}
+
+struct UiTargetsParams: Decodable {
+    let maxTargets: Int?
+    let deadlineMs: Int?
 }
 
 struct ReplaceRangeParams: Decodable {
@@ -151,6 +159,67 @@ public struct ContextBlockInfo {
     }
 }
 
+/// One actionable thing in the window, as the host and the model see it.
+///
+/// `index` is the address. The model is shown this list and answers with a
+/// number, never a name — see `AXTargets` for why that is the whole reason
+/// pressing things is safe to build at all.
+public struct UiTargetInfo {
+    public let index: Int
+    public let role: String
+    public let subrole: String?
+    public let title: String
+    public let help: String?
+    public let value: String?
+    /// Screen rectangle, when the element reports one. Sent so the model can
+    /// line this list up against the screenshot beside it.
+    public let frame: (x: Double, y: Double, width: Double, height: Double)?
+    public let actions: [String]
+    public let enabled: Bool
+    public let focused: Bool
+    /// "press" | "type".
+    public let kind: String
+
+    public init(
+        index: Int, role: String, subrole: String?, title: String, help: String?, value: String?,
+        frame: (x: Double, y: Double, width: Double, height: Double)?, actions: [String],
+        enabled: Bool, focused: Bool, kind: String
+    ) {
+        self.index = index
+        self.role = role
+        self.subrole = subrole
+        self.title = title
+        self.help = help
+        self.value = value
+        self.frame = frame
+        self.actions = actions
+        self.enabled = enabled
+        self.focused = focused
+        self.kind = kind
+    }
+}
+
+public struct UiTargetsInfo {
+    /// Names the set of element handles the sidecar is holding. A press quotes
+    /// it back, so a press decided against a stale look is refused rather than
+    /// landing on whatever now occupies that index.
+    public let harvestId: String
+    public let targets: [UiTargetInfo]
+    public let truncated: Bool
+    public let stoppedBy: String
+    public let scanMs: Int
+
+    public init(
+        harvestId: String, targets: [UiTargetInfo], truncated: Bool, stoppedBy: String, scanMs: Int
+    ) {
+        self.harvestId = harvestId
+        self.targets = targets
+        self.truncated = truncated
+        self.stoppedBy = stoppedBy
+        self.scanMs = scanMs
+    }
+}
+
 public struct ScreenshotInfo {
     public let path: String
     public let width: Int
@@ -248,6 +317,10 @@ public protocol SystemActions {
     /// The whole focused window, as an Accessibility transcript and — when
     /// asked and permitted — as a JPEG on disk. A read; it presses nothing.
     func windowContext(maxChars: Int, deadlineMs: Int, screenshot: Bool) -> WindowContextInfo
+    /// Everything in the focused window that can be pressed or typed into,
+    /// numbered. Also a read — it presses nothing, and the numbering is the
+    /// only thing a later `pressTarget` is allowed to act on.
+    func uiTargets(maxTargets: Int, deadlineMs: Int) -> UiTargetsInfo
     /// Insert at the caret with a concrete strategy ("ax" | "paste" | "type").
     func insert(text: String, strategy: String, settleMs: Int) -> InsertOutcome
     /// Replace the current selection, reporting what was there before.
@@ -401,6 +474,69 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
                 ])
             } ?? .null,
             "screenshotReason": optional(info.screenshotReason)
+        ])
+    }
+
+    /// What can be pressed here.
+    ///
+    /// Guarded exactly like `windowContext` and for the same reason: it writes
+    /// nothing, but it reads, and enumerating the controls of a password
+    /// manager is its own harm. Secure input refuses the whole thing.
+    d.register("uiTargets") { raw in
+        let params = try decodeParams(
+            UiTargetsParams.self, from: raw,
+            defaultIfMissing: UiTargetsParams(maxTargets: nil, deadlineMs: nil))
+        let (app, title) = system.frontmostApp()
+
+        func empty(_ reason: String) -> JSON {
+            .object([
+                "app": appJSON(app),
+                "windowTitle": optional(title),
+                "harvestId": .string(""),
+                "targets": .array([]),
+                "truncated": .bool(false),
+                "stoppedBy": .string(reason),
+                "scanMs": .int(0)
+            ])
+        }
+
+        if system.secureInputActive() { return empty("secure-input") }
+        guard system.accessibilityTrusted() else { return empty("no-accessibility") }
+
+        let info = system.uiTargets(
+            maxTargets: min(max(params.maxTargets ?? 120, 1), 400),
+            deadlineMs: min(max(params.deadlineMs ?? 800, 50), 2_000))
+
+        return .object([
+            "app": appJSON(app),
+            "windowTitle": optional(title),
+            "harvestId": .string(info.harvestId),
+            "targets": .array(
+                info.targets.map { target in
+                    .object([
+                        "index": .int(target.index),
+                        "role": .string(target.role),
+                        "subrole": optional(target.subrole),
+                        "title": .string(target.title),
+                        "help": optional(target.help),
+                        "value": optional(target.value),
+                        "frame": target.frame.map { frame in
+                            JSON.object([
+                                "x": .double(frame.x),
+                                "y": .double(frame.y),
+                                "width": .double(frame.width),
+                                "height": .double(frame.height)
+                            ])
+                        } ?? .null,
+                        "actions": .array(target.actions.map { .string($0) }),
+                        "enabled": .bool(target.enabled),
+                        "focused": .bool(target.focused),
+                        "kind": .string(target.kind)
+                    ])
+                }),
+            "truncated": .bool(info.truncated),
+            "stoppedBy": .string(info.stoppedBy),
+            "scanMs": .int(info.scanMs)
         ])
     }
 

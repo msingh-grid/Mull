@@ -1,0 +1,387 @@
+import ApplicationServices
+import Foundation
+
+/// The things in this window that can be pressed, numbered.
+///
+/// `AXHarvest` answers *what does this window say*. This answers *what can be
+/// done to it*, and the two are close to complements: the harvest's
+/// `chromeRoles` deny-list drops `AXButton`, `AXMenuItem`, `AXPopUpButton`,
+/// `AXCheckBox`, `AXRadioButton`, `AXComboBox` and `AXTabGroup` — which is
+/// right when the job is reading a conversation, and removes every single thing
+/// you would press.
+///
+/// So this is a second walk over the same tree with the filter inverted. It
+/// shares the traversal shape, the budgets, the messaging timeout and the
+/// `AXManualAccessibility` warm-up, because a cold Chromium window is just as
+/// invisible here as it was there.
+///
+/// ### Why the model is shown integers rather than names
+///
+/// An earlier design had the model *name* a target — "press the Send button" —
+/// and Mull go looking for it. That was rejected, correctly: two buttons are
+/// called Send, "Priya Sharma" sits next to "Priya (you)", and a label lookup
+/// is a guess dressed as a lookup.
+///
+/// Enumerating first dissolves that. Mull walks the tree, numbers what it
+/// found, and shows the model the list; the model answers with an index. Two
+/// buttons named Send are two different integers. "Exact match or refuse" stops
+/// being an aspiration and becomes a comparison of numbers.
+///
+/// Which is also why the `AXUIElement` references are **kept** (see `Store`
+/// below) rather than rediscovered at press time. The handle Mull presses is
+/// the handle Mull saw.
+///
+/// ### What this file does not do
+///
+/// It does not press anything — that is `press(...)`, deliberately below a
+/// separate entry point with its own verification — and it never synthesises a
+/// mouse click. An element that does not advertise `AXPress` is simply not a
+/// target, and the caller says so out loud rather than clicking at its
+/// coordinates: a synthetic click moves the user's pointer, lands on whatever
+/// has scrolled under it, and cannot be verified afterwards.
+public enum AXTargets {
+
+    /// What can be done with a target. Two kinds, and they are not
+    /// interchangeable — see the `type` guard in the executor.
+    public enum Kind: String {
+        /// Advertises `AXPress`. A button, a row, a link, a tab.
+        case press
+        /// A text or search field. The only thing the navigator may type into,
+        /// and never a message composer.
+        case type
+    }
+
+    public struct Target {
+        /// Position in the list handed to the model. Stable only within one
+        /// harvest, which is what `harvestId` is for.
+        public let index: Int
+        public let role: String
+        public let subrole: String?
+        /// The best name this element has. Never empty — an unnamed control is
+        /// dropped, because a model cannot choose it and a user cannot check it.
+        public let title: String
+        public let help: String?
+        public let value: String?
+        /// Screen rectangle, so the model can tell the sidebar "Priya" from the
+        /// search-result "Priya" by looking at the screenshot beside this list.
+        public let frame: CGRect?
+        public let actions: [String]
+        public let enabled: Bool
+        public let focused: Bool
+        public let kind: Kind
+    }
+
+    public struct Scan {
+        public let harvestId: String
+        public let targets: [Target]
+        public let truncated: Bool
+        /// "complete" | "nodes" | "deadline" | "targets" | "no-window"
+        /// | "no-accessibility" | "tree-warming"
+        public let stoppedBy: String
+        public let elapsedMs: Int
+    }
+
+    public struct Budget {
+        public var maxNodes: Int
+        public var maxDepth: Int
+        public var maxTargets: Int
+        public var deadline: TimeInterval
+
+        /// Roomier than the reading harvest's 0.35s, and it buys a second IPC
+        /// per node (see `actionNames`). Affordable because this runs between
+        /// plan steps with a card already on screen, not during a hold with the
+        /// user mid-sentence.
+        public init(
+            maxNodes: Int = 3000,
+            maxDepth: Int = 40,
+            maxTargets: Int = 120,
+            deadline: TimeInterval = 0.8
+        ) {
+            self.maxNodes = maxNodes
+            self.maxDepth = maxDepth
+            self.maxTargets = maxTargets
+            self.deadline = deadline
+        }
+    }
+
+    // MARK: - The walk
+
+    /// Roles that can hold typed text.
+    ///
+    /// Separated from the press targets because typing is the more dangerous of
+    /// the two: a press is one event in a place the user can see, and a typed
+    /// string lands somewhere that might be a message composer. The executor
+    /// refuses to type into anything that is not on this list, and refuses
+    /// again on anything whose name suggests a composer rather than a search.
+    private static let textRoles: Set<String> = [
+        "AXTextField", "AXSearchField", "AXComboBox"
+    ]
+
+    /// Roles that are never worth offering even when they advertise `AXPress`.
+    ///
+    /// `AXStaticText` and `AXImage` in a Chromium tree frequently claim to be
+    /// pressable because some ancestor attached a click handler; offering three
+    /// hundred of them buries the six controls that matter. `AXWindow` and
+    /// `AXApplication` press as a no-op.
+    private static let neverTargets: Set<String> = [
+        "AXStaticText", "AXImage", "AXWindow", "AXApplication", "AXScrollArea",
+        "AXSplitGroup", "AXUnknown"
+    ]
+
+    private static let attributes =
+        [
+            kAXRoleAttribute,
+            kAXSubroleAttribute,
+            kAXTitleAttribute,
+            kAXDescriptionAttribute,
+            kAXValueAttribute,
+            kAXEnabledAttribute,
+            kAXFocusedAttribute,
+            kAXPositionAttribute,
+            kAXSizeAttribute,
+            kAXChildrenAttribute
+        ] as CFArray
+
+    /// Walk the frontmost window of `pid` and number everything actionable.
+    ///
+    /// `treeDeadline` carries the Chromium warm-up across retries exactly as
+    /// `AXHarvest.harvest` does, and for the same reason: the switch only
+    /// answers "yes" once per app, so recomputing it inside the retry would end
+    /// the wait after a single poll.
+    public static func scan(
+        pid: pid_t,
+        budget: Budget = Budget(),
+        treeDeadline: CFAbsoluteTime? = nil
+    ) -> Scan {
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        let warming = treeDeadline != nil || AXHarvest.enableManualAccessibility(pid: pid)
+        let treeDeadline = treeDeadline ?? (startedAt + AXHarvest.manualAccessibilityWait)
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, AXHarvest.messagingTimeout)
+
+        guard let root = AXHarvest.window(of: app) else {
+            return Scan(
+                harvestId: "", targets: [], truncated: false, stoppedBy: "no-window",
+                elapsedMs: AXHarvest.elapsed(since: startedAt))
+        }
+
+        var targets: [Target] = []
+        var elements: [AXUIElement] = []
+        var visited = 0
+        var stoppedBy = "complete"
+        var stack: [(element: AXUIElement, depth: Int)] = [(root, 0)]
+        let deadline = startedAt + budget.deadline
+
+        while let (element, depth) = stack.popLast() {
+            if visited >= budget.maxNodes {
+                stoppedBy = "nodes"
+                break
+            }
+            if targets.count >= budget.maxTargets {
+                stoppedBy = "targets"
+                break
+            }
+            if CFAbsoluteTimeGetCurrent() > deadline {
+                stoppedBy = "deadline"
+                break
+            }
+            visited += 1
+
+            let node = read(element)
+            if let target = target(from: node, index: targets.count, element: element) {
+                targets.append(target)
+                elements.append(element)
+            }
+
+            guard depth < budget.maxDepth else { continue }
+            for child in node.children.reversed() {
+                stack.append((child, depth + 1))
+            }
+        }
+
+        // The same cold-Chromium wait as the reading harvest. A Slack window
+        // that has never been read has no tree at all, and an empty target list
+        // from one of those means "ask again", not "nothing here is clickable".
+        if warming && targets.isEmpty {
+            if CFAbsoluteTimeGetCurrent() < treeDeadline {
+                Thread.sleep(forTimeInterval: AXHarvest.manualAccessibilityPoll)
+                return scan(pid: pid, budget: budget, treeDeadline: treeDeadline)
+            }
+            return Scan(
+                harvestId: "", targets: [], truncated: true, stoppedBy: "tree-warming",
+                elapsedMs: AXHarvest.elapsed(since: startedAt))
+        }
+
+        let harvestId = Store.shared.keep(elements: elements, pid: pid)
+        return Scan(
+            harvestId: harvestId,
+            targets: targets,
+            truncated: stoppedBy != "complete",
+            stoppedBy: stoppedBy,
+            elapsedMs: AXHarvest.elapsed(since: startedAt))
+    }
+
+    // MARK: - One node
+
+    private struct Node {
+        var role: String
+        var subrole: String?
+        var title: String?
+        var help: String?
+        var value: String?
+        var enabled: Bool
+        var focused: Bool
+        var frame: CGRect?
+        var actions: [String]
+        var children: [AXUIElement]
+    }
+
+    /// Ten attributes in one message, then the action list in a second.
+    ///
+    /// The action list cannot join the batch —
+    /// `AXUIElementCopyMultipleAttributeValues` reads attributes and actions
+    /// are not attributes — so it is a second round trip per node, and it is
+    /// what makes this walk roughly twice the cost of the reading one.
+    ///
+    /// It is asked for anyway, on every node rather than on a guessed list of
+    /// roles, because *"does this element advertise AXPress"* is the actual
+    /// question and a role allow-list would be one more hand-written table that
+    /// works in the apps someone tested. Slack's sidebar rows and Finder's
+    /// toolbar items do not agree about what role a clickable thing has; they
+    /// do agree about `AXPress`.
+    private static func read(_ element: AXUIElement) -> Node {
+        var raw: CFArray?
+        let status = AXUIElementCopyMultipleAttributeValues(
+            element, attributes, AXCopyMultipleAttributeOptions(rawValue: 0), &raw)
+        guard status == .success, let values = raw as? [CFTypeRef], values.count >= 10 else {
+            return Node(
+                role: "", subrole: nil, title: nil, help: nil, value: nil, enabled: false,
+                focused: false, frame: nil, actions: [], children: [])
+        }
+        let role = AXHarvest.string(values[0]) ?? ""
+        return Node(
+            role: role,
+            subrole: AXHarvest.string(values[1]),
+            title: AXHarvest.string(values[2]),
+            help: AXHarvest.string(values[3]),
+            value: AXHarvest.string(values[4]),
+            enabled: AXHarvest.bool(values[5]) ?? true,
+            focused: AXHarvest.bool(values[6]) ?? false,
+            frame: rect(position: values[7], size: values[8]),
+            actions: role.isEmpty ? [] : actionNames(element),
+            children: AXHarvest.elements(values[9]))
+    }
+
+    /// Is this node worth offering, and as what?
+    ///
+    /// Three ways to be dropped, and the third is the one that keeps the list
+    /// short enough to read:
+    ///
+    ///   1. a role that is never a target (`neverTargets`)
+    ///   2. neither pressable nor typeable
+    ///   3. **no name at all** — an unlabelled button cannot be chosen by a
+    ///      model and cannot be checked by the user reading the card, so
+    ///      offering it is offering a coin flip. Chromium emits a great many of
+    ///      these for layout elements that happen to carry a click handler.
+    private static func target(from node: Node, index: Int, element: AXUIElement) -> Target? {
+        if node.role.isEmpty { return nil }
+        if neverTargets.contains(node.role) { return nil }
+
+        let kind: Kind
+        if textRoles.contains(node.role) {
+            kind = .type
+        } else if node.actions.contains(kAXPressAction) {
+            kind = .press
+        } else {
+            return nil
+        }
+
+        // Title, then description, then — for a text field only — its
+        // placeholder-ish value. A button named by its contents is named by
+        // `title`; a search box is usually named by `description`.
+        let name = [node.title, node.help].compactMap { $0?.trimmed }.first { !$0.isEmpty }
+        guard let name, !name.isEmpty else { return nil }
+
+        return Target(
+            index: index,
+            role: node.role,
+            subrole: node.subrole,
+            title: AXHarvest.clamp(name, to: 120),
+            help: node.help,
+            value: node.value.map { AXHarvest.clamp($0, to: 200) },
+            frame: node.frame,
+            actions: node.actions,
+            enabled: node.enabled,
+            focused: node.focused,
+            kind: kind)
+    }
+
+    private static func actionNames(_ element: AXUIElement) -> [String] {
+        var raw: CFArray?
+        guard AXUIElementCopyActionNames(element, &raw) == .success,
+            let names = raw as? [String]
+        else { return [] }
+        return names
+    }
+
+    private static func rect(position: CFTypeRef, size: CFTypeRef) -> CGRect? {
+        guard CFGetTypeID(position) == AXValueGetTypeID(),
+            CFGetTypeID(size) == AXValueGetTypeID()
+        else { return nil }
+        // swiftlint:disable force_cast
+        let positionValue = position as! AXValue
+        let sizeValue = size as! AXValue
+        // swiftlint:enable force_cast
+        var origin = CGPoint.zero
+        var extent = CGSize.zero
+        guard AXValueGetValue(positionValue, .cgPoint, &origin),
+            AXValueGetValue(sizeValue, .cgSize, &extent)
+        else { return nil }
+        return CGRect(origin: origin, size: extent)
+    }
+
+    // MARK: - Keeping the handles
+
+    /// The elements a scan found, held so a later press can address them.
+    ///
+    /// An `AXUIElement` is a live handle into another process, not a
+    /// description, which is exactly what is wanted: pressing the thing that
+    /// was seen beats re-finding something with the same label in a tree that
+    /// has moved since.
+    ///
+    /// Bounded, because handles are not free and a long session would otherwise
+    /// accumulate one set per plan step forever. Two scans is enough — the
+    /// current one and the one immediately before it, so a step decided against
+    /// the previous look can still be attempted and then refused *on the
+    /// evidence* rather than refused for want of a handle.
+    final class Store {
+        static let shared = Store()
+        private struct Entry {
+            let harvestId: String
+            let pid: pid_t
+            let elements: [AXUIElement]
+        }
+        private var entries: [Entry] = []
+        private var counter = 0
+        private let lock = NSLock()
+
+        func keep(elements: [AXUIElement], pid: pid_t) -> String {
+            lock.lock()
+            defer { lock.unlock() }
+            counter += 1
+            let harvestId = "scan-\(counter)"
+            entries.append(Entry(harvestId: harvestId, pid: pid, elements: elements))
+            if entries.count > 2 { entries.removeFirst(entries.count - 2) }
+            return harvestId
+        }
+
+        func element(harvestId: String, index: Int) -> (element: AXUIElement, pid: pid_t)? {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let entry = entries.first(where: { $0.harvestId == harvestId }),
+                index >= 0, index < entry.elements.count
+            else { return nil }
+            return (entry.elements[index], entry.pid)
+        }
+    }
+}

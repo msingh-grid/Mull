@@ -217,6 +217,71 @@ export const WindowContextResultSchema = z.object({
   screenshotReason: z.string().nullable()
 })
 
+/**
+ * What can be pressed here — the window read a third way.
+ *
+ * `windowContext` answers *what does this window say*. This answers *what can
+ * be done to it*, and the two are near complements: the reading harvest
+ * deny-lists `AXButton`, `AXMenuItem`, `AXPopUpButton`, `AXCheckBox` and
+ * `AXTabGroup` as furniture, which is right for reading a conversation and
+ * removes every single thing you would press.
+ *
+ * **The model is shown this list and answers with an `index`, never a name.**
+ * That is the whole reason pressing things in someone else's window is safe to
+ * build. A design where the model says "press the Send button" and Mull goes
+ * looking is a guess dressed as a lookup — there are two buttons called Send,
+ * and "Priya Sharma" sits beside "Priya (you)". Enumerating first turns it into
+ * a comparison of integers.
+ *
+ * Still a read. Nothing in this verb presses, focuses or types.
+ */
+export const UiTargetSchema = z.object({
+  /** The address. Stable only within one `harvestId`. */
+  index: z.number().int().nonnegative(),
+  role: z.string(),
+  subrole: z.string().nullable(),
+  /** Never empty — an unnamed control is dropped, because a model cannot pick
+   *  it and a user cannot check it on the card. */
+  title: z.string(),
+  help: z.string().nullable(),
+  value: z.string().nullable(),
+  /** Screen rectangle, so the list can be lined up against the screenshot. */
+  frame: z
+    .object({ x: z.number(), y: z.number(), width: z.number(), height: z.number() })
+    .nullable(),
+  actions: z.array(z.string()),
+  enabled: z.boolean(),
+  focused: z.boolean(),
+  /** 'press' | 'type'. Not interchangeable: only a `type` target accepts text,
+   *  and the executor refuses anything that is not a search field. */
+  kind: z.enum(['press', 'type'])
+})
+export type UiTarget = z.infer<typeof UiTargetSchema>
+
+export const UiTargetsParamsSchema = z.object({
+  maxTargets: z.number().int().positive().max(400).optional(),
+  deadlineMs: z.number().int().min(50).max(2_000).optional()
+})
+
+export const UiTargetsResultSchema = z.object({
+  app: AppRefSchema.nullable(),
+  windowTitle: z.string().nullable(),
+  /**
+   * Names the set of element handles the sidecar is holding for this scan.
+   *
+   * A press quotes it back, so a step decided against a stale look is refused
+   * rather than landing on whatever now occupies that index. Empty when the
+   * scan found nothing to hold.
+   */
+  harvestId: z.string(),
+  targets: z.array(UiTargetSchema),
+  truncated: z.boolean(),
+  /** 'complete' | 'nodes' | 'deadline' | 'targets' | 'no-window'
+   *  | 'no-accessibility' | 'secure-input' | 'tree-warming' */
+  stoppedBy: z.string(),
+  scanMs: z.number().int().nonnegative()
+})
+
 export const PromptScreenRecordingParamsSchema = z.object({})
 export const PromptScreenRecordingResultSchema = z.object({
   prompted: z.boolean(),
@@ -366,10 +431,14 @@ export const KeyChordResultSchema = z.object({
  * keys stopped being alternatives and became two verbs — ⌥Space dictates and
  * Fn instructs — so the tap watches both at once and names the one that fired.
  *
+ * 7 (M5a Stage 5): `uiTargets` — the focused window read a third way, as a
+ * numbered list of what can be pressed or typed into. Still a read; the verbs
+ * that act on the numbering come with it and are guarded separately.
+ *
  * The `init` handshake rejects a mismatch, so a stale `mull-mac` binary fails
  * loudly at boot instead of returning shapes the host can't parse.
  */
-export const SIDECAR_PROTOCOL_VERSION = 6
+export const SIDECAR_PROTOCOL_VERSION = 7
 
 // ---------------------------------------------------------------------------
 // Notifications: sidecar -> host, no id, no reply.
@@ -406,6 +475,7 @@ export const SidecarMethods = {
   focusedElement: { params: FocusedElementParamsSchema, result: FocusedElementResultSchema },
   selectedText: { params: SelectedTextParamsSchema, result: SelectedTextResultSchema },
   windowContext: { params: WindowContextParamsSchema, result: WindowContextResultSchema },
+  uiTargets: { params: UiTargetsParamsSchema, result: UiTargetsResultSchema },
   promptScreenRecording: {
     params: PromptScreenRecordingParamsSchema,
     result: PromptScreenRecordingResultSchema

@@ -9,6 +9,7 @@ import {
   SidecarNotifications,
   WindowContextParamsSchema,
   WindowContextResultSchema,
+  UiTargetsResultSchema,
   SIDECAR_PROTOCOL_VERSION
 } from './sidecar-api'
 
@@ -104,6 +105,7 @@ describe('sidecar-api zod contract', () => {
       'focusedElement',
       'selectedText',
       'windowContext',
+      'uiTargets',
       'promptScreenRecording',
       'insertText',
       'replaceSelection',
@@ -115,7 +117,79 @@ describe('sidecar-api zod contract', () => {
       'stopHotkeyTap'
     ])
     // Bumped whenever a shape changes; the sidecar's `init` refuses a mismatch.
-    expect(SIDECAR_PROTOCOL_VERSION).toBe(6)
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(7)
+  })
+})
+
+/**
+ * The target list is the model's whole vocabulary for acting on a window, so
+ * the contract has to make two things impossible rather than merely unlikely.
+ */
+describe('uiTargets', () => {
+  const target = {
+    index: 0,
+    role: 'AXRow',
+    subrole: null,
+    title: 'Priya Sharma',
+    help: null,
+    value: null,
+    frame: { x: 0, y: 120, width: 260, height: 32 },
+    actions: ['AXPress'],
+    enabled: true,
+    focused: false,
+    kind: 'press'
+  }
+
+  it('parses a scan off the wire', () => {
+    const parsed = UiTargetsResultSchema.parse({
+      app: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack', pid: 900 },
+      windowTitle: 'Slack',
+      harvestId: 'scan-3',
+      targets: [target],
+      truncated: false,
+      stoppedBy: 'complete',
+      scanMs: 62
+    })
+    expect(parsed.targets[0]?.title).toBe('Priya Sharma')
+    expect(parsed.harvestId).toBe('scan-3')
+  })
+
+  /**
+   * There are exactly two kinds and they are not interchangeable. `press` is
+   * one event in a place the user can see; `type` puts a string somewhere that
+   * might be a composer. A third kind arriving off the wire — or a typo for one
+   * of these two — must fail here rather than be acted on.
+   */
+  it('admits no kind but press and type', () => {
+    expect(() =>
+      UiTargetsResultSchema.parse({
+        app: null,
+        windowTitle: null,
+        harvestId: 'scan-1',
+        targets: [{ ...target, kind: 'send' }],
+        truncated: false,
+        stoppedBy: 'complete',
+        scanMs: 1
+      })
+    ).toThrow()
+  })
+
+  /**
+   * An element that reports no rectangle says so. Defaulting it to the origin
+   * would put an invisible control at the top-left corner of the screenshot the
+   * model is lining this list up against, which is worse than absent.
+   */
+  it('keeps an unknown frame null rather than inventing one', () => {
+    const parsed = UiTargetsResultSchema.parse({
+      app: null,
+      windowTitle: null,
+      harvestId: 'scan-1',
+      targets: [{ ...target, frame: null }],
+      truncated: false,
+      stoppedBy: 'complete',
+      scanMs: 1
+    })
+    expect(parsed.targets[0]?.frame).toBeNull()
   })
 })
 

@@ -9,6 +9,7 @@ import {
   type SidecarNotification,
   type SidecarNotificationName,
   type ContextBlock,
+  type UiTarget,
   type InsertionStrategy,
   type SidecarApi,
   type SidecarMethodName,
@@ -250,6 +251,7 @@ export class SidecarClient extends EventEmitter<SidecarEvents> implements Sideca
   focusedElement = (p: SidecarParams<'focusedElement'>) => this.call('focusedElement', p)
   selectedText = (p: SidecarParams<'selectedText'>) => this.call('selectedText', p)
   windowContext = (p: SidecarParams<'windowContext'>) => this.call('windowContext', p)
+  uiTargets = (p: SidecarParams<'uiTargets'>) => this.call('uiTargets', p)
   promptScreenRecording = (p: SidecarParams<'promptScreenRecording'>) =>
     this.call('promptScreenRecording', p)
   insertText = (p: SidecarParams<'insertText'>) => this.call('insertText', p)
@@ -376,6 +378,17 @@ export interface FakeSidecarOptions {
   contextStoppedBy?: string
   /** A pretend JPEG on disk. Absent means the picture was not taken. */
   screenshotPath?: string
+  /**
+   * What the pretend window offers to press or type into.
+   *
+   * Given as plain strings for the common case — each becomes a pressable
+   * `AXButton` with that title — so a test about *choosing* a target does not
+   * have to spell out a frame and an action list. A test about the press
+   * guards can pass whole targets.
+   */
+  targets?: Array<string | UiTarget>
+  /** Stop the pretend scan early, as a budget or a cold tree would. */
+  targetsStoppedBy?: string
 }
 
 /**
@@ -504,6 +517,62 @@ export class FakeSidecar implements SidecarApi {
             : 'no-screen-recording'
     }
   }
+  /**
+   * What the pretend window offers to act on.
+   *
+   * Same two refusals as `windowContext`, in the same order and for the same
+   * reason: enumerating a password manager's controls is as much a read as
+   * transcribing its text, so secure input refuses the whole verb.
+   */
+  async uiTargets(_p: SidecarParams<'uiTargets'>) {
+    const app = (await this.frontmostApp()).app
+    const empty = (reason: string) => ({
+      app,
+      windowTitle: null,
+      harvestId: '',
+      targets: [],
+      truncated: reason !== 'complete',
+      stoppedBy: reason,
+      scanMs: 0
+    })
+    if (this.overrides.secureInput) return empty('secure-input')
+    if (!this.overrides.accessibility) return empty('no-accessibility')
+
+    const stoppedBy = this.overrides.targetsStoppedBy ?? 'complete'
+    if (stoppedBy === 'tree-warming' && !this.targetsWarmed) {
+      this.targetsWarmed = true
+      return empty('tree-warming')
+    }
+
+    const targets: UiTarget[] = (this.overrides.targets ?? []).map((target, index) =>
+      typeof target === 'string'
+        ? {
+            index,
+            role: 'AXButton',
+            subrole: null,
+            title: target,
+            help: null,
+            value: null,
+            frame: null,
+            actions: ['AXPress'],
+            enabled: true,
+            focused: false,
+            kind: 'press' as const
+          }
+        : { ...target, index }
+    )
+    return {
+      app,
+      windowTitle: null,
+      harvestId: targets.length > 0 ? 'scan-1' : '',
+      targets,
+      truncated: stoppedBy !== 'complete',
+      stoppedBy,
+      scanMs: 1
+    }
+  }
+  private targetsWarmed = false
+
   async frontmostApp() {
     return {
       app:

@@ -158,6 +158,45 @@ public final class RealSystem: SystemActions {
             screenshotReason: shotReason)
     }
 
+    public func uiTargets(maxTargets: Int, deadlineMs: Int) -> UiTargetsInfo {
+        let (app, _) = frontmostApp()
+        guard let pid = app.map({ pid_t($0.pid) }) else {
+            return UiTargetsInfo(
+                harvestId: "", targets: [], truncated: false, stoppedBy: "no-frontmost-app",
+                scanMs: 0)
+        }
+
+        let scan = AXTargets.scan(
+            pid: pid,
+            budget: AXTargets.Budget(
+                maxTargets: maxTargets, deadline: TimeInterval(deadlineMs) / 1000))
+
+        return UiTargetsInfo(
+            harvestId: scan.harvestId,
+            targets: scan.targets.map { target in
+                UiTargetInfo(
+                    index: target.index,
+                    role: target.role,
+                    subrole: target.subrole,
+                    title: target.title,
+                    help: target.help,
+                    value: target.value,
+                    frame: target.frame.map {
+                        (
+                            x: Double($0.origin.x), y: Double($0.origin.y),
+                            width: Double($0.size.width), height: Double($0.size.height)
+                        )
+                    },
+                    actions: target.actions,
+                    enabled: target.enabled,
+                    focused: target.focused,
+                    kind: target.kind.rawValue)
+            },
+            truncated: scan.truncated,
+            stoppedBy: scan.stoppedBy,
+            scanMs: scan.elapsedMs)
+    }
+
     public func focusedElement(context: Int) -> FocusedElementLookup {
         guard AXIsProcessTrusted() else { return .unavailable("no-accessibility") }
         guard let element = AXText.focusedElement() else {

@@ -102,6 +102,14 @@ interface Turn {
 }
 
 let turn: Turn | null = null
+/**
+ * Read the in-flight turn without letting control-flow analysis narrow it.
+ *
+ * The reader below is a closure that never assigns `turn`, so TS narrows it to
+ * its initialiser `null`, decides every guard is always taken, and types the
+ * property accesses after them as `never`. A call's result is not narrowed.
+ */
+const inFlight = (): Turn | null => turn
 const prompts = new Pushable<SDKUserMessage>()
 const options: Options = {
   systemPrompt: SYSTEM,
@@ -120,15 +128,18 @@ void (async () => {
     if (message.type === 'stream_event') {
       const event = message.event
       if (event.type === 'content_block_delta' && event.delta.type === 'text_delta') {
-        if (!turn) continue
-        turn.text += event.delta.text
-        turn.onPartial(turn.text)
+        const t = inFlight()
+        if (!t) continue
+        t.text += event.delta.text
+        t.onPartial(t.text)
       }
     } else if (message.type === 'result') {
-      const t = turn
+      const t = inFlight()
       turn = null
       if (!t) continue
-      if (message.subtype === 'success') t.resolve(t.result ?? t.text)
+      // `message.result`, not `t.result` — the latter was a typo that typechecked
+      // only because the whole block had collapsed to `never`.
+      if (message.subtype === 'success') t.resolve(message.result ?? t.text)
       else t.reject(new Error(String(message.subtype)))
     }
   }

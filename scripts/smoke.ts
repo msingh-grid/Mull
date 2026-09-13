@@ -150,7 +150,7 @@ async function checkSidecar(): Promise<void> {
     // The M3 event tap. Starting and stopping it is safe here: while it runs it
     // only *observes* — and it is torn down two lines later, well before anyone
     // could press the chord.
-    const tap = await client.startHotkeyTap({ chord: 'opt-space', swallow: true })
+    const tap = await client.startHotkeyTap({ chords: ['opt-space'], swallow: true })
     if (tap.started) {
       check('hotkey tap starts', true, tap.swallowing ? 'swallowing ⌥Space' : 'observing only')
       const stopped = await client.stopHotkeyTap({})
@@ -167,7 +167,7 @@ async function checkSidecar(): Promise<void> {
 
     // Fn is observable but never swallowable; the sidecar must say so rather
     // than letting the host believe the key is being consumed.
-    const fn = await client.startHotkeyTap({ chord: 'fn', swallow: true })
+    const fn = await client.startHotkeyTap({ chords: ['fn'], swallow: true })
     if (fn.started) {
       check('fn tap admits it cannot swallow', !fn.swallowing)
       await client.stopHotkeyTap({})

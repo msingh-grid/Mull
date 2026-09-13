@@ -56,6 +56,13 @@ final class StubSystem: SystemActions {
         harvestCalls.append((maxChars, deadlineMs, screenshot))
         return harvest
     }
+    var targetCalls: [(maxTargets: Int, deadlineMs: Int)] = []
+    var targets = UiTargetsInfo(
+        harvestId: "scan-1", targets: [], truncated: false, stoppedBy: "complete", scanMs: 4)
+    func uiTargets(maxTargets: Int, deadlineMs: Int) -> UiTargetsInfo {
+        targetCalls.append((maxTargets, deadlineMs))
+        return targets
+    }
     func startHotkeyTap(chords: [String], swallow: Bool) -> (started: Bool, reason: String?) {
         hotkeyChords = chords
         return (true, nil)
@@ -327,7 +334,7 @@ final class VerbTests: XCTestCase {
             "activateApp", "checkPermissions", "focusedElement", "frontmostApp", "init",
             "insertText", "keyChord", "promptAccessibility", "promptScreenRecording",
             "replaceRange", "replaceSelection", "secureInputState", "selectedText",
-            "startHotkeyTap", "stopHotkeyTap", "windowContext"
+            "startHotkeyTap", "stopHotkeyTap", "uiTargets", "windowContext"
         ]
         XCTAssertEqual(dispatcher.methods, expected)
     }
@@ -378,6 +385,64 @@ final class VerbTests: XCTestCase {
         let result = try XCTUnwrap(obj["result"] as? [String: Any])
         XCTAssertEqual(result["stoppedBy"] as? String, "no-accessibility")
         XCTAssertTrue(system.harvestCalls.isEmpty)
+    }
+
+    // MARK: - uiTargets (M5a Stage 5)
+
+    func testUiTargetsNumbersWhatItFound() throws {
+        system.targets = UiTargetsInfo(
+            harvestId: "scan-7",
+            targets: [
+                UiTargetInfo(
+                    index: 0, role: "AXButton", subrole: nil, title: "Search", help: nil,
+                    value: nil, frame: (x: 12, y: 40, width: 200, height: 28),
+                    actions: ["AXPress"], enabled: true, focused: false, kind: "press"),
+                UiTargetInfo(
+                    index: 1, role: "AXRow", subrole: nil, title: "Priya Sharma", help: nil,
+                    value: nil, frame: nil, actions: ["AXPress"], enabled: true, focused: false,
+                    kind: "press")
+            ],
+            truncated: false, stoppedBy: "complete", scanMs: 51)
+
+        let obj = try handle(#"{"jsonrpc":"2.0","id":60,"method":"uiTargets","params":{}}"#)
+        let result = try XCTUnwrap(obj["result"] as? [String: Any])
+        let targets = try XCTUnwrap(result["targets"] as? [[String: Any]])
+        XCTAssertEqual(result["harvestId"] as? String, "scan-7")
+        XCTAssertEqual(targets.count, 2)
+        XCTAssertEqual(targets[0]["title"] as? String, "Search")
+        XCTAssertEqual(targets[0]["kind"] as? String, "press")
+        let frame = try XCTUnwrap(targets[0]["frame"] as? [String: Any])
+        XCTAssertEqual(frame["width"] as? Double, 200)
+        // An element with no reported rectangle says so rather than inventing
+        // one at the origin — the model lines this list up against a screenshot.
+        XCTAssertTrue(targets[1]["frame"] is NSNull)
+    }
+
+    func testUiTargetsClampsItsBudgets() throws {
+        _ = try handle(
+            #"{"jsonrpc":"2.0","id":61,"method":"uiTargets","params":{"maxTargets":99999,"deadlineMs":1}}"#)
+        let call = try XCTUnwrap(system.targetCalls.first)
+        XCTAssertEqual(call.maxTargets, 400)
+        XCTAssertEqual(call.deadlineMs, 50)
+    }
+
+    /// Enumerating the controls of a password manager is its own harm, exactly
+    /// as reading its text is. Same guard, same refusal, same silence.
+    func testUiTargetsRefusesUnderSecureInput() throws {
+        system.secureInput = true
+        let obj = try handle(#"{"jsonrpc":"2.0","id":62,"method":"uiTargets","params":{}}"#)
+        let result = try XCTUnwrap(obj["result"] as? [String: Any])
+        XCTAssertEqual(result["stoppedBy"] as? String, "secure-input")
+        XCTAssertEqual((result["targets"] as? [[String: Any]])?.count, 0)
+        XCTAssertTrue(system.targetCalls.isEmpty)
+    }
+
+    func testUiTargetsRefusesWithoutAccessibility() throws {
+        system.trusted = false
+        let obj = try handle(#"{"jsonrpc":"2.0","id":63,"method":"uiTargets","params":{}}"#)
+        let result = try XCTUnwrap(obj["result"] as? [String: Any])
+        XCTAssertEqual(result["stoppedBy"] as? String, "no-accessibility")
+        XCTAssertTrue(system.targetCalls.isEmpty)
     }
 
     func testCheckPermissionsReportsScreenRecording() throws {
