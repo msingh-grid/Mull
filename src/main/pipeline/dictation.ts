@@ -10,16 +10,21 @@ import type { Bench } from '../bench'
 import { concatFloat32, peakAmplitude } from '../audio/wav'
 import { cleanTranscript, summarise } from './cleanup'
 import { describeInsertionReason, type InsertionService } from '../services/insertion'
+import { captureSelection, countWords, type SelectionSnapshot } from './selection'
+import { looksLikeInstruction, route } from './router'
 import type { JournalStore } from '../store/journal'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 
 /**
- * The M1 loop: hold key -> capture -> transcribe -> clean -> insert.
+ * The loop: hold key -> capture -> transcribe -> clean -> route -> insert.
  *
  * Two invariants from docs/PLAN.md are enforced here, not by convention:
  *
- *  1. Dictation never waits on an engine. Nothing in this path makes a network
- *     call or consults an LLM; the only slow step is local ASR.
+ *  1. Dictation never waits on an engine. The routing step added in M4 is a
+ *     pure rules table (`router.ts`), and it answers the common case — nothing
+ *     selected — without looking at the transcript at all. The ONLY await this
+ *     path adds is for a selection snapshot that is already in flight, and only
+ *     once the transcript has already been judged instruction-shaped.
  *  2. Insertion is hard-blocked while macOS secure input is active. It is
  *     checked twice — when capture starts (so we can tell the user early) and
  *     again immediately before inserting, because focus can move to a password
@@ -28,6 +33,22 @@ import type { JournalDraft, JournalEntry } from '@shared/types'
  * Everything is injected, so the whole loop runs in tests against fakes.
  */
 
+/**
+ * The edit lane, as this file sees it (implementation: `sculpt.ts`).
+ *
+ * Narrowed to one method and declared here rather than imported so the
+ * dictation path cannot accidentally reach into the engine: the type system
+ * enforces invariant 1 as well as the code does.
+ */
+export interface SculptLaneLike {
+  run(request: {
+    instruction: string
+    transcript: string
+    snapshot: SelectionSnapshot
+    app: { bundleId: string; name: string } | null
+  }): Promise<void>
+}
+
 export interface DictationDeps {
   sidecar: SidecarApi
   asr: AsrProvider
@@ -35,6 +56,8 @@ export interface DictationDeps {
   bench: Bench
   /** Walks the per-app strategy chain (M2). */
   insertion: InsertionService
+  /** Where instructions go. Absent = every utterance is dictation. */
+  sculpt?: SculptLaneLike
   /** Where applied and failed actions are written down. Optional in tests. */
   journal?: JournalStore
   onState: (state: HudState) => void
@@ -57,6 +80,8 @@ export class DictationPipeline {
   private state: HudState = { ...IDLE_HUD_STATE }
   private maxTimer: NodeJS.Timeout | null = null
   private lingerTimer: NodeJS.Timeout | null = null
+  /** Read during the hold; resolved by the time a normal utterance ends. */
+  private selectionPromise: Promise<SelectionSnapshot | null> | null = null
   private readonly now: () => number
   private readonly log: NonNullable<DictationDeps['log']>
 
@@ -79,7 +104,28 @@ export class DictationPipeline {
   }
 
   private toIdle(notice: string | null = null): void {
-    this.setState({ phase: 'idle', transcript: '', partial: false, app: null, notice })
+    this.setState({
+      phase: 'idle',
+      transcript: '',
+      partial: false,
+      app: null,
+      notice,
+      chips: []
+    })
+  }
+
+  /**
+   * Let the edit lane write the panel while it works.
+   *
+   * There is still exactly one object writing HUD base state — this one. The
+   * lane borrows it, and the borrow is refused mid-utterance for the same
+   * reason `announce()` is: whatever the user is saying right now outranks a
+   * card they were looking at a moment ago.
+   */
+  patchState(patch: Partial<HudState>): boolean {
+    if (this.phase === 'capturing') return false
+    this.setState(patch)
+    return true
   }
 
   /** Called for every PCM chunk the capture renderer produces. */
@@ -104,7 +150,26 @@ export class DictationPipeline {
     this.chunks = []
     this.startedAt = this.now()
     this.deps.capture.start()
-    this.setState({ phase: 'listening', transcript: '', partial: true, notice: null })
+    this.setState({ phase: 'listening', transcript: '', partial: true, notice: null, chips: [] })
+
+    // What is selected right now, read while the user is still speaking. This
+    // is the only input the router needs beyond the transcript, and taking it
+    // here means the decision itself costs nothing.
+    this.selectionPromise = captureSelection(this.deps.sidecar, this.log)
+    void this.selectionPromise.then((snapshot) => {
+      if (this.phase !== 'capturing' || !snapshot) return
+      // Announced before the user finishes speaking, so they can see Mull has
+      // the selection in time to change their mind (docs/DESIGN.md §7.5).
+      this.setState({
+        chips: [
+          {
+            kind: 'dict',
+            id: 'selection',
+            label: `${snapshot.app?.name ?? 'Selected'} — ${countWords(snapshot.text)} words`
+          }
+        ]
+      })
+    })
 
     this.maxTimer = setTimeout(() => {
       this.log('warn', 'dictation: max utterance length reached; stopping')
@@ -239,6 +304,37 @@ export class DictationPipeline {
         return
       }
 
+      // ---- Routing (M4) ----------------------------------------------------
+      // Read the invariant at the top of this file before changing anything
+      // here. `looksLikeInstruction` is pure string work; the await beneath it
+      // is reached only by a transcript that has already passed that test, so
+      // ordinary dictation never waits for the selection — or for anything
+      // else.
+      const instructionShaped = this.deps.sculpt ? looksLikeInstruction(text) : false
+      const snapshot = instructionShaped ? await this.selectionSnapshot() : null
+      const routed = route(text, { hasSelection: snapshot !== null })
+
+      if (routed.kind === 'edit' && snapshot && this.deps.sculpt) {
+        // Idle before handing off: the lane owns the panel from here, and a
+        // new utterance must be able to interrupt it.
+        this.phase = 'idle'
+        await this.deps.sculpt.run({
+          instruction: routed.instruction,
+          transcript: text,
+          snapshot,
+          app: this.state.app ?? snapshot.app
+        })
+        return
+      }
+
+      // Heard an instruction with nothing selected. The words get typed —
+      // which is correct, there was nothing to edit — and the HUD says why,
+      // because "it just types what I say" is exactly the confusion this
+      // feature exists to resolve.
+      const hint = instructionShaped
+        ? 'Select the text first, then say that — Mull will edit it instead of typing it.'
+        : null
+
       this.setState({ phase: 'inserting' })
       const insertStart = this.now()
       // Normally resolved during the hold, off the critical path. A very short
@@ -306,7 +402,7 @@ export class DictationPipeline {
       this.setState({
         phase: 'applied',
         partial: false,
-        notice: null,
+        notice: hint,
         lastAction: {
           summary,
           at: this.now(),
@@ -366,6 +462,15 @@ export class DictationPipeline {
         totalMs: this.now() - keyUpAt
       })
     }
+  }
+
+  /**
+   * The snapshot taken at key-down. Awaited, never re-read: an edit is a
+   * promise about the text the user was looking at when they spoke, not about
+   * whatever happens to be selected by the time transcription finishes.
+   */
+  private async selectionSnapshot(): Promise<SelectionSnapshot | null> {
+    return this.selectionPromise ? this.selectionPromise : null
   }
 
   private async resolveApp(): Promise<HudState['app']> {

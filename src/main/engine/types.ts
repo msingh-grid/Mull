@@ -51,6 +51,10 @@ export interface PlanResult {
 }
 
 export interface Engine {
+  /** Which implementation this is: 'agent' | 'api-key' | 'fake' | 'signed-out'. */
+  readonly name: string
+  /** The model actually in use, or null when there isn't one. For the ledger. */
+  readonly model: string | null
   ready(): Promise<EngineState>
   /**
    * Edit text. `onPartial` receives progressively longer prefixes of the

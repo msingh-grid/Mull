@@ -2,11 +2,12 @@ import { describe, expect, it, vi } from 'vitest'
 import { CAPTURE_SAMPLE_RATE, type HudState } from '@shared/ipc'
 import { FakeSidecar } from '../services/sidecar'
 import { FakeAsrProvider } from '../asr/fake'
-import { Bench, type BenchRow } from '../bench'
+import { Bench, type BenchDraft, type DictationRow } from '../bench'
 import { InsertionService, describeInsertionReason } from '../services/insertion'
 import { JournalStore } from '../store/journal'
 import { memoryDatabase } from '../store/journal.test-helpers'
 import { DictationPipeline } from './dictation'
+import type { SculptRequest } from './sculpt'
 
 function speech(seconds: number, amplitude = 0.25): Float32Array {
   const samples = new Float32Array(Math.round(CAPTURE_SAMPLE_RATE * seconds))
@@ -21,27 +22,33 @@ interface Harness {
   sidecar: FakeSidecar
   journal: JournalStore
   states: HudState[]
-  rows: Array<Omit<BenchRow, 'at'>>
+  rows: Array<BenchDraft<DictationRow>>
   capture: { started: number; stopped: number }
   clock: { advance: (ms: number) => void }
+  /** Everything the router handed to the edit lane. */
+  sculpted: SculptRequest[]
 }
 
 function harness(options: {
   sidecar?: FakeSidecar
   transcript?: string
+  /** Absent = no edit lane at all, which is the M1–M3 behaviour. */
+  sculpt?: boolean
 } = {}): Harness {
   const sidecar = options.sidecar ?? new FakeSidecar({ accessibility: true })
   const journal = new JournalStore(memoryDatabase())
   const states: HudState[] = []
-  const rows: Array<Omit<BenchRow, 'at'>> = []
+  const rows: Array<BenchDraft<DictationRow>> = []
   const capture = { started: 0, stopped: 0 }
 
   let clockMs = 1_000
   const bench = new Bench('/dev/null')
   vi.spyOn(bench, 'record').mockImplementation((row) => {
-    rows.push(row)
+    // This harness is about the dictation path; edit rows belong to sculpt.test.ts.
+    if (row.kind === 'dictation') rows.push(row)
   })
 
+  const sculpted: SculptRequest[] = []
   const pipe = new DictationPipeline(
     {
       sidecar,
@@ -49,6 +56,13 @@ function harness(options: {
       bench,
       insertion: new InsertionService({ sidecar }),
       journal,
+      sculpt: options.sculpt
+        ? {
+            run: async (request) => {
+              sculpted.push(request)
+            }
+          }
+        : undefined,
       onState: (s) => states.push({ ...s }),
       now: () => clockMs,
       appliedLingerMs: 5,
@@ -71,7 +85,8 @@ function harness(options: {
     states,
     rows,
     capture,
-    clock: { advance: (ms) => { clockMs += ms } }
+    clock: { advance: (ms) => { clockMs += ms } },
+    sculpted
   }
 }
 
@@ -292,5 +307,96 @@ describe('describeInsertionReason', () => {
     expect(describeInsertionReason('secure-input')).toMatch(/password field/)
     expect(describeInsertionReason('no-focused-element')).toMatch(/click where/)
     expect(describeInsertionReason(null)).toMatch(/Couldn’t insert/)
+  })
+})
+
+/**
+ * Routing (M4). The invariant under test is the one at the top of
+ * dictation.ts: an utterance only reaches the edit lane when there was a live
+ * selection AND the words read as an instruction. Everything else is typed,
+ * exactly as it was before this milestone existed.
+ */
+describe('DictationPipeline — routing', () => {
+  const SELECTED = 'some selected words here'
+
+  const withSelection = (): FakeSidecar =>
+    new FakeSidecar({
+      accessibility: true,
+      text: SELECTED,
+      caret: 0,
+      selectionLength: SELECTED.length
+    })
+
+  async function utterance(h: Harness): Promise<void> {
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+  }
+
+  it('hands an instruction to the edit lane instead of the caret', async () => {
+    const h = harness({
+      sidecar: withSelection(),
+      transcript: 'make this crisp',
+      sculpt: true
+    })
+    await utterance(h)
+
+    expect(h.sculpted.length).toBe(1)
+    expect(h.sculpted[0]?.instruction).toBe('Make this crisp')
+    expect(h.sculpted[0]?.snapshot.text).toBe(SELECTED)
+    // Nothing typed, and no dictation row — the lane owns this one now.
+    expect(h.sidecar.insertions).toEqual([])
+    expect(h.journal.recent(10)).toEqual([])
+    h.pipe.dispose()
+  })
+
+  it('types ordinary speech even with text selected', async () => {
+    const h = harness({
+      sidecar: withSelection(),
+      transcript: 'make sure Priya signs off before Friday',
+      sculpt: true
+    })
+    await utterance(h)
+
+    expect(h.sculpted).toEqual([])
+    expect(h.sidecar.insertions).toEqual(['Make sure Priya signs off before Friday'])
+    h.pipe.dispose()
+  })
+
+  it('shows what is selected while you are still speaking', async () => {
+    const h = harness({ sidecar: withSelection(), sculpt: true })
+    h.pipe.begin()
+    await settle()
+    const listening = h.states.filter((s) => s.phase === 'listening').at(-1)
+    expect(listening?.chips).toEqual([
+      { kind: 'dict', id: 'selection', label: 'TextEdit — 4 words' }
+    ])
+    h.pipe.end()
+    await settle()
+    h.pipe.dispose()
+  })
+
+  it('types an instruction when nothing is selected, and explains why', async () => {
+    const h = harness({ transcript: 'make this crisp', sculpt: true })
+    await utterance(h)
+
+    expect(h.sculpted).toEqual([])
+    expect(h.sidecar.insertions).toEqual(['Make this crisp'])
+    const applied = h.states.filter((s) => s.phase === 'applied').at(-1)
+    expect(applied?.notice).toMatch(/Select the text first/)
+    h.pipe.dispose()
+  })
+
+  it('is pure dictation when there is no edit lane at all', async () => {
+    const h = harness({ sidecar: withSelection(), transcript: 'make this crisp' })
+    await utterance(h)
+
+    expect(h.sculpted).toEqual([])
+    expect(h.sidecar.insertions).toEqual(['Make this crisp'])
+    // No hint either: there is nothing to discover on a build without the lane.
+    expect(h.states.filter((s) => s.phase === 'applied').at(-1)?.notice).toBeNull()
+    h.pipe.dispose()
   })
 })

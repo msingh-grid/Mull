@@ -59,6 +59,8 @@ export interface FakeEngineOptions {
 }
 
 export class FakeEngine implements Engine {
+  readonly name = 'fake'
+  readonly model = null
   private readonly state: EngineState
   private readonly chunkMs: number
   private readonly sleep: (ms: number) => Promise<void>

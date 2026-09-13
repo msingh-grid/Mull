@@ -36,6 +36,7 @@ import { SettingsStore } from './store/settings'
 import { JournalStore } from './store/journal'
 import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
+import { SculptLane } from './pipeline/sculpt'
 import { appliedText, diffText } from './pipeline/diff'
 import { FakeEngine } from './engine/fake'
 import type { Engine } from './engine/types'
@@ -58,6 +59,7 @@ let hud: HudController | null = null
 let chords: ChordScope | null = null
 let tray: TrayPresence | null = null
 let engine: Engine | null = null
+let sculpt: SculptLane | null = null
 let settings: SettingsStore | null = null
 let permissions: PermissionsService | null = null
 /** Filled in at boot; the about pane reports what is actually running. */
@@ -404,6 +406,26 @@ async function bootstrap(): Promise<void> {
   })
   tray.start()
 
+  // The edit lane. Its HUD port reads `pipeline` and `hud` at call time, which
+  // is what lets it be built before the pipeline that hands work to it.
+  sculpt = new SculptLane({
+    engine,
+    sidecar,
+    insertion,
+    journal: journal ?? undefined,
+    bench,
+    onJournalChanged: notifyJournalChanged,
+    log: logFn,
+    hud: {
+      update: (patch) => pipeline?.patchState(patch) ?? false,
+      announce: (phase, notice, lastAction) =>
+        pipeline?.announce(phase, notice, lastAction) ?? false,
+      openCard: (card, onAction) => hud?.openCard(card, onAction),
+      updateCard: (card) => hud?.updateCard(card),
+      closeCard: () => hud?.closeCard()
+    }
+  })
+
   pipeline = new DictationPipeline(
     {
       sidecar,
@@ -411,6 +433,7 @@ async function bootstrap(): Promise<void> {
       bench,
       insertion,
       journal: journal ?? undefined,
+      sculpt,
       onState: (state) => hud?.setPipelineState(state),
       log: logFn,
       capture: {
@@ -428,7 +451,12 @@ async function bootstrap(): Promise<void> {
   hotkey = new HotkeyService({
     chord: settings.get().hotkey,
     sidecar,
-    onStart: () => pipeline?.begin(),
+    onStart: () => {
+      // A new utterance withdraws whatever proposal was on screen — answered
+      // as a cancel, so it lands in the journal rather than vanishing.
+      hud?.cancelOpen()
+      pipeline?.begin()
+    },
     onStop: () => pipeline?.end(),
     log: logFn
   })
@@ -611,7 +639,12 @@ async function applyHotkeyChoice(next: Settings): Promise<void> {
   hotkey = new HotkeyService({
     chord: next.hotkey,
     sidecar,
-    onStart: () => pipeline?.begin(),
+    onStart: () => {
+      // A new utterance withdraws whatever proposal was on screen — answered
+      // as a cancel, so it lands in the journal rather than vanishing.
+      hud?.cancelOpen()
+      pipeline?.begin()
+    },
     onStop: () => pipeline?.end(),
     log: logFn
   })

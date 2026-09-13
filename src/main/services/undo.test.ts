@@ -80,23 +80,53 @@ describe('UndoService', () => {
     expect((await undo.undoLast()).reason).toBe('no-focused-element')
   })
 
-  it('refuses when the text has changed under it', async () => {
-    // The user typed after the insertion: the characters before the caret are
-    // no longer ours.
-    const { undo, sidecar } = setup({ text: `Hi there. ${INSERTED} and more` })
+  it('refuses when its own text has been edited', async () => {
+    // A word inside the insertion was changed. Neither candidate position
+    // holds the characters Mull wrote, so there is nothing it may remove.
+    const { undo, sidecar } = setup({ text: 'Hi there. Send the DECK today' })
     const before = sidecar.text
     const result = await undo.undoLast()
 
+    expect(result.ok).toBe(false)
     expect(result.reason).toBe('text-changed')
     expect(sidecar.text).toBe(before)
   })
 
-  it('refuses when the caret sits before the text it would delete', async () => {
+  it('refuses when its text is gone entirely', async () => {
+    const { undo, sidecar } = setup({ text: 'Hi there. Something else completely' })
+    const before = sidecar.text
+
+    expect((await undo.undoLast()).reason).toBe('text-changed')
+    expect(sidecar.text).toBe(before)
+  })
+
+  /**
+   * The two cases below used to refuse, and now don't.
+   *
+   * Refusing was over-caution dressed up as safety: in both, Mull's exact
+   * characters are still sitting exactly where it put them, and `expect`
+   * confirms that inside the sidecar before a single character moves. What had
+   * actually changed was only where the *caret* was — and an undo that works
+   * solely when you haven't clicked anywhere since is an undo that fails when
+   * people reach for it. It is also what makes an applied edit reversible at
+   * all, since replacing a selection rarely leaves the caret at the end of the
+   * new text.
+   */
+  it('removes its own text even when you kept typing after it', async () => {
+    const { undo, sidecar } = setup({ text: `Hi there. ${INSERTED} and more` })
+    const result = await undo.undoLast()
+
+    expect(result.ok).toBe(true)
+    // What the user typed afterwards survives; only Mull's words go.
+    expect(sidecar.text).toBe('Hi there.  and more')
+  })
+
+  it('removes its own text from wherever the caret happens to be', async () => {
     const { undo, sidecar } = setup({ text: `Hi there. ${INSERTED}`, caret: 3 })
     const result = await undo.undoLast()
 
-    expect(result.reason).toBe('text-changed')
-    expect(sidecar.text).toContain(INSERTED)
+    expect(result.ok).toBe(true)
+    expect(sidecar.text).toBe('Hi there. ')
   })
 
   it('relies on the sidecar when the element won’t hand over its text', async () => {
@@ -236,11 +266,11 @@ describe('UndoService.undo(entryId)', () => {
   })
 
   it('applies the same changed-text gate as ⌥Z', async () => {
-    const { undo, id, sidecar } = setup({ text: 'Hi there. Send the deck today!' })
+    const { undo, id, sidecar } = setup({ text: 'Hi there. Send the DECK today' })
     const result = await undo.undo(id)
 
     expect(result.ok).toBe(false)
     expect(result.reason).toBe('text-changed')
-    expect(sidecar.text).toBe('Hi there. Send the deck today!')
+    expect(sidecar.text).toBe('Hi there. Send the DECK today')
   })
 })

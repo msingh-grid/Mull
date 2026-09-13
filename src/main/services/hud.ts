@@ -95,6 +95,19 @@ export class HudController {
     }
   }
 
+  /**
+   * Withdraw an open proposal because something else needs the panel — in
+   * practice, the user starting a new utterance.
+   *
+   * Delivered as a cancel rather than a silent `closeCard()` so whoever opened
+   * it hears the answer and writes it down. A proposal that disappears without
+   * a word is one the journal has no row for, and "where did that go?" is the
+   * question this app exists to never provoke.
+   */
+  cancelOpen(): void {
+    if (this.card) this.act('cancel')
+  }
+
   get hasCard(): boolean {
     return this.card !== null
   }

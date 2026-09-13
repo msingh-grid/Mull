@@ -15,9 +15,10 @@ import type { JournalStore } from '../store/journal'
  *   1. the entry was verified when it was written (we read it back then),
  *   2. the same app is frontmost now,
  *   3. a text element has focus and reports a caret,
- *   4. the range ending at that caret still holds exactly the inserted text —
- *      checked locally against the element's own text, then again inside the
- *      sidecar via `expect`, which is the check that actually gates the write.
+ *   4. a position it knows about still holds exactly the inserted text — where
+ *      the caret is now, or where the write itself reported landing — checked
+ *      locally against the element's own text, then again inside the sidecar
+ *      via `expect`, which is the check that actually gates the write.
  *
  * Any doubt ends as a refusal with a sentence explaining which check failed.
  */
@@ -161,26 +162,25 @@ export class UndoService {
     }
 
     const length = utf16Length(inserted)
-    const start = caret - length
-    if (start < 0) {
-      return {
-        ok: false,
-        entry,
-        reason: 'text-changed',
-        message: 'The text has changed since Mull inserted it — nothing was undone.'
-      }
-    }
 
-    // Local pre-check, when the element handed us a window that covers the
-    // range. It cannot replace the sidecar's `expect` (the document can change
-    // between these two calls) but it produces the better error message.
-    const local = sliceIfCovered(
-      focused.element.text,
-      focused.element.textStart,
-      start,
-      length
+    /**
+     * Where the text might be.
+     *
+     * The caret is the first guess and the usual one — Mull just wrote there.
+     * But an app is free to park the caret elsewhere after a write (replacing
+     * a selection through AX frequently does), and an edit whose Apply card
+     * printed "⌥Z undoes after apply" has to keep that promise. So the offset
+     * the write itself reported is tried as well.
+     *
+     * Trying two positions is not a loosening of the safety rule. Every
+     * candidate goes through the same `expect` gate inside the sidecar, which
+     * refuses unless that exact range still holds exactly these characters —
+     * so a wrong guess ends in a refusal, never in someone else's paragraph.
+     */
+    const candidates = [caret - length, (entry.caret ?? -1) - length].filter(
+      (start, index, all) => start >= 0 && all.indexOf(start) === index
     )
-    if (local !== null && local !== inserted) {
+    if (candidates.length === 0) {
       return {
         ok: false,
         entry,
@@ -189,32 +189,51 @@ export class UndoService {
       }
     }
 
-    const result = await this.deps.sidecar.replaceRange({
-      start,
-      length,
-      text: restore,
-      expect: inserted
-    })
+    let lastReason: string | null = 'expect-mismatch'
+    for (const start of candidates) {
+      // Local pre-check, when the element handed us a window that covers the
+      // range. It cannot replace the sidecar's `expect` (the document can
+      // change between these two calls) but it saves a round trip and produces
+      // the better error message.
+      const local = sliceIfCovered(focused.element.text, focused.element.textStart, start, length)
+      if (local !== null && local !== inserted) {
+        lastReason = 'expect-mismatch'
+        continue
+      }
 
-    if (!result.replaced) {
-      const reason: UndoReason =
-        result.reason === 'expect-mismatch'
-          ? 'text-changed'
-          : result.reason === 'secure-input' || result.reason === 'no-accessibility'
-            ? 'blocked'
-            : 'failed'
-      this.log('warn', 'undo refused', { entry: entry.id, reason: result.reason })
-      return { ok: false, entry, reason, message: describeUndoFailure(result.reason) }
+      const result = await this.deps.sidecar.replaceRange({
+        start,
+        length,
+        text: restore,
+        expect: inserted
+      })
+
+      if (result.replaced) {
+        this.deps.journal.markUndone(entry.id, this.now())
+        this.log('info', 'undo applied', { entry: entry.id, chars: length, start })
+        return {
+          ok: true,
+          entry,
+          reason: null,
+          message: restore ? 'Restored the previous text.' : `Removed “${preview(inserted)}”.`
+        }
+      }
+
+      lastReason = result.reason
+      // Only a mismatch is about *where* we looked. Secure input, a missing
+      // permission, an app with no AX text — none of those get better at a
+      // different offset, so stop rather than ask twice.
+      if (result.reason !== 'expect-mismatch') break
     }
 
-    this.deps.journal.markUndone(entry.id, this.now())
-    this.log('info', 'undo applied', { entry: entry.id, chars: length })
-    return {
-      ok: true,
-      entry,
-      reason: null,
-      message: restore ? 'Restored the previous text.' : `Removed “${preview(inserted)}”.`
-    }
+    const reason: UndoReason =
+      lastReason === 'expect-mismatch'
+        ? 'text-changed'
+        : lastReason === 'secure-input' || lastReason === 'no-accessibility'
+          ? 'blocked'
+          : 'failed'
+    this.log('warn', 'undo refused', { entry: entry.id, reason: lastReason })
+    return { ok: false, entry, reason, message: describeUndoFailure(lastReason) }
   }
 }
 
