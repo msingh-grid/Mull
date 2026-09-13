@@ -24,16 +24,35 @@ export default function App(): JSX.Element {
   const [state, setState] = useState<HudState>(IDLE_HUD_STATE)
 
   useEffect(() => {
+    // No bridge means this page is being viewed outside the app — most often
+    // the dev server URL opened in a browser tab. Say so rather than throwing.
+    const bridge = window.mull as typeof window.mull | undefined
+    if (!bridge) return
+
     let cancelled = false
-    void window.mull.hud.getState().then((current) => {
+    void bridge.hud.getState().then((current) => {
       if (!cancelled && current) setState(current)
     })
-    const off = window.mull.hud.onState(setState)
+    const off = bridge.hud.onState(setState)
     return () => {
       cancelled = true
       off()
     }
   }, [])
+
+  if (!(window.mull as typeof window.mull | undefined)) {
+    return (
+      <main style={{ padding: '10px 14px', fontSize: 12, lineHeight: 1.5 }}>
+        <div>
+          <strong>NO BRIDGE</strong>
+        </div>
+        <div>
+          This is the HUD renderer opened without Mull’s preload — usually the dev-server URL in a
+          browser. Use the app window that <code>npm run dev</code> opens.
+        </div>
+      </main>
+    )
+  }
 
   return (
     <main

@@ -33,11 +33,18 @@ Launch once (`npm run dev`) and let it ask, or pre-grant in **System Settings �
 | Permission | Why Mull needs it | Symptom when missing |
 |---|---|---|
 | **Microphone** | to hear you | HUD shows "No audio captured" |
-| **Accessibility** | to place text at the caret | HUD shows the Accessibility notice; nothing is inserted |
-| **Input Monitoring** | to see ⌥Space while in the background | HUD says ⌥Space is unavailable; hotkey falls back to toggle mode |
+| **Accessibility** | to place text at the caret — and, on macOS, for the key-up tap as well | nothing is inserted; log shows `Accessibility API is disabled!` and `hotkey mode: toggle` |
+| **Input Monitoring** | to see ⌥Space while in the background | `hotkey mode` never reaches `ptt` |
 
 In dev the permissions are attributed to **Electron**, not "Mull" — that is expected until M6 signs
 a real app bundle. **Grants require a restart of `npm run dev`** to take effect.
+
+Until Accessibility is granted the hotkey runs in **toggle** mode: ⌥Space starts, ⌥Space stops.
+The loop is fully testable that way; it simply isn't push-to-talk yet.
+
+Two more things that look like bugs and aren't: the dev server picking port 5174 means an older
+`npm run dev` is still running (kill it), and opening the dev-server URL in a browser shows
+`NO BRIDGE` because a browser tab has no preload — use the window Electron opens.
 
 ## 3. The checklist
 

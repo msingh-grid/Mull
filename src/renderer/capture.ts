@@ -11,7 +11,11 @@ import { CAPTURE_SAMPLE_RATE } from '@shared/ipc'
  * the orange mic indicator while the device stays open.
  */
 
-const api = window.mull.capture
+const bridge = window.mull as typeof window.mull | undefined
+if (!bridge) {
+  throw new Error('capture: preload bridge missing — this page only works inside Mull')
+}
+const api = bridge.capture
 
 let context: AudioContext | null = null
 let source: MediaStreamAudioSourceNode | null = null
