@@ -1,0 +1,589 @@
+<title>Mull — Signal Brutalist</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* ============================================================
+   MULL — DIRECTION BOARD 03 / SIGNAL BRUTALIST
+   Tactical-telemetry dark substrate. Every color, size and
+   duration is a custom property — D3 extracts tokens from here.
+   ============================================================ */
+:root{
+  /* substrate */
+  --c-ground:#0A0A0A;          /* board + desktop ground        */
+  --c-panel:#141414;           /* HUD / card solid ground       */
+  --c-panel-2:#1A1A18;         /* raised compartment            */
+  --c-line:#2C2C29;            /* hairline grid                 */
+  --c-line-strong:#3A3A36;     /* structural border             */
+  /* phosphor */
+  --c-ink:#EAEAEA;             /* primary text (15.3:1 / panel) */
+  --c-dim:#9A9A91;             /* secondary text (6.5:1)        */
+  --c-faint:#5F5F58;           /* decorative marks only         */
+  /* semantic — stable hues, nothing else gets color */
+  --c-accent:#FF2A2A;          /* hazard red: REC lamp, peaks   */
+  --c-ins:#3ED47C;             /* added   (9.6:1 / panel)       */
+  --c-ins-bg:rgba(62,212,124,.10);
+  --c-del:#FF5245;             /* removed (5.7:1 / panel)       */
+  --c-del-bg:rgba(255,82,69,.10);
+  --c-warn:#FFB300;            /* warning (10.3:1 / panel)      */
+  --c-warn-bg:rgba(255,179,0,.10);
+  --c-mem:#4CC9E8;             /* memory citation (9.5:1)       */
+  --c-mem-bg:rgba(76,201,232,.10);
+  /* type */
+  --f-mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
+  --f-sans:system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --fs-11:11px; --fs-12:12px; --fs-13:13px;
+  --track-wide:.08em; --track-med:.05em; --track-display:-.03em;
+  /* geometry */
+  --r-0:0px;                   /* the direction's only radius   */
+  --hud-w:480px;
+  --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-6:24px; --sp-8:32px;
+  /* motion */
+  --t-fast:120ms; --t-med:180ms; --t-slow:250ms;
+  --ease-out:cubic-bezier(.2,0,.2,1);
+  --d-pulse:1.3s; --d-meter:1.7s; --d-caret:1.1s;
+  /* elevation — the HUD floats on real offset+blur */
+  --e-hud:0 18px 44px rgba(0,0,0,.58), 0 2px 8px rgba(0,0,0,.45);
+  --e-window:0 24px 64px rgba(0,0,0,.6);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{background:var(--c-ground)}
+body{
+  color:var(--c-ink);
+  font:var(--fs-13)/1.6 var(--f-mono);
+  overflow-x:hidden;
+  -webkit-font-smoothing:antialiased;
+}
+::selection{background:var(--c-accent);color:#0A0A0A}
+a{color:inherit}
+kbd{font-family:var(--f-mono);font-size:inherit}
+
+/* faint CRT sweep — board decoration only, 3% */
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:repeating-linear-gradient(0deg,transparent 0 3px,rgba(0,0,0,.03) 3px 4px);
+}
+
+.board{max-width:1240px;margin:0 auto;padding:0 var(--sp-6) 80px}
+
+/* ---------- board chrome: header --------------------------- */
+.meta-bar{
+  display:flex;justify-content:space-between;gap:var(--sp-4);flex-wrap:wrap;
+  padding:14px 0;border-bottom:1px solid var(--c-line);
+  font-size:var(--fs-11);letter-spacing:var(--track-wide);
+  text-transform:uppercase;color:var(--c-dim);
+}
+.meta-bar b{color:var(--c-ink);font-weight:700}
+.masthead{padding:56px 0 34px;border-bottom:1px solid var(--c-line);position:relative}
+.masthead h1{
+  font:900 clamp(56px,9.2vw,116px)/0.9 var(--f-sans);
+  letter-spacing:var(--track-display);text-transform:uppercase;
+  color:var(--c-ink);
+}
+.masthead h1 span{display:block}
+.masthead h1 .row2{color:transparent;-webkit-text-stroke:1.5px var(--c-ink)}
+.thesis{
+  margin-top:26px;max-width:72ch;color:var(--c-dim);
+  font-size:var(--fs-13);letter-spacing:.02em;
+}
+.thesis b{color:var(--c-ink);font-weight:700}
+.hazard{
+  height:6px;margin-top:34px;
+  background:repeating-linear-gradient(-45deg,var(--c-accent) 0 10px,transparent 10px 22px);
+  opacity:.55;
+}
+
+/* ---------- section labels --------------------------------- */
+.sec{
+  display:flex;justify-content:space-between;align-items:baseline;gap:var(--sp-4);
+  margin:52px 0 18px;padding:10px 0;flex-wrap:wrap;
+  border-top:1px solid var(--c-line-strong);border-bottom:1px solid var(--c-line);
+  font-size:var(--fs-12);letter-spacing:.12em;text-transform:uppercase;
+}
+.sec .tag{font-weight:700;color:var(--c-ink)}
+.sec .tag::before{content:"/// ";color:var(--c-accent)}
+.sec .note{color:var(--c-dim);letter-spacing:var(--track-wide);font-size:var(--fs-11)}
+
+/* ---------- state frames ------------------------------------ */
+.frame{border:1px solid var(--c-line-strong);margin-bottom:36px;position:relative}
+.frame::before,.frame::after{
+  content:"+";position:absolute;top:-9px;color:var(--c-faint);
+  font:12px var(--f-mono);z-index:5;
+}
+.frame::before{left:-5px}.frame::after{right:-5px}
+.frame-cap{
+  display:flex;justify-content:space-between;gap:var(--sp-4);flex-wrap:wrap;
+  padding:9px 14px;border-bottom:1px solid var(--c-line-strong);
+  background:var(--c-panel);
+  font-size:var(--fs-11);letter-spacing:var(--track-wide);text-transform:uppercase;
+}
+.frame-cap .st{font-weight:700;color:var(--c-ink)}
+.frame-cap .an{color:var(--c-dim)}
+.frame-notes{
+  padding:9px 14px;border-top:1px solid var(--c-line-strong);
+  background:var(--c-panel);color:var(--c-dim);
+  font-size:var(--fs-11);letter-spacing:var(--track-med);text-transform:uppercase;
+}
+.frame-notes em{font-style:normal;color:var(--c-ink)}
+
+/* ---------- desktop scene (CSS-drawn macOS backdrop) -------- */
+.scene{
+  position:relative;overflow:hidden;
+  background:
+    radial-gradient(120% 90% at 28% -12%, #1D2733 0%, #11151C 46%, #0A0C10 78%, #07080A 100%);
+}
+.scene.h-a{height:330px}.scene.h-b{height:360px}.scene.h-c{height:560px}
+.menubar{
+  position:absolute;top:0;left:0;right:0;height:25px;z-index:1;
+  display:flex;align-items:center;gap:18px;padding:0 14px;
+  background:rgba(18,20,24,.86);
+  font:12px var(--f-sans);color:rgba(235,235,240,.88);
+}
+.menubar .app{font-weight:700}
+.menubar .sp{flex:1}
+.menubar .right{display:flex;gap:14px;color:rgba(235,235,240,.75)}
+
+/* Mail window */
+.mailwin{
+  position:absolute;top:52px;left:5%;width:min(660px,74%);z-index:1;
+  background:#242426;border:1px solid rgba(255,255,255,.09);
+  border-radius:10px;box-shadow:var(--e-window);
+  font-family:var(--f-sans);overflow:hidden;
+}
+.mw-title{
+  display:flex;align-items:center;gap:8px;height:38px;padding:0 12px;
+  background:#2C2C2E;border-bottom:1px solid rgba(0,0,0,.4);
+}
+.tl{width:12px;height:12px;border-radius:50%}
+.tl.r{background:#FF5F57}.tl.y{background:#FEBC2E}.tl.g{background:#28C840}
+.mw-title .name{flex:1;text-align:center;font-size:12px;color:rgba(235,235,240,.6);margin-right:52px}
+.mw-tools{display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid rgba(0,0,0,.35);background:#29292B}
+.mw-tools i{display:block;width:26px;height:18px;border-radius:5px;background:rgba(255,255,255,.09)}
+.mw-hdr{padding:8px 14px;border-bottom:1px solid rgba(255,255,255,.07);font-size:12px;color:rgba(235,235,240,.55)}
+.mw-hdr b{color:rgba(235,235,240,.85);font-weight:600}
+.mw-body{padding:14px 16px 24px;font-size:13px;line-height:1.65;color:#D4D4D8;background:#202022}
+.mw-body p{margin:0 0 10px}
+.sel{background:rgba(64,120,255,.34);box-shadow:0 0 0 1px rgba(64,120,255,.22)}
+
+/* ============================================================
+   THE HUD — non-activating floating panel, 480px, solid ground
+   ============================================================ */
+.hud{
+  position:absolute;left:50%;transform:translateX(-50%);bottom:26px;z-index:2;
+  width:var(--hud-w);max-width:calc(100% - 32px);
+  background:var(--c-line);              /* 1px grid via grid-gap */
+  border:1px solid var(--c-line-strong);
+  border-radius:var(--r-0);
+  box-shadow:var(--e-hud);
+  display:grid;gap:1px;
+}
+.hud>*{background:var(--c-panel)}
+
+.hud-head{display:flex;align-items:center;gap:10px;padding:9px 12px}
+.lamp{
+  width:15px;height:15px;flex:none;border:1px solid var(--c-line-strong);
+  display:grid;place-items:center;
+}
+.lamp::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--c-faint)}
+.lamp.rec::before{background:var(--c-accent);box-shadow:0 0 7px rgba(255,42,42,.85);animation:pulse var(--d-pulse) var(--ease-out) infinite}
+.lamp.hold::before{background:var(--c-ink)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+
+.meter{
+  position:relative;flex:1;height:12px;
+  -webkit-mask-image:repeating-linear-gradient(90deg,#000 0 5px,transparent 5px 8px);
+          mask-image:repeating-linear-gradient(90deg,#000 0 5px,transparent 5px 8px);
+}
+.meter::before{content:"";position:absolute;inset:0;background:#262623}
+.meter .lit{
+  position:absolute;inset:0;
+  background:linear-gradient(90deg,var(--c-ink) 0 84%,var(--c-accent) 84% 100%);
+  clip-path:inset(0 96% 0 0);
+}
+.meter.live .lit{animation:level var(--d-meter) var(--ease-out) infinite}
+.meter.hold .lit{clip-path:inset(0 78% 0 0)}
+@keyframes level{
+  0%{clip-path:inset(0 62% 0 0)} 16%{clip-path:inset(0 34% 0 0)}
+  34%{clip-path:inset(0 52% 0 0)} 52%{clip-path:inset(0 12% 0 0)}
+  70%{clip-path:inset(0 44% 0 0)} 84%{clip-path:inset(0 24% 0 0)}
+  100%{clip-path:inset(0 62% 0 0)}
+}
+.hud-state{
+  flex:none;font-size:var(--fs-11);font-weight:700;
+  letter-spacing:var(--track-wide);text-transform:uppercase;color:var(--c-dim);
+}
+.hud-state.on{color:var(--c-ink)}
+
+.hud-line{padding:8px 12px;font-size:var(--fs-12);line-height:1.55;color:var(--c-ink);min-height:34px}
+.hud-line .ghost{color:var(--c-dim);font-size:var(--fs-11);letter-spacing:var(--track-med);text-transform:uppercase}
+.hud-line .ghost kbd{color:var(--c-dim);border:1px solid var(--c-line-strong);padding:0 4px;font-size:var(--fs-11)}
+.caret{
+  display:inline-block;width:7px;height:13px;vertical-align:-2px;
+  background:var(--c-ink);animation:blink var(--d-caret) steps(2,start) infinite;
+}
+@keyframes blink{to{visibility:hidden}}
+
+.hud-chips{display:flex;gap:6px;flex-wrap:wrap;padding:8px 12px}
+.chip{
+  display:inline-flex;align-items:center;gap:6px;padding:3px 8px;
+  font-size:var(--fs-11);letter-spacing:.06em;text-transform:uppercase;
+  border:1px solid var(--c-line-strong);color:var(--c-ink);background:var(--c-panel-2);
+  border-radius:var(--r-0);
+  transition:border-color var(--t-fast) var(--ease-out),color var(--t-fast) var(--ease-out);
+}
+.chip kbd{color:var(--c-dim)}
+.chip.mem{color:var(--c-mem);border-color:rgba(76,201,232,.4);background:var(--c-mem-bg);cursor:pointer}
+.chip.mem:hover{border-color:var(--c-mem)}
+.chip.warn{color:var(--c-warn);border-color:rgba(255,179,0,.4);background:var(--c-warn-bg)}
+
+/* diff card */
+.hud-card{display:grid;gap:1px;background:var(--c-line)}
+.hud-card>*{background:var(--c-panel)}
+.card-title{
+  display:flex;justify-content:space-between;gap:10px;padding:7px 12px;
+  font-size:var(--fs-11);letter-spacing:var(--track-med);text-transform:uppercase;
+}
+.card-title .t{color:var(--c-ink);font-weight:700}
+.card-title .m{color:var(--c-dim)}
+.diff{
+  padding:10px 12px;max-height:150px;overflow:auto;
+  font-size:var(--fs-12);line-height:1.75;color:var(--c-ink);
+  scrollbar-width:thin;scrollbar-color:var(--c-line-strong) var(--c-panel);
+}
+.diff::-webkit-scrollbar{width:8px}
+.diff::-webkit-scrollbar-thumb{background:var(--c-line-strong)}
+.diff::-webkit-scrollbar-track{background:var(--c-panel)}
+del{
+  color:var(--c-del);background:var(--c-del-bg);padding:1px 3px;
+  text-decoration:line-through;text-decoration-thickness:1px;
+  text-decoration-color:rgba(255,82,69,.75);
+}
+ins{color:var(--c-ins);background:var(--c-ins-bg);padding:1px 3px;text-decoration:none}
+.card-actions{display:flex;align-items:center;gap:8px;padding:9px 12px}
+.btn{
+  font:700 var(--fs-11) var(--f-mono);letter-spacing:var(--track-med);
+  text-transform:uppercase;padding:6px 14px;cursor:pointer;
+  border-radius:var(--r-0);
+  transition:background var(--t-fast) var(--ease-out),color var(--t-fast) var(--ease-out),border-color var(--t-fast) var(--ease-out);
+}
+.btn.ok{background:var(--c-ink);color:#0A0A0A;border:1px solid var(--c-ink)}
+.btn.ok:hover{background:#FFFFFF;border-color:#FFFFFF}
+.btn.no{background:transparent;color:var(--c-dim);border:1px solid var(--c-line-strong)}
+.btn.no:hover{color:var(--c-ink);border-color:var(--c-dim)}
+.undo-path{
+  margin-left:auto;font-size:var(--fs-11);letter-spacing:var(--track-med);
+  text-transform:uppercase;color:var(--c-dim);
+}
+.undo-path kbd{border:1px solid var(--c-line-strong);padding:0 4px;font-size:var(--fs-11)}
+
+/* dimension ruler over state A HUD */
+.dim-rule{
+  position:absolute;left:50%;transform:translateX(-50%);bottom:118px;z-index:2;
+  width:var(--hud-w);max-width:calc(100% - 32px);
+  border-top:1px solid var(--c-faint);height:8px;
+  font-size:var(--fs-11);letter-spacing:var(--track-wide);color:var(--c-dim);
+  text-align:center;line-height:14px;
+}
+.dim-rule::before,.dim-rule::after{
+  content:"";position:absolute;top:-4px;width:1px;height:8px;background:var(--c-faint);
+}
+.dim-rule::before{left:0}.dim-rule::after{right:0}
+.dim-rule span{background:transparent;position:relative;top:2px}
+
+/* ---------- journal row ------------------------------------- */
+.journal{border:1px solid var(--c-line-strong);background:var(--c-line);display:grid;gap:1px}
+.journal>*{background:var(--c-panel)}
+.j-head{
+  display:flex;justify-content:space-between;gap:10px;padding:8px 14px;flex-wrap:wrap;
+  font-size:var(--fs-11);letter-spacing:var(--track-wide);text-transform:uppercase;color:var(--c-dim);
+}
+.j-head b{color:var(--c-ink)}
+.j-row{
+  display:grid;grid-template-columns:auto auto auto 1fr auto auto;
+  align-items:center;gap:14px;padding:10px 14px;font-size:var(--fs-13);
+}
+.j-type{
+  font-size:var(--fs-11);font-weight:700;letter-spacing:var(--track-med);
+  text-transform:uppercase;border:1px solid var(--c-line-strong);
+  background:var(--c-panel-2);padding:2px 7px;
+}
+.j-app,.j-time{font-size:var(--fs-12);color:var(--c-dim)}
+.j-sum{color:var(--c-ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.j-count{font-size:var(--fs-11);letter-spacing:var(--track-med);text-transform:uppercase;color:var(--c-dim)}
+.j-undo{
+  font:700 var(--fs-11) var(--f-mono);letter-spacing:var(--track-med);text-transform:uppercase;
+  background:transparent;color:var(--c-ink);border:1px solid var(--c-line-strong);
+  padding:4px 12px;cursor:pointer;border-radius:var(--r-0);
+  transition:border-color var(--t-fast) var(--ease-out),color var(--t-fast) var(--ease-out);
+}
+.j-undo:hover{border-color:var(--c-ink)}
+
+/* ---------- palette ----------------------------------------- */
+.pal{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1px;background:var(--c-line);border:1px solid var(--c-line-strong)}
+.sw{background:var(--c-panel);padding:0 0 10px}
+.sw .block{height:58px;border-bottom:1px solid var(--c-line)}
+.sw .hex{padding:8px 12px 0;font-size:var(--fs-12);font-weight:700;color:var(--c-ink)}
+.sw .role{padding:0 12px;font-size:var(--fs-11);letter-spacing:var(--track-med);text-transform:uppercase;color:var(--c-dim)}
+
+/* ---------- chip register ----------------------------------- */
+.register{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:14px;border:1px solid var(--c-line-strong);background:var(--c-panel)}
+
+/* ---------- type specimen ----------------------------------- */
+.spec{border:1px solid var(--c-line-strong);background:var(--c-line);display:grid;gap:1px}
+.spec-row{background:var(--c-panel);display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:16px;padding:12px 14px;align-items:baseline}
+.spec-row .m{font-size:var(--fs-11);letter-spacing:var(--track-med);text-transform:uppercase;color:var(--c-dim)}
+.spec-row .m b{color:var(--c-ink)}
+.s-11{font:var(--fs-11) var(--f-mono);letter-spacing:var(--track-wide);text-transform:uppercase}
+.s-12{font:var(--fs-12) var(--f-mono)}
+.s-12d{font:var(--fs-12)/1.75 var(--f-mono)}
+.s-13{font:var(--fs-13) var(--f-mono)}
+.s-disp{font:900 64px/0.92 var(--f-sans);letter-spacing:var(--track-display);text-transform:uppercase}
+
+/* ---------- rationale --------------------------------------- */
+.rationale{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--c-line);border:1px solid var(--c-line-strong)}
+.rat{background:var(--c-panel);padding:18px}
+.rat h3{font-size:var(--fs-11);letter-spacing:var(--track-wide);text-transform:uppercase;color:var(--c-dim);margin-bottom:10px}
+.rat p{font-size:var(--fs-13);line-height:1.7;color:var(--c-ink);max-width:64ch}
+.rat p+p{margin-top:8px}
+.rat .k{color:var(--c-dim)}
+.colophon{
+  margin-top:36px;padding-top:12px;border-top:1px solid var(--c-line);
+  display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;
+  font-size:var(--fs-11);letter-spacing:var(--track-wide);text-transform:uppercase;color:var(--c-faint);
+}
+.colophon b{color:var(--c-dim);font-weight:700}
+
+@media (max-width:760px){
+  .spec-row{grid-template-columns:1fr}
+  .rationale{grid-template-columns:1fr}
+  .j-row{grid-template-columns:auto auto 1fr auto;grid-auto-rows:auto}
+  .j-sum{grid-column:1 / -1;white-space:normal}
+  .s-disp{font-size:44px}
+}
+
+/* ---------- reduced motion ---------------------------------- */
+@media (prefers-reduced-motion:reduce){
+  .lamp.rec::before{animation:none}
+  .meter.live .lit{animation:none;clip-path:inset(0 40% 0 0)}
+  .caret{animation:none}
+  *{transition-duration:1ms !important}
+}
+</style>
+
+<div class="board">
+
+  <!-- ======== MASTHEAD ======== -->
+  <div class="meta-bar">
+    <span><b>Mull</b> — voice-first thinking layer</span>
+    <span>Direction board <b>03 / 04</b> · rev 1.0 · 2026-09-13 · lead appearance: <b>dark</b></span>
+  </div>
+
+  <header class="masthead">
+    <h1><span>Signal</span><span class="row2">Brutalist</span></h1>
+    <p class="thesis">Declassified field equipment for your words. <b>Every state is a metered reading</b> — a lamp for the mic, a level for your voice, a wiring-log diff for every change. Nothing implied, nothing decorated, everything on the record.</p>
+    <div class="hazard"></div>
+  </header>
+
+  <!-- ======== HUD STATES ======== -->
+  <div class="sec">
+    <span class="tag">HUD — three operating states</span>
+    <span class="note">rendered at real size · 480px panel · floats over the user's desktop · never takes focus</span>
+  </div>
+
+  <!-- STATE A — IDLE -->
+  <div class="frame">
+    <div class="frame-cap"><span class="st">State A / Idle</span><span class="an">lamp off · meter at floor · last-action ghost holds the undo path</span></div>
+    <div class="scene h-a">
+      <div class="menubar"><span class="app">Mail</span><span>File</span><span>Edit</span><span>View</span><span>Mailbox</span><span>Message</span><span class="sp"></span><span class="right"><span>&#9679;&#9675;</span><span>Sat Sep 13</span><span>2:41&#8202;PM</span></span></div>
+      <div class="mailwin">
+        <div class="mw-title"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="name">Re: Q3 planning — Draft</span></div>
+        <div class="mw-tools"><i></i><i></i><i></i><i style="margin-left:auto"></i><i></i></div>
+        <div class="mw-hdr"><b>To:</b> Sarah Kim &nbsp;·&nbsp; <b>Subject:</b> Re: Q3 planning</div>
+        <div class="mw-body">
+          <p>Hi Sarah,</p>
+          <p>I'm so sorry to bother you again, but I was just wondering if maybe you could review the Q3 plan whenever you get a chance, no rush at all.</p>
+          <p>Thanks so much, and sorry again for all the emails!</p>
+        </div>
+      </div>
+      <div class="dim-rule"><span>480&#8202;px</span></div>
+      <div class="hud">
+        <div class="hud-head">
+          <span class="lamp"></span>
+          <div class="meter"><span class="lit"></span></div>
+          <span class="hud-state">idle</span>
+        </div>
+        <div class="hud-line"><span class="ghost">last: edit · Mail · 2:41 PM &nbsp;·&nbsp; <kbd>&#8997;Z</kbd> undo</span></div>
+      </div>
+    </div>
+    <div class="frame-notes">the HUD at its most invisible: <em>two rows, one ghost</em> — the undo path stays visible even at rest</div>
+  </div>
+
+  <!-- STATE B — LISTENING -->
+  <div class="frame">
+    <div class="frame-cap"><span class="st">State B / Listening</span><span class="an">REC lamp pulsing · segmented level live · partial transcript · intent chip just landed</span></div>
+    <div class="scene h-b">
+      <div class="menubar"><span class="app">Mail</span><span>File</span><span>Edit</span><span>View</span><span>Mailbox</span><span>Message</span><span class="sp"></span><span class="right"><span>&#9679;&#9675;</span><span>Sat Sep 13</span><span>2:41&#8202;PM</span></span></div>
+      <div class="mailwin">
+        <div class="mw-title"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="name">Re: Q3 planning — Draft</span></div>
+        <div class="mw-tools"><i></i><i></i><i></i><i style="margin-left:auto"></i><i></i></div>
+        <div class="mw-hdr"><b>To:</b> Sarah Kim &nbsp;·&nbsp; <b>Subject:</b> Re: Q3 planning</div>
+        <div class="mw-body">
+          <p>Hi Sarah,</p>
+          <p><span class="sel">I'm so sorry to bother you again, but I was just wondering if maybe you could review the Q3 plan whenever you get a chance, no rush at all.</span></p>
+          <p>Thanks so much, and sorry again for all the emails!</p>
+        </div>
+      </div>
+      <div class="hud">
+        <div class="hud-head">
+          <span class="lamp rec"></span>
+          <div class="meter live"><span class="lit"></span></div>
+          <span class="hud-state on">listening</span>
+        </div>
+        <div class="hud-line">tighten this up and make it sound less apolo<span class="caret"></span></div>
+        <div class="hud-chips">
+          <span class="chip">&#9998; edit — tighten selection</span>
+        </div>
+      </div>
+    </div>
+    <div class="frame-notes">the router's decision is <em>visible before anything happens</em> — the intent chip lands while you are still speaking</div>
+  </div>
+
+  <!-- STATE C — DIFF PREVIEW -->
+  <div class="frame">
+    <div class="frame-cap"><span class="st">State C / Diff preview</span><span class="an">transcript settled · intent + memory chips · nothing writes until Apply</span></div>
+    <div class="scene h-c">
+      <div class="menubar"><span class="app">Mail</span><span>File</span><span>Edit</span><span>View</span><span>Mailbox</span><span>Message</span><span class="sp"></span><span class="right"><span>&#9679;&#9675;</span><span>Sat Sep 13</span><span>2:41&#8202;PM</span></span></div>
+      <div class="mailwin">
+        <div class="mw-title"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span><span class="name">Re: Q3 planning — Draft</span></div>
+        <div class="mw-tools"><i></i><i></i><i></i><i style="margin-left:auto"></i><i></i></div>
+        <div class="mw-hdr"><b>To:</b> Sarah Kim &nbsp;·&nbsp; <b>Subject:</b> Re: Q3 planning</div>
+        <div class="mw-body">
+          <p>Hi Sarah,</p>
+          <p><span class="sel">I'm so sorry to bother you again, but I was just wondering if maybe you could review the Q3 plan whenever you get a chance, no rush at all.</span></p>
+          <p>Thanks so much, and sorry again for all the emails!</p>
+        </div>
+      </div>
+      <div class="hud">
+        <div class="hud-head">
+          <span class="lamp hold"></span>
+          <div class="meter hold"><span class="lit"></span></div>
+          <span class="hud-state on">preview</span>
+        </div>
+        <div class="hud-line">tighten this up and make it sound less apologetic</div>
+        <div class="hud-chips">
+          <span class="chip">&#9998; edit — tighten selection</span>
+          <span class="chip mem">&#9672; using: Q3 planning thread</span>
+        </div>
+        <div class="hud-card">
+          <div class="card-title"><span class="t">Proposed edit</span><span class="m">Mail · selection · 2 changes</span></div>
+          <div class="diff"><del>I'm so sorry to bother you again, but I was just wondering if maybe</del> <ins>Following up:</ins> you could review the Q3 plan <del>whenever you get a chance, no rush at all</del> <ins>by Friday</ins>.</div>
+          <div class="card-actions">
+            <button class="btn ok">Apply &#9166;</button>
+            <button class="btn no">Cancel &#9099;</button>
+            <span class="undo-path"><kbd>&#8997;Z</kbd> reverts after apply</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="frame-notes">the wiring log: <em>del strikes, ins lands</em> — exact bytes shown before they touch your text, undo quoted in the same breath</div>
+  </div>
+
+  <!-- ======== JOURNAL ======== -->
+  <div class="sec">
+    <span class="tag">Journal — the record</span>
+    <span class="note">normal window · append-only · every action carries its before/after and an undo</span>
+  </div>
+  <div class="journal">
+    <div class="j-head"><span><b>Journal</b> — every action, undoable</span><span>stored locally · append-only</span></div>
+    <div class="j-row">
+      <span class="j-type">Edit</span>
+      <span class="j-app">Mail</span>
+      <span class="j-time">2:41 PM</span>
+      <span class="j-sum">"tighten + de-apologize"</span>
+      <span class="j-count">2 changes</span>
+      <button class="j-undo">Undo</button>
+    </div>
+  </div>
+
+  <!-- ======== PALETTE ======== -->
+  <div class="sec">
+    <span class="tag">Palette — utilitarian, four working hues</span>
+    <span class="note">contrast measured against panel #141414 · everything else stays neutral</span>
+  </div>
+  <div class="pal">
+    <div class="sw"><div class="block" style="background:#0A0A0A"></div><div class="hex">#0A0A0A</div><div class="role">ground — board + desktop</div></div>
+    <div class="sw"><div class="block" style="background:#141414"></div><div class="hex">#141414</div><div class="role">panel — HUD solid ground</div></div>
+    <div class="sw"><div class="block" style="background:#2C2C29"></div><div class="hex">#2C2C29</div><div class="role">grid line — 1px compartments</div></div>
+    <div class="sw"><div class="block" style="background:#EAEAEA"></div><div class="hex">#EAEAEA</div><div class="role">phosphor — primary text · 15.3:1</div></div>
+    <div class="sw"><div class="block" style="background:#9A9A91"></div><div class="hex">#9A9A91</div><div class="role">secondary text · 6.5:1</div></div>
+    <div class="sw"><div class="block" style="background:#FF2A2A"></div><div class="hex">#FF2A2A</div><div class="role">hazard — REC lamp · meter peak</div></div>
+    <div class="sw"><div class="block" style="background:#3ED47C"></div><div class="hex">#3ED47C</div><div class="role">ins — added text · 9.6:1</div></div>
+    <div class="sw"><div class="block" style="background:#FF5245"></div><div class="hex">#FF5245</div><div class="role">del — removed text · 5.7:1</div></div>
+    <div class="sw"><div class="block" style="background:#FFB300"></div><div class="hex">#FFB300</div><div class="role">warn — degraded modes · 10.3:1</div></div>
+    <div class="sw"><div class="block" style="background:#4CC9E8"></div><div class="hex">#4CC9E8</div><div class="role">mem — memory citation · 9.5:1</div></div>
+  </div>
+
+  <!-- ======== CHIP REGISTER ======== -->
+  <div class="sec">
+    <span class="tag">Chip register — the five routes</span>
+    <span class="note">neutral for classification · hue only where meaning lives</span>
+  </div>
+  <div class="register">
+    <span class="chip">&#9998; edit — tighten selection</span>
+    <span class="chip">&#9656; command — 3 steps</span>
+    <span class="chip">dictation</span>
+    <span class="chip mem">&#9672; using: Q3 planning thread</span>
+    <span class="chip warn">&#9650; secure input — paused</span>
+    <span class="chip">applied <kbd>&#8997;Z undo</kbd></span>
+  </div>
+
+  <!-- ======== TYPE SPECIMEN ======== -->
+  <div class="sec">
+    <span class="tag">Type — one mono voice, one stencil register</span>
+    <span class="note">ui-monospace / SF Mono / Menlo · system-ui for board display only</span>
+  </div>
+  <div class="spec">
+    <div class="spec-row">
+      <span class="m"><b>Micro label</b> · 11px mono · +0.08em · uppercase</span>
+      <span class="s-11">state: listening · mem: Q3 thread · rev 2.6</span>
+    </div>
+    <div class="spec-row">
+      <span class="m"><b>Transcript / data</b> · 12px mono · 0 tracking · sentence case</span>
+      <span class="s-12">tighten this up and make it sound less apologetic</span>
+    </div>
+    <div class="spec-row">
+      <span class="m"><b>Diff body</b> · 12px/1.75 mono · hue = meaning</span>
+      <span class="s-12d"><del>whenever you get a chance, no rush at all</del> <ins>by Friday</ins></span>
+    </div>
+    <div class="spec-row">
+      <span class="m"><b>Journal / body</b> · 13px mono · 0 tracking</span>
+      <span class="s-13">Edit · Mail · 2:41 PM — "tighten + de-apologize" · 2 changes</span>
+    </div>
+    <div class="spec-row">
+      <span class="m"><b>Board display</b> · system-ui 900 · −0.03em · uppercase · board chrome only, never in the HUD</span>
+      <span class="s-disp">Signal 03</span>
+    </div>
+  </div>
+
+  <!-- ======== RATIONALE ======== -->
+  <div class="sec">
+    <span class="tag">Why this fits "trustworthy instrument"</span>
+    <span class="note">and how the other appearance resolves</span>
+  </div>
+  <div class="rationale">
+    <div class="rat">
+      <h3>Rationale</h3>
+      <p>Signal equipment earns trust by refusing to perform: a lamp is lit or it isn't, a level reads what the mic hears, a log records what changed. This direction gives every AI behavior that same physical honesty — the REC lamp, the segmented meter, and the del/ins wiring log make Mull's machinery inspectable at a glance, which is the product's whole differentiator.</p>
+      <p>The stencil register keeps labels out of the data's way: uppercase tracked mono for classification, plain sentence-case mono for the user's own words. <span class="k">Menu-bar glyph: the same square-bezel lamp as a template glyph — off / pulsing / sweep / amber-attention.</span></p>
+    </div>
+    <div class="rat">
+      <h3>Light mode resolution</h3>
+      <p>The HUD stays appearance-invariant — always this dark panel, an instrument that reads the same over any wallpaper — while the journal, settings, and onboarding flip to a print substrate: #F4F4F0 unbleached paper, carbon-ink text, the same four semantic hues darkened one step for contrast, grid lines going from phosphor-dark to ruled-form gray.</p>
+    </div>
+  </div>
+
+  <div class="colophon">
+    <span><b>Mull</b> · direction 03 — signal brutalist</span>
+    <span>self-contained · no external assets · system fonts only · css motion 120–250ms · reduced-motion safe</span>
+  </div>
+
+</div>

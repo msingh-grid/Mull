@@ -1,0 +1,735 @@
+<title>Mull — Studio Paper</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ================================================================
+     MULL · DIRECTION 02 · STUDIO PAPER
+     Warm light editorial. Ink-on-paper diffs. Book typography.
+     Every color, size, and duration lives in a custom property so
+     D3 can lift tokens straight from this file.
+     ================================================================ */
+
+  :root {
+    /* -- surfaces ------------------------------------------------ */
+    --board-bg:        #e9e3d3;   /* the desk the board sits on     */
+    --paper:           #faf7ef;   /* HUD + card ground              */
+    --paper-bright:    #fffdf6;   /* fresh page: diff card, wells   */
+    --paper-recessed:  #f1ecdf;   /* inset wells, kbd keys          */
+    --ink:             #2b2418;   /* primary text                   */
+    --ink-2:           #5b523f;   /* secondary text                 */
+    --ink-3:           #766c55;   /* tertiary, meta, ghosts (AA at 11px) */
+    --hairline:        rgba(43,36,24,0.18);
+    --hairline-soft:   rgba(43,36,24,0.10);
+
+    /* -- semantic hues (the only color spend) --------------------- */
+    --del:             #b23a2e;   /* red pencil: deletions          */
+    --del-wash:        rgba(178,58,46,0.10);
+    --del-line:        rgba(178,58,46,0.72);
+    --ins:             #274f8e;   /* writing ink: insertions, apply */
+    --ins-wash:        rgba(39,79,142,0.09);
+    --ins-line:        rgba(39,79,142,0.42);
+    --warn:            #9a6410;   /* ochre pencil: warnings         */
+    --warn-wash:       rgba(154,100,16,0.11);
+    --mem:             #4f6b33;   /* reading-room green: memory     */
+    --mem-wash:        rgba(79,107,51,0.10);
+
+    /* -- type ----------------------------------------------------- */
+    --serif: ui-serif, "New York", "Iowan Old Style", "Palatino", Charter, Georgia, serif;
+    --sans:  -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --mono:  ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+
+    --fs-display:      52px;      /* board masthead                 */
+    --fs-h2:           21px;      /* board section headings         */
+    --fs-body:         13.5px;    /* board prose                    */
+    --fs-transcript:   13px;      /* HUD transcript (serif)         */
+    --fs-diff:         12px;      /* diff body (mono)               */
+    --fs-chip:         11px;      /* chips                          */
+    --fs-journal:      12px;      /* journal row                    */
+    --fs-label:        11px;      /* state label, card titles       */
+    --fs-kbd:          11px;      /* key hints                      */
+    --track-label:     0.10em;    /* uppercase label tracking       */
+    --track-display:   -0.02em;   /* masthead tracking              */
+
+    /* -- geometry -------------------------------------------------- */
+    --r-panel:         10px;      /* HUD, cards, stages             */
+    --r-inner:         7px;       /* diff card, journal row         */
+    --r-chip:          5px;       /* chips, buttons, tags           */
+    --r-kbd:           3px;
+    --hud-w:           480px;
+    --hud-pad:         13px 15px 12px;
+    --stage-h:         430px;
+
+    /* -- elevation -------------------------------------------------- */
+    --shadow-hud: 0 0 0 0.5px rgba(43,36,24,0.38),
+                  0 18px 44px rgba(35,26,12,0.32),
+                  0 4px 12px  rgba(35,26,12,0.16);
+    --shadow-window: 0 0 0 0.5px rgba(30,24,14,0.22),
+                     0 16px 40px rgba(35,26,12,0.24);
+    --shadow-stage: 0 1px 0 rgba(255,255,255,0.5) inset,
+                    0 10px 30px rgba(35,26,12,0.14);
+
+    /* -- motion ----------------------------------------------------- */
+    --t-fast:          140ms;     /* hovers, chip entrances         */
+    --t-med:           220ms;     /* card entrances, state swaps    */
+    --ease-out:        cubic-bezier(0.22, 0.7, 0.3, 1);
+    --pulse-period:    1.6s;      /* listening orb                  */
+    --wave-period:     0.95s;     /* listening waveform             */
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--board-bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: var(--fs-body);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: clip;
+  }
+  ::selection { background: rgba(39,79,142,0.20); color: var(--ink); }
+  button { font: inherit; cursor: pointer; }
+  button:focus-visible, [tabindex]:focus-visible {
+    outline: 2px solid var(--ins); outline-offset: 2px;
+  }
+
+  #board { max-width: 1040px; margin: 0 auto; padding: 60px 36px 88px; }
+
+  /* ── Masthead ─────────────────────────────────────────────────── */
+  .mast-meta {
+    font-family: var(--sans); font-size: 11px; font-weight: 600;
+    letter-spacing: var(--track-label); text-transform: uppercase;
+    color: var(--ink-3); display: flex; justify-content: space-between; gap: 16px;
+    padding-bottom: 14px; border-bottom: 1px solid var(--hairline);
+  }
+  h1 {
+    font-family: var(--serif); font-weight: 600;
+    font-size: var(--fs-display); letter-spacing: var(--track-display);
+    line-height: 1.05; margin: 30px 0 14px;
+  }
+  .thesis {
+    font-family: var(--serif); font-style: italic;
+    font-size: 19px; line-height: 1.5; color: var(--ink-2);
+    max-width: 62ch; margin: 0 0 8px;
+  }
+  .mast-note {
+    font-size: 12.5px; color: var(--ink-3); max-width: 68ch; margin: 0;
+  }
+
+  /* ── Sections ─────────────────────────────────────────────────── */
+  section { margin-top: 72px; }
+  h2 {
+    font-family: var(--serif); font-weight: 600;
+    font-size: var(--fs-h2); letter-spacing: -0.01em;
+    margin: 0 0 6px; padding-top: 18px;
+    border-top: 1px solid var(--hairline);
+  }
+  .sec-note { font-size: 12.5px; color: var(--ink-2); max-width: 70ch; margin: 0 0 26px; }
+
+  /* ── Desktop stages ───────────────────────────────────────────── */
+  .stage {
+    position: relative; height: var(--stage-h);
+    border-radius: var(--r-panel); overflow: hidden;
+    box-shadow: var(--shadow-stage);
+  }
+  .stage + figcaption { margin-top: 14px; }
+  figure.state { margin: 0 0 46px; }
+  figure.state:last-child { margin-bottom: 0; }
+
+  /* three wallpapers to prove the HUD reads over anything */
+  .stage.wp-a { background:
+      radial-gradient(900px 420px at 82% -10%, #e6ddc6 0%, transparent 60%),
+      linear-gradient(155deg, #d8d2bd 0%, #c2bca6 55%, #a9a58f 100%); }
+  .stage.wp-b { background:
+      radial-gradient(820px 400px at 12% -14%, #d8bfa4 0%, transparent 55%),
+      linear-gradient(150deg, #c2a284 0%, #a17e5f 60%, #86664b 100%); }
+  .stage.wp-c { background:
+      radial-gradient(900px 460px at 78% -12%, #6a6355 0%, transparent 60%),
+      linear-gradient(155deg, #57503f 0%, #3b3529 60%, #2b2619 100%); }
+
+  .menubar {
+    position: absolute; inset: 0 0 auto 0; height: 24px;
+    display: flex; align-items: center; gap: 13px; padding: 0 12px;
+    background: rgba(250,247,239,0.72);
+    font-size: 11.5px; color: var(--ink-2);
+    border-bottom: 1px solid rgba(43,36,24,0.08);
+  }
+  .wp-c .menubar { background: rgba(35,30,20,0.62); color: #d8d0bd; border-bottom-color: rgba(255,253,246,0.08); }
+  .menubar .app { font-weight: 700; }
+  .menubar .sp { flex: 1; }
+  .menubar .clock { font-variant-numeric: tabular-nums; }
+
+  /* CSS-drawn Mail window */
+  .mailwin {
+    position: absolute; left: 50%; transform: translateX(-50%); top: 40px;
+    width: 620px; max-width: 92%;
+    background: #fdfcf8; border-radius: 9px; overflow: hidden;
+    box-shadow: var(--shadow-window);
+    font-size: 12.5px; color: var(--ink);
+  }
+  .titlebar {
+    height: 34px; display: flex; align-items: center; gap: 8px; padding: 0 11px;
+    background: linear-gradient(#f6f3ea, #ece8db);
+    border-bottom: 1px solid rgba(43,36,24,0.10);
+    font-size: 12px; font-weight: 600; color: var(--ink-2);
+  }
+  .titlebar .tname { flex: 1; text-align: center; margin-right: 48px; }
+  .lights { display: flex; gap: 7px; }
+  .lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #e0695f; }
+  .lights i:nth-child(2) { background: #e2b23e; }
+  .lights i:nth-child(3) { background: #7fb069; }
+  .mail-toolbar {
+    display: flex; gap: 8px; align-items: center; padding: 6px 11px;
+    border-bottom: 1px solid rgba(43,36,24,0.08); background: #faf8f1;
+  }
+  .mail-toolbar .tb {
+    border: 1px solid rgba(43,36,24,0.16); background: #fffdf6; border-radius: 6px;
+    padding: 3px 10px; font-size: 11.5px; color: var(--ink-2); font-weight: 600;
+  }
+  .mail-toolbar .tb.send { background: var(--ins); border-color: var(--ins); color: #fffdf6; }
+  .mail-toolbar .draftnote { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+  .mail-fields .row {
+    display: flex; gap: 8px; padding: 5px 13px;
+    border-bottom: 1px solid rgba(43,36,24,0.06); font-size: 12px;
+  }
+  .mail-fields .k { color: var(--ink-3); width: 52px; flex: none; }
+  .mail-fields .pill {
+    background: var(--ins-wash); color: var(--ins);
+    border-radius: 9px; padding: 0 8px; font-weight: 600;
+  }
+  .mail-bodytext {
+    padding: 12px 15px 16px; font-size: 12.5px; line-height: 1.6;
+    color: var(--ink); min-height: 128px; white-space: pre-wrap;
+  }
+  .mail-bodytext .selx { background: rgba(39,79,142,0.16); border-radius: 2px; }
+
+  /* ── The HUD ──────────────────────────────────────────────────── */
+  .hud {
+    position: absolute; left: 50%; transform: translateX(-50%); bottom: 24px;
+    width: var(--hud-w); max-width: 94%;
+    background: var(--paper);
+    border-radius: var(--r-panel);
+    box-shadow: var(--shadow-hud);
+    padding: var(--hud-pad);
+    color: var(--ink);
+  }
+  .hud-top { display: flex; align-items: center; gap: 11px; min-height: 24px; }
+
+  .orb {
+    width: 13px; height: 13px; border-radius: 50%; flex: none;
+    background: var(--ink);
+    box-shadow: 0 0 0 0 rgba(43,36,24,0.30);
+  }
+  .hud.is-idle .orb {
+    background: transparent;
+    box-shadow: inset 0 0 0 1.5px var(--ink-3);
+  }
+  .hud.is-listening .orb { animation: orb-pulse var(--pulse-period) var(--ease-out) infinite; }
+  @keyframes orb-pulse {
+    0%   { box-shadow: 0 0 0 0    rgba(43,36,24,0.32); }
+    70%  { box-shadow: 0 0 0 9px  rgba(43,36,24,0);    }
+    100% { box-shadow: 0 0 0 0    rgba(43,36,24,0);    }
+  }
+
+  .wave { display: flex; align-items: center; gap: 2.5px; height: 20px; flex: none; }
+  .wave i {
+    width: 2px; height: var(--h, 4px); border-radius: 1px;
+    background: var(--ink-3); display: block;
+    transform-origin: center;
+  }
+  .hud.is-listening .wave i {
+    background: var(--ink-2);
+    animation: wave-tick var(--wave-period) ease-in-out infinite;
+    animation-delay: var(--d, 0ms);
+  }
+  @keyframes wave-tick {
+    0%, 100% { transform: scaleY(1); }
+    50%      { transform: scaleY(var(--amp, 3)); }
+  }
+
+  .transcript {
+    flex: 1; min-width: 0;
+    font-family: var(--serif); font-size: var(--fs-transcript);
+    line-height: 1.45; color: var(--ink);
+  }
+  .transcript .ghost { color: var(--ink-3); font-style: italic; }
+  .caret {
+    display: inline-block; width: 1.5px; height: 1em; background: var(--ins);
+    vertical-align: text-bottom; margin-left: 1px;
+    animation: caret-blink 1s steps(1) infinite;
+  }
+  @keyframes caret-blink { 50% { opacity: 0; } }
+
+  .state-label {
+    flex: none; font-size: var(--fs-label); font-weight: 700;
+    letter-spacing: var(--track-label); text-transform: uppercase;
+    color: var(--ink-3);
+  }
+  .hud.is-listening .state-label { color: var(--ink); }
+
+  /* ghost of the last action (idle only) */
+  .last-action {
+    margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--hairline-soft);
+    display: flex; align-items: center; gap: 7px;
+    font-size: 11px; color: var(--ink-3);
+  }
+  .last-action .dot-sep { opacity: 0.6; }
+
+  /* chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: var(--fs-chip); font-weight: 600; letter-spacing: 0.01em;
+    border-radius: var(--r-chip); padding: 3px 9px;
+    border: 1px solid var(--hairline);
+    background: var(--paper-bright); color: var(--ink-2);
+    transition: background var(--t-fast) var(--ease-out), border-color var(--t-fast) var(--ease-out);
+    animation: rise-in var(--t-med) var(--ease-out) both;
+  }
+  .chip .g { font-size: 10px; opacity: 0.85; }
+  .chip.intent { background: var(--ink); border-color: var(--ink); color: var(--paper-bright); }
+  .chip.mem    { background: var(--mem-wash); border-color: rgba(79,107,51,0.42); color: var(--mem); cursor: pointer; }
+  .chip.mem:hover { background: rgba(79,107,51,0.16); }
+  .chip.warn   { background: var(--warn-wash); border-color: rgba(154,100,16,0.42); color: var(--warn); }
+  .chip.cmd    { background: var(--paper-bright); border-color: var(--hairline); color: var(--ink); }
+  .chip .k { font-family: var(--mono); font-size: var(--fs-kbd); font-weight: 500; opacity: 0.7; }
+  @keyframes rise-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* diff card */
+  .diffcard {
+    margin-top: 11px;
+    background: var(--paper-bright);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-inner);
+    padding: 10px 12px 11px;
+    animation: rise-in var(--t-med) var(--ease-out) both;
+  }
+  .diffcard .dtitle {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 10px;
+    font-size: var(--fs-label); font-weight: 700;
+    letter-spacing: var(--track-label); text-transform: uppercase;
+    color: var(--ink-3); margin-bottom: 8px;
+  }
+  .diffcard .dtitle .count { font-weight: 600; letter-spacing: 0.04em; }
+  .diffbody {
+    font-family: var(--mono); font-size: var(--fs-diff); line-height: 1.7;
+    color: var(--ink-2);
+    max-height: 150px; overflow-y: auto;
+    scrollbar-width: thin; scrollbar-color: var(--ink-3) transparent;
+    margin-bottom: 10px;
+  }
+  .diffbody::-webkit-scrollbar { width: 5px; }
+  .diffbody::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 3px; }
+  .diffbody del {
+    color: var(--del); background: var(--del-wash);
+    text-decoration: line-through;
+    text-decoration-color: var(--del-line);
+    text-decoration-thickness: 1.5px;
+    border-radius: 2px; padding: 0 1px;
+  }
+  .diffbody ins {
+    color: var(--ins); background: var(--ins-wash);
+    text-decoration: none;
+    border-bottom: 1px solid var(--ins-line);
+    border-radius: 2px 2px 0 0; padding: 0 1px;
+    font-weight: 600;
+  }
+  .diff-actions { display: flex; align-items: center; gap: 8px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px;
+    border-radius: var(--r-chip); padding: 5px 13px;
+    font-size: 12px; font-weight: 650; border: 1px solid transparent;
+    transition: background var(--t-fast) var(--ease-out),
+                transform var(--t-fast) var(--ease-out);
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn.apply { background: var(--ins); color: var(--paper-bright); }
+  .btn.apply:hover { background: #1f4177; }
+  .btn.cancel { background: transparent; color: var(--ink-2); border-color: var(--hairline); }
+  .btn.cancel:hover { background: var(--paper-recessed); }
+  .btn .k { font-family: var(--mono); font-size: var(--fs-kbd); font-weight: 500; opacity: 0.75; }
+  .undo-promise { margin-left: auto; font-size: 11px; color: var(--ink-3); }
+
+  kbd {
+    font-family: var(--mono); font-size: var(--fs-kbd); font-weight: 500;
+    color: var(--ink-2);
+    background: var(--paper-recessed);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-kbd);
+    padding: 0.5px 4px;
+  }
+
+  /* stage captions */
+  figcaption { display: grid; grid-template-columns: 168px 1fr; gap: 18px; }
+  figcaption .cap-name {
+    font-size: var(--fs-label); font-weight: 700;
+    letter-spacing: var(--track-label); text-transform: uppercase;
+    color: var(--ink-3); padding-top: 4px;
+  }
+  figcaption .cap-name b {
+    display: block; font-family: var(--serif); font-style: italic; font-weight: 600;
+    font-size: 16px; letter-spacing: 0; text-transform: none; color: var(--ink); margin-top: 2px;
+  }
+  figcaption .cap-text { font-size: 12.5px; color: var(--ink-2); max-width: 64ch; margin: 0; }
+
+  /* ── Journal row ──────────────────────────────────────────────── */
+  .journal-row {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--paper);
+    border: 1px solid var(--hairline);
+    border-radius: var(--r-inner);
+    padding: 11px 14px;
+    max-width: 720px;
+    box-shadow: 0 2px 8px rgba(35,26,12,0.07);
+    font-size: var(--fs-journal);
+  }
+  .journal-row .kind {
+    font-size: var(--fs-label); font-weight: 700;
+    letter-spacing: 0.07em; text-transform: uppercase;
+    background: var(--ins-wash); color: var(--ins);
+    border-radius: 4px; padding: 2px 7px; flex: none;
+  }
+  .journal-row .app { color: var(--ink-2); flex: none; }
+  .journal-row .time { color: var(--ink-3); font-variant-numeric: tabular-nums; flex: none; }
+  .journal-row .sum {
+    font-family: var(--serif); font-size: 13px; color: var(--ink);
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .journal-row .changes { color: var(--ink-3); flex: none; }
+  .journal-row .sep { color: var(--ink-3); opacity: 0.55; flex: none; }
+  .journal-row .undo {
+    border: 1px solid var(--hairline); background: var(--paper-bright);
+    color: var(--ink-2); border-radius: var(--r-chip);
+    padding: 3px 11px; font-size: 11.5px; font-weight: 650; flex: none;
+    transition: background var(--t-fast) var(--ease-out);
+  }
+  .journal-row .undo:hover { background: var(--paper-recessed); }
+
+  /* ── Palette ──────────────────────────────────────────────────── */
+  .swatches {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(176px, 1fr));
+    gap: 14px;
+  }
+  .sw { font-size: 12px; }
+  .sw .block {
+    height: 58px; border-radius: var(--r-inner);
+    border: 1px solid var(--hairline-soft);
+    margin-bottom: 7px;
+  }
+  .sw .hex { font-family: var(--mono); font-size: 11px; color: var(--ink-2); }
+  .sw .role { color: var(--ink-3); }
+  .sw .role b { color: var(--ink); font-weight: 650; }
+
+  .chip-vocab { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; align-items: center; }
+  .chip-vocab .vlabel { font-size: 11.5px; color: var(--ink-3); margin-right: 6px; }
+
+  /* ── Type specimen ────────────────────────────────────────────── */
+  .spec-table { border-top: 1px solid var(--hairline-soft); }
+  .spec-row {
+    display: grid; grid-template-columns: 1fr 270px; gap: 24px; align-items: baseline;
+    padding: 14px 0; border-bottom: 1px solid var(--hairline-soft);
+  }
+  .spec-row .spec-meta {
+    font-family: var(--mono); font-size: 11px; line-height: 1.7; color: var(--ink-3);
+    text-align: right;
+  }
+  .sp-display { font-family: var(--serif); font-weight: 600; font-size: 26px; letter-spacing: -0.015em; line-height: 1.2; }
+  .sp-transcript { font-family: var(--serif); font-size: 13px; line-height: 1.45; }
+  .sp-diff { font-family: var(--mono); font-size: 12px; line-height: 1.7; color: var(--ink-2); }
+  .sp-diff del { color: var(--del); background: var(--del-wash); text-decoration: line-through; text-decoration-color: var(--del-line); text-decoration-thickness: 1.5px; padding: 0 1px; border-radius: 2px; }
+  .sp-diff ins { color: var(--ins); background: var(--ins-wash); text-decoration: none; border-bottom: 1px solid var(--ins-line); font-weight: 600; padding: 0 1px; }
+  .sp-label { font-size: 11px; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase; color: var(--ink-3); }
+  .sp-chip { font-size: 11px; font-weight: 600; }
+  .sp-journal { font-size: 12px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+
+  /* ── Closing notes ────────────────────────────────────────────── */
+  .fit-note {
+    font-family: var(--serif); font-size: 15.5px; line-height: 1.65;
+    color: var(--ink); max-width: 66ch; margin: 0 0 18px;
+  }
+  .dark-note { font-size: 12.5px; color: var(--ink-2); max-width: 68ch; margin: 0; }
+  .dark-note .swx {
+    display: inline-block; width: 11px; height: 11px; border-radius: 3px;
+    vertical-align: -1px; margin: 0 3px 0 1px; border: 1px solid var(--hairline);
+  }
+
+  footer {
+    margin-top: 72px; padding-top: 14px; border-top: 1px solid var(--hairline);
+    font-size: 12px; font-weight: 600; color: var(--ink-3);
+    display: flex; justify-content: space-between; gap: 16px;
+  }
+
+  /* ── Reduced motion ───────────────────────────────────────────── */
+  @media (prefers-reduced-motion: reduce) {
+    .hud.is-listening .orb,
+    .hud.is-listening .wave i,
+    .caret, .chip, .diffcard { animation: none; }
+    /* waveform degrades to a static mid-level trace */
+    .hud.is-listening .wave i { transform: scaleY(2); }
+    * { transition-duration: 1ms !important; }
+  }
+
+  /* ── Narrow fallback (board is a desktop pitch, but never breaks) */
+  @media (max-width: 760px) {
+    :root { --fs-display: 38px; --stage-h: 470px; }
+    #board { padding: 40px 18px 64px; }
+    figcaption { grid-template-columns: 1fr; gap: 6px; }
+    .spec-row { grid-template-columns: 1fr; gap: 8px; }
+    .spec-row .spec-meta { text-align: left; }
+    .mailwin { width: 94%; }
+    .journal-row { flex-wrap: wrap; }
+  }
+</style>
+
+<div id="board">
+
+  <!-- ═══════════ Masthead ═══════════ -->
+  <header>
+    <div class="mast-meta">
+      <span>Mull · design direction board</span>
+      <span>02 of 04 · lead appearance: light</span>
+    </div>
+    <h1>Studio Paper</h1>
+    <p class="thesis">A manuscript on a well-lit desk: Mull marks up your words the way a careful editor does, in red pencil and blue-black ink, and every mark is legible before it lands.</p>
+    <p class="mast-note">Warm paper ground, a book voice for the human's words, a system voice for the machine's labels, and a mono voice for the diff. Color appears only where it carries meaning: deletion, insertion, warning, memory.</p>
+  </header>
+
+  <!-- ═══════════ HUD states ═══════════ -->
+  <section aria-label="The HUD in three states">
+    <h2>The HUD, three states, at real size</h2>
+    <p class="sec-note">A non-activating floating panel, 480px wide, on its own paper ground with a true shadow. Shown over three wallpapers, from bright to dark, to prove the panel never borrows legibility from what is behind it.</p>
+
+    <!-- ── State A · Idle ── -->
+    <figure class="state">
+      <div class="stage wp-a" role="img" aria-label="Idle HUD floating over a light desktop with a Mail compose window">
+        <div class="menubar"><span class="app">Mail</span><span>File</span><span>Edit</span><span>View</span><span class="sp"></span><span>Mull</span><span class="clock">Sat 13 Sep · 2:39 PM</span></div>
+        <div class="mailwin">
+          <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Re: Q4 partnership terms</div></div>
+          <div class="mail-toolbar"><span class="tb send">Send</span><span class="tb">Attach</span><span class="tb">Aa</span><span class="draftnote">Draft · autosaved</span></div>
+          <div class="mail-fields">
+            <div class="row"><span class="k">To:</span><span><span class="pill">Sarah Kim</span></span></div>
+            <div class="row"><span class="k">From:</span><span>maya@meridian.co</span></div>
+            <div class="row"><span class="k">Subject:</span><span>Re: Q4 partnership terms</span></div>
+          </div>
+          <div class="mail-bodytext">Hi Sarah,
+
+I'm so sorry to bother you again, but I was just wondering if maybe we still need your sign-off on the terms doc whenever you get a chance, no rush at all.
+
+Thanks,
+Maya</div>
+        </div>
+
+        <div class="hud is-idle">
+          <div class="hud-top">
+            <span class="orb" aria-hidden="true"></span>
+            <span class="wave" aria-hidden="true">
+              <i style="--h:3px"></i><i style="--h:5px"></i><i style="--h:4px"></i><i style="--h:6px"></i><i style="--h:4px"></i><i style="--h:5px"></i><i style="--h:3px"></i><i style="--h:4px"></i><i style="--h:6px"></i><i style="--h:4px"></i><i style="--h:3px"></i><i style="--h:5px"></i>
+            </span>
+            <span class="transcript"><span class="ghost">Hold ⌥Space and speak</span></span>
+            <span class="state-label">idle</span>
+          </div>
+          <div class="last-action">
+            <span>Applied</span><span class="dot-sep">·</span>
+            <span>tighten + de-apologize</span><span class="dot-sep">·</span>
+            <span>2:41 PM</span>
+            <span style="margin-left:auto"><kbd>⌥Z</kbd> undo</span>
+          </div>
+        </div>
+      </div>
+      <figcaption>
+        <div class="cap-name">State A <b>Idle</b></div>
+        <p class="cap-text">At rest the panel is a closed notebook: a hollow ink point, a flat level trace, a ghost of the last action with its undo chord still printed. Nothing pulses, nothing asks.</p>
+      </figcaption>
+    </figure>
+
+    <!-- ── State B · Listening ── -->
+    <figure class="state">
+      <div class="stage wp-b" role="img" aria-label="Listening HUD with live waveform over a warm desktop">
+        <div class="menubar"><span class="app">Mail</span><span>File</span><span>Edit</span><span>View</span><span class="sp"></span><span>Mull ●</span><span class="clock">Sat 13 Sep · 2:40 PM</span></div>
+        <div class="mailwin">
+          <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Re: Q4 partnership terms</div></div>
+          <div class="mail-toolbar"><span class="tb send">Send</span><span class="tb">Attach</span><span class="tb">Aa</span><span class="draftnote">Draft · autosaved</span></div>
+          <div class="mail-fields">
+            <div class="row"><span class="k">To:</span><span><span class="pill">Sarah Kim</span></span></div>
+            <div class="row"><span class="k">From:</span><span>maya@meridian.co</span></div>
+            <div class="row"><span class="k">Subject:</span><span>Re: Q4 partnership terms</span></div>
+          </div>
+          <div class="mail-bodytext">Hi Sarah,
+
+<span class="selx">I'm so sorry to bother you again, but I was just wondering if maybe we still need your sign-off on the terms doc whenever you get a chance, no rush at all.</span>
+
+Thanks,
+Maya</div>
+        </div>
+
+        <div class="hud is-listening">
+          <div class="hud-top">
+            <span class="orb" aria-hidden="true"></span>
+            <span class="wave" aria-hidden="true">
+              <i style="--h:4px; --d:0ms;   --amp:3.2"></i>
+              <i style="--h:4px; --d:90ms;  --amp:4.4"></i>
+              <i style="--h:4px; --d:180ms; --amp:2.6"></i>
+              <i style="--h:4px; --d:260ms; --amp:4.8"></i>
+              <i style="--h:4px; --d:120ms; --amp:3.6"></i>
+              <i style="--h:4px; --d:40ms;  --amp:2.4"></i>
+              <i style="--h:4px; --d:220ms; --amp:4.2"></i>
+              <i style="--h:4px; --d:300ms; --amp:3.0"></i>
+              <i style="--h:4px; --d:150ms; --amp:4.6"></i>
+              <i style="--h:4px; --d:70ms;  --amp:2.8"></i>
+              <i style="--h:4px; --d:240ms; --amp:3.8"></i>
+              <i style="--h:4px; --d:110ms; --amp:2.6"></i>
+            </span>
+            <span class="transcript">tighten this up and make it sound less apolo<span class="caret" aria-hidden="true"></span></span>
+            <span class="state-label">listening</span>
+          </div>
+          <div class="chips">
+            <span class="chip intent"><span class="g">✎</span>Edit — tighten selection</span>
+          </div>
+        </div>
+      </div>
+      <figcaption>
+        <div class="cap-name">State B <b>Listening</b></div>
+        <p class="cap-text">The ink point pulses, the trace goes live, and the words appear in the book voice as they are heard. The router's decision arrives as a stamped chip before anything is touched: you see what Mull intends while you are still speaking.</p>
+      </figcaption>
+    </figure>
+
+    <!-- ── State C · Diff preview ── -->
+    <figure class="state">
+      <div class="stage wp-c" role="img" aria-label="Diff preview HUD over a dark desktop, proving contrast">
+        <div class="menubar"><span class="app">Mail</span><span>File</span><span>Edit</span><span>View</span><span class="sp"></span><span>Mull ●</span><span class="clock">Sat 13 Sep · 2:41 PM</span></div>
+        <div class="mailwin">
+          <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Re: Q4 partnership terms</div></div>
+          <div class="mail-toolbar"><span class="tb send">Send</span><span class="tb">Attach</span><span class="tb">Aa</span><span class="draftnote">Draft · autosaved</span></div>
+          <div class="mail-fields">
+            <div class="row"><span class="k">To:</span><span><span class="pill">Sarah Kim</span></span></div>
+            <div class="row"><span class="k">Subject:</span><span>Re: Q4 partnership terms</span></div>
+          </div>
+          <div class="mail-bodytext">Hi Sarah,
+
+<span class="selx">I'm so sorry to bother you again, but I was just wondering if maybe we still need your sign-off on the terms doc whenever you get a chance, no rush at all.</span></div>
+        </div>
+
+        <div class="hud is-preview">
+          <div class="hud-top">
+            <span class="orb" aria-hidden="true"></span>
+            <span class="wave" aria-hidden="true">
+              <i style="--h:3px"></i><i style="--h:5px"></i><i style="--h:4px"></i><i style="--h:6px"></i><i style="--h:4px"></i><i style="--h:5px"></i><i style="--h:3px"></i><i style="--h:4px"></i><i style="--h:6px"></i><i style="--h:4px"></i><i style="--h:3px"></i><i style="--h:5px"></i>
+            </span>
+            <span class="transcript">tighten this up and make it sound less apologetic</span>
+            <span class="state-label">thinking</span>
+          </div>
+          <div class="chips">
+            <span class="chip intent"><span class="g">✎</span>Edit — tighten selection</span>
+            <span class="chip mem" role="button" tabindex="0"><span class="g">◈</span>using: Q3 planning thread</span>
+          </div>
+          <div class="diffcard">
+            <div class="dtitle"><span>Edit preview · Mail</span><span class="count">2 changes</span></div>
+            <div class="diffbody">
+              <del>I'm so sorry to bother you again, but I was just wondering if maybe</del> <ins>Following up:</ins> we still need your sign-off on the terms doc <del>whenever you get a chance, no rush at all</del> <ins>by Friday</ins>.
+            </div>
+            <div class="diff-actions">
+              <button class="btn apply" type="button">Apply <span class="k">⏎</span></button>
+              <button class="btn cancel" type="button">Cancel <span class="k">esc</span></button>
+              <span class="undo-promise"><kbd>⌥Z</kbd> undoes after apply</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <figcaption>
+        <div class="cap-name">State C <b>Diff preview</b></div>
+        <p class="cap-text">The proposed edit is typeset as proofreading marks: red pencil strikes what goes, blue-black ink writes what replaces it, and untouched words stay quiet between them. Apply and Cancel carry their key chords, and the undo path is stated in the same breath as the action.</p>
+      </figcaption>
+    </figure>
+  </section>
+
+  <!-- ═══════════ Journal ═══════════ -->
+  <section aria-label="Journal entry">
+    <h2>One journal entry</h2>
+    <p class="sec-note">The journal is the ledger of the desk: every dictation, edit, and command as a single scannable line, before/after on demand, undo always one press away.</p>
+    <div class="journal-row">
+      <span class="kind">Edit</span>
+      <span class="app">Mail</span>
+      <span class="time">2:41 PM</span>
+      <span class="sep">—</span>
+      <span class="sum">"tighten + de-apologize"</span>
+      <span class="changes">2 changes</span>
+      <button class="undo" type="button">Undo</button>
+    </div>
+  </section>
+
+  <!-- ═══════════ Palette ═══════════ -->
+  <section aria-label="Palette">
+    <h2>Palette</h2>
+    <p class="sec-note">Warm neutrals do the furniture; four hues carry the four meanings and are spent nowhere else.</p>
+    <div class="swatches">
+      <div class="sw"><div class="block" style="background:#faf7ef"></div><div class="hex">#FAF7EF</div><div class="role"><b>paper</b> · HUD and panel ground</div></div>
+      <div class="sw"><div class="block" style="background:#fffdf6"></div><div class="hex">#FFFDF6</div><div class="role"><b>fresh page</b> · diff card, wells</div></div>
+      <div class="sw"><div class="block" style="background:#f1ecdf"></div><div class="hex">#F1ECDF</div><div class="role"><b>recessed</b> · kbd keys, insets</div></div>
+      <div class="sw"><div class="block" style="background:#2b2418"></div><div class="hex">#2B2418</div><div class="role"><b>ink</b> · primary text, intent stamp</div></div>
+      <div class="sw"><div class="block" style="background:#5b523f"></div><div class="hex">#5B523F</div><div class="role"><b>ink 70</b> · secondary text</div></div>
+      <div class="sw"><div class="block" style="background:#766c55"></div><div class="hex">#766C55</div><div class="role"><b>ink 50</b> · meta, ghosts, labels</div></div>
+      <div class="sw"><div class="block" style="background:#b23a2e"></div><div class="hex">#B23A2E</div><div class="role"><b>red pencil</b> · deletions</div></div>
+      <div class="sw"><div class="block" style="background:#274f8e"></div><div class="hex">#274F8E</div><div class="role"><b>writing ink</b> · insertions, Apply</div></div>
+      <div class="sw"><div class="block" style="background:#9a6410"></div><div class="hex">#9A6410</div><div class="role"><b>ochre pencil</b> · warnings</div></div>
+      <div class="sw"><div class="block" style="background:#4f6b33"></div><div class="hex">#4F6B33</div><div class="role"><b>reading green</b> · memory citations</div></div>
+    </div>
+
+    <div class="chip-vocab">
+      <span class="vlabel">Chip vocabulary:</span>
+      <span class="chip intent"><span class="g">✎</span>Edit — tighten selection</span>
+      <span class="chip cmd"><span class="g">▸</span>Command — 3 steps</span>
+      <span class="chip mem"><span class="g">◈</span>using: Q3 planning thread</span>
+      <span class="chip">Dictation</span>
+      <span class="chip warn">secure input — paused</span>
+    </div>
+  </section>
+
+  <!-- ═══════════ Type specimen ═══════════ -->
+  <section aria-label="Type specimen">
+    <h2>Type specimen</h2>
+    <p class="sec-note">Three voices, strictly cast: a book serif for anything the human said or is reading back, the system sans for the instrument's own labels, and mono for the diff, where character alignment is evidence.</p>
+    <div class="spec-table">
+      <div class="spec-row">
+        <div class="sp-display">Every change, shown before it lands.</div>
+        <div class="spec-meta">New York / Charter · 26px / 600<br>tracking -0.015em · display, board only</div>
+      </div>
+      <div class="spec-row">
+        <div class="sp-transcript">tighten this up and make it sound less apologetic</div>
+        <div class="spec-meta">New York / Charter · 13px / 400<br>leading 1.45 · transcript, journal summary</div>
+      </div>
+      <div class="spec-row">
+        <div class="sp-diff"><del>no rush at all</del> <ins>by Friday</ins> and the words between stay quiet</div>
+        <div class="spec-meta">SF Mono · 12px / 400 · leading 1.7<br>diff body · strike 1.5px, ink underline 1px</div>
+      </div>
+      <div class="spec-row">
+        <div class="sp-label">idle · listening · thinking · applied</div>
+        <div class="spec-meta">SF Pro · 11px / 700 · tracking 0.10em<br>state labels, card titles, uppercase</div>
+      </div>
+      <div class="spec-row">
+        <div class="sp-chip">Edit — tighten selection &nbsp;·&nbsp; using: Q3 planning thread</div>
+        <div class="spec-meta">SF Pro · 11px / 600 · tracking 0.01em<br>chips</div>
+      </div>
+      <div class="spec-row">
+        <div class="sp-journal">Edit · Mail · 2:41 PM · 2 changes</div>
+        <div class="spec-meta">SF Pro · 12px / 400 · tabular numerals<br>journal metadata</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════ Why it fits ═══════════ -->
+  <section aria-label="Rationale">
+    <h2>Why this fits <em>trustworthy instrument</em></h2>
+    <p class="fit-note">An editor's markup is the original legible diff: for a century, red pencil and ink on paper have meant "here is exactly what changes, and nothing changes until you agree." Studio Paper borrows that contract literally, so the HUD reads as a careful professional at your desk rather than a magician behind a curtain. Warmth here is not decoration; it is the difference between an instrument you monitor and one you work beside all day.</p>
+    <p class="dark-note"><strong>Dark mode</strong> resolves as the same desk after sundown: paper inverts to a warm lamplit charcoal<span class="swx" style="background:#211c13"></span>#211C13 with cream ink<span class="swx" style="background:#ece5d3"></span>#ECE5D3, the pencil, ink, ochre, and green hues keep their exact roles at raised luminance, hairlines lighten, and shadows deepen; the journal and settings follow the system appearance while the HUD may stay paper-light as a deliberate "page in the dark."</p>
+  </section>
+
+  <footer>
+    <span>Mull · Studio Paper</span>
+    <span>D2 direction board · tokens ready for D3 extraction</span>
+  </footer>
+
+</div>

@@ -1,0 +1,802 @@
+<title>Mull — Instrument</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+/* ═══════════════════════════════════════════════════════════════════
+   MULL · D2 DIRECTION BOARD 01 — INSTRUMENT
+   Dark optical glass · precision hairlines · monospace data voice.
+   Every color / size / duration is a custom property (D3 extracts these).
+   ═══════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── neutrals ── */
+  --ground:        #0A0C0E;   /* board + desktop ground              */
+  --glass:         rgba(16,20,24,0.92); /* HUD optical glass         */
+  --glass-solid:   #101418;   /* glass base, opaque reference        */
+  --well:          #0C0F12;   /* recessed card interior (diff body)  */
+  --raise:         #14181D;   /* raised surface (journal, windows)   */
+  --line:          rgba(255,255,255,0.09);  /* hairline              */
+  --line-strong:   rgba(255,255,255,0.17);  /* hairline, emphasized  */
+  --text:          #E8EDF1;   /* primary                             */
+  --text-2:        #98A4AD;   /* secondary                           */
+  --text-3:        #74818B;   /* faint / ghost (4.6:1 on ground)     */
+
+  /* ── meaning-bearing hues (stable across product) ── */
+  --phos:          #4FD8C2;   /* phosphor — live signal, primary act */
+  --phos-dim:      rgba(79,216,194,0.14);
+  --phos-line:     rgba(79,216,194,0.45);
+  --ins:           #85E89D;   /* added                               */
+  --ins-dim:       rgba(133,232,157,0.10);
+  --del:           #F97583;   /* removed                             */
+  --del-dim:       rgba(249,117,131,0.09);
+  --warn:          #E3B341;   /* warning                             */
+  --warn-dim:      rgba(227,179,65,0.10);
+  --mem:           #B392F0;   /* memory citation                     */
+  --mem-dim:       rgba(179,146,240,0.10);
+  --mem-line:      rgba(179,146,240,0.40);
+
+  /* ── type ── */
+  --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif;
+  --mono: ui-monospace, "SF Mono", "Menlo", "Cascadia Mono", monospace;
+  --fs-label: 10px;      /* tracked caps labels        */
+  --fs-readout: 11px;    /* mono readouts, key hints   */
+  --fs-chip: 11px;       /* chips                      */
+  --fs-ui: 12px;         /* dense UI text              */
+  --fs-diff: 12px;       /* diff body (mono)           */
+  --fs-transcript: 12.5px;
+  --fs-body: 13px;       /* HUD/journal body           */
+  --track-caps: 0.14em;
+  --track-chip: 0.01em;
+
+  /* ── geometry ── */
+  --r-hud: 14px;
+  --r-card: 10px;
+  --r-btn: 7px;
+  --r-chip: 999px;
+  --hud-w: 472px;
+
+  /* ── motion ── */
+  --t-fast: 140ms;   /* chips, hovers, key states   */
+  --t-med: 200ms;    /* cards, state swaps          */
+  --ease: cubic-bezier(0.2, 0.7, 0.25, 1);
+  --pulse: 1.6s;     /* orb ring while listening    */
+  --wave: 1.1s;      /* trace bars while listening  */
+}
+
+/* ═══ board scaffold ═══ */
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+::selection { background: rgba(79,216,194,0.3); color: #ECFFFA; }
+button { font: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible {
+  outline: 1px solid var(--phos); outline-offset: 2px; border-radius: 4px;
+}
+
+.board { max-width: 1240px; margin: 0 auto; padding: 0 48px 96px; }
+
+/* document chrome strip */
+.meta {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 24px;
+  padding: 22px 0 18px; border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: var(--fs-readout);
+  letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-3);
+}
+.meta b { color: var(--text-2); font-weight: 500; }
+
+header.masthead { padding: 84px 0 72px; border-bottom: 1px solid var(--line); }
+h1 {
+  margin: 0 0 20px; font-size: 64px; font-weight: 650; letter-spacing: -0.022em;
+  line-height: 1.02; color: var(--text);
+}
+.thesis {
+  margin: 0; max-width: 58ch; font-size: 17px; line-height: 1.55;
+  color: var(--text-2); font-weight: 400; letter-spacing: -0.005em;
+}
+.thesis em { color: var(--phos); font-style: normal; }
+
+/* section header rows — spec-sheet style */
+section { padding: 64px 0 0; }
+.shead {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 24px;
+  padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 40px;
+}
+.shead h2 {
+  margin: 0; font-size: 21px; font-weight: 600; letter-spacing: -0.014em; color: var(--text);
+}
+.shead .note {
+  font-family: var(--mono); font-size: var(--fs-readout); color: var(--text-3);
+  letter-spacing: var(--track-caps); text-transform: uppercase; text-align: right;
+}
+
+/* state rows: annotation rail + stage */
+.staterow {
+  display: grid; grid-template-columns: 272px 1fr; gap: 44px; margin-bottom: 56px;
+  align-items: start;
+}
+.rail h3 { margin: 0 0 10px; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+.rail h3 span { color: var(--text-3); font-weight: 500; }
+.rail p { margin: 0 0 18px; font-size: 13px; line-height: 1.6; color: var(--text-2); }
+.specs { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.specs div {
+  display: flex; justify-content: space-between; gap: 14px; padding: 7px 0;
+  border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: var(--fs-readout); color: var(--text-3);
+}
+.specs div b { color: var(--text-2); font-weight: 450; text-align: right; }
+
+/* ═══ desktop stage ═══ */
+.stage {
+  position: relative; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--line);
+  background:
+    radial-gradient(880px 460px at 82% -12%, #1A2830 0%, transparent 62%),
+    radial-gradient(720px 520px at 6% 116%, #141E28 0%, transparent 58%),
+    linear-gradient(168deg, #11161C 0%, #0C1015 52%, #090C0F 100%);
+}
+.stage-a { height: 336px; }
+.stage-b { height: 396px; }
+.stage-c { height: 664px; }
+
+.menubar {
+  position: absolute; inset: 0 0 auto 0; height: 26px; z-index: 5;
+  display: flex; align-items: center; gap: 14px; padding: 0 14px;
+  background: rgba(18,22,26,0.78); backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 11.5px; color: var(--text-2);
+}
+.menubar .app { font-weight: 700; color: var(--text); }
+.menubar .sp { flex: 1; }
+.menubar .mull-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  border: 1px solid var(--text-3); position: relative;
+}
+.stage-b .menubar .mull-dot { border-color: var(--phos-line); background: var(--phos); box-shadow: 0 0 0 2px var(--phos-dim); }
+.menubar .clock { font-variant-numeric: tabular-nums; color: var(--text-2); }
+
+/* background window, defocused */
+.bgwin {
+  position: absolute; left: -150px; top: 62px; width: 350px; height: 560px; z-index: 1;
+  background: #15181C; border-radius: 10px;
+  box-shadow: 0 12px 34px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.05);
+  opacity: 0.65;
+}
+.bgwin .tb { height: 34px; border-bottom: 1px solid rgba(255,255,255,0.06); display:flex; align-items:center; padding: 0 12px; }
+.bgwin .row { height: 11px; border-radius: 3px; background: rgba(255,255,255,0.05); margin: 14px 18px 0; }
+.bgwin .row.w2 { width: 55%; } .bgwin .row.w3 { width: 72%; }
+
+/* Mail window — dark appearance */
+.mailwin {
+  position: absolute; right: 34px; top: 44px; width: 600px; z-index: 2;
+  background: #191D22; border-radius: 10px; overflow: hidden;
+  display: flex; flex-direction: column;
+  box-shadow: 0 22px 56px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.07);
+}
+.stage-a .mailwin, .stage-b .mailwin { height: 480px; }
+.stage-c .mailwin { height: 560px; }
+.titlebar {
+  height: 36px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  background: #1F242A; border-bottom: 1px solid rgba(0,0,0,0.4);
+  font-size: 12px; font-weight: 600; color: var(--text-2);
+}
+.titlebar .tname { flex: 1; text-align: center; margin-right: 50px; }
+.lights { display: flex; gap: 7px; }
+.lights i { width: 11px; height: 11px; border-radius: 50%; display: block; }
+.lights i:nth-child(1) { background: #E5544B; } .lights i:nth-child(2) { background: #D6A243; } .lights i:nth-child(3) { background: #4AA84E; }
+.mail-toolbar {
+  flex: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06); background: #1C2126;
+}
+.mail-toolbar button {
+  border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.04);
+  color: var(--text-2); border-radius: 6px; padding: 3px 11px; font-size: 11.5px; font-weight: 600;
+}
+.mail-toolbar .auto { margin-left: auto; font-size: 11px; color: var(--text-3); font-family: var(--mono); }
+.mail-fields { flex: none; font-size: 12px; }
+.mail-fields .frow { display: flex; gap: 8px; padding: 6px 14px; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.mail-fields .k { color: var(--text-3); width: 56px; flex: none; }
+.mail-fields .v { color: var(--text); }
+.mail-fields .pill { background: rgba(94,141,214,0.18); color: #9FBEF0; border-radius: 10px; padding: 0 8px; font-size: 11.5px; }
+.mail-body {
+  flex: 1; padding: 14px 18px; font-size: 13px; line-height: 1.6; color: #C9D2D9;
+  white-space: pre-wrap; overflow: hidden;
+}
+.mail-body .sel-range {
+  background: rgba(79,216,194,0.16);
+  box-shadow: 0 0 0 1px rgba(79,216,194,0.22);
+  border-radius: 2px;
+}
+
+/* ═══ HUD — non-activating floating panel ═══ */
+.hud {
+  position: absolute; left: 50%; bottom: 26px; transform: translateX(-50%);
+  width: var(--hud-w); z-index: 10;
+  background: var(--glass);
+  backdrop-filter: blur(22px) saturate(1.15);
+  border-radius: var(--r-hud);
+  padding: 10px 14px 11px;
+  box-shadow:
+    0 0 0 1px rgba(255,255,255,0.11),
+    inset 0 1px 0 rgba(255,255,255,0.07),
+    0 4px 14px rgba(0,0,0,0.4),
+    0 22px 52px rgba(0,0,0,0.55);
+  transition: opacity var(--t-med) var(--ease), transform var(--t-med) var(--ease);
+}
+.hud-row { display: flex; align-items: center; gap: 12px; min-height: 28px; }
+
+/* orb: status ring + core */
+.orb {
+  width: 22px; height: 22px; border-radius: 50%; flex: none; position: relative;
+  border: 1px solid var(--line-strong);
+  display: grid; place-items: center;
+}
+.orb i { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); transition: background var(--t-fast) var(--ease); }
+.hud--listening .orb { border-color: var(--phos-line); }
+.hud--listening .orb i { background: var(--phos); }
+.hud--listening .orb::after {
+  content: ""; position: absolute; inset: -1px; border-radius: 50%;
+  border: 1px solid var(--phos);
+  animation: orbping var(--pulse) var(--ease) infinite;
+}
+@keyframes orbping {
+  0%   { transform: scale(1);    opacity: 0.7; }
+  75%  { transform: scale(1.85); opacity: 0; }
+  100% { transform: scale(1.85); opacity: 0; }
+}
+.hud--preview .orb { border-color: var(--line-strong); }
+.hud--preview .orb i { background: var(--text-2); }
+
+/* waveform: trace bars over a baseline hairline */
+.wave { display: flex; align-items: center; gap: 2px; height: 20px; width: 66px; flex: none; position: relative; }
+.wave::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line); }
+.wave span {
+  width: 2px; height: 18px; flex: none; position: relative;
+  background: var(--text-3); transform: scaleY(0.1); border-radius: 1px;
+}
+.hud--listening .wave span { background: var(--phos); animation: trace var(--wave) ease-in-out infinite; }
+.hud--listening .wave span:nth-child(1)  { animation-delay: 0ms; }
+.hud--listening .wave span:nth-child(2)  { animation-delay: 90ms; }
+.hud--listening .wave span:nth-child(3)  { animation-delay: 180ms; }
+.hud--listening .wave span:nth-child(4)  { animation-delay: 60ms; }
+.hud--listening .wave span:nth-child(5)  { animation-delay: 240ms; }
+.hud--listening .wave span:nth-child(6)  { animation-delay: 140ms; }
+.hud--listening .wave span:nth-child(7)  { animation-delay: 300ms; }
+.hud--listening .wave span:nth-child(8)  { animation-delay: 40ms; }
+.hud--listening .wave span:nth-child(9)  { animation-delay: 200ms; }
+.hud--listening .wave span:nth-child(10) { animation-delay: 110ms; }
+.hud--listening .wave span:nth-child(11) { animation-delay: 260ms; }
+@keyframes trace {
+  0%, 100% { transform: scaleY(0.12); }
+  50%      { transform: scaleY(0.95); }
+}
+.hud--preview .wave span { transform: scaleY(0.12); background: var(--text-3); }
+
+.transcript {
+  flex: 1; min-width: 0; font-family: var(--mono); font-size: var(--fs-transcript);
+  line-height: 1.5; color: var(--text);
+}
+.transcript.settled { color: var(--text-2); }
+.caret {
+  display: inline-block; width: 1px; height: 1.05em; background: var(--phos);
+  vertical-align: text-bottom; margin-left: 2px;
+  animation: blink 1.1s steps(1) infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+
+.statelabel {
+  flex: none; font-family: var(--mono); font-size: var(--fs-label); font-weight: 600;
+  letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-3);
+}
+.hud--listening .statelabel { color: var(--phos); }
+.hud--preview .statelabel { color: var(--text-2); }
+
+/* idle ghost of the last action */
+.ghost {
+  margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line);
+  display: flex; justify-content: space-between; gap: 12px;
+  font-family: var(--mono); font-size: var(--fs-readout); color: var(--text-3);
+}
+.ghost .ok { color: var(--phos); opacity: 0.75; }
+
+/* chips */
+.chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--mono); font-size: var(--fs-chip); font-weight: 500;
+  letter-spacing: var(--track-chip);
+  border-radius: var(--r-chip); padding: 3.5px 10px;
+  border: 1px solid var(--line-strong); background: rgba(255,255,255,0.045);
+  color: var(--text-2);
+  animation: rise var(--t-fast) var(--ease) both;
+}
+.chip .k { color: var(--text-3); }
+.chip--intent { color: var(--phos); border-color: var(--phos-line); background: var(--phos-dim); }
+.chip--mem    { color: var(--mem);  border-color: var(--mem-line);  background: var(--mem-dim); cursor: pointer; }
+.chip--cmd    { color: var(--text); border-color: var(--line-strong); background: rgba(255,255,255,0.07); }
+.chip--warn   { color: var(--warn); border-color: rgba(227,179,65,0.42); background: var(--warn-dim); }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* diff card */
+.diffcard {
+  margin-top: 11px; background: var(--well);
+  border: 1px solid var(--line); border-radius: var(--r-card);
+  overflow: hidden;
+  animation: rise var(--t-med) var(--ease) both;
+}
+.diffcard .dtitle {
+  display: flex; justify-content: space-between; gap: 12px;
+  padding: 8px 12px; border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: var(--fs-label); font-weight: 600;
+  letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-2);
+}
+.diffcard .dtitle .m { color: var(--text-3); font-weight: 500; }
+.diffbody {
+  padding: 10px 12px; max-height: 150px; overflow-y: auto;
+  font-family: var(--mono); font-size: var(--fs-diff); line-height: 1.6; color: var(--text-2);
+}
+.diffbody::-webkit-scrollbar { width: 8px; }
+.diffbody::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; border: 2px solid var(--well); }
+.dline { display: flex; gap: 9px; }
+.dline .gut { flex: none; width: 8px; text-align: center; user-select: none; }
+.dline--del .gut { color: var(--del); }
+.dline--ins .gut { color: var(--ins); }
+.dline del {
+  color: var(--del); background: var(--del-dim);
+  text-decoration: line-through; text-decoration-color: rgba(249,117,131,0.5);
+  border-radius: 2px; padding: 0 2px;
+}
+.dline ins {
+  color: var(--ins); background: var(--ins-dim);
+  text-decoration: none; border-radius: 2px; padding: 0 2px;
+}
+.rsep { height: 1px; background: var(--line); margin: 8px 0; }
+.diffacts {
+  display: flex; align-items: center; gap: 8px;
+  padding: 9px 12px; border-top: 1px solid var(--line);
+}
+.btn {
+  display: inline-flex; align-items: center; gap: 7px;
+  border-radius: var(--r-btn); padding: 5px 12px;
+  font-family: var(--sans); font-size: var(--fs-ui); font-weight: 600;
+  border: 1px solid transparent;
+  transition: background var(--t-fast) var(--ease), border-color var(--t-fast) var(--ease);
+}
+.btn .kbd {
+  font-family: var(--mono); font-size: var(--fs-label); font-weight: 500;
+  opacity: 0.72; letter-spacing: 0.04em;
+}
+.btn--apply { background: var(--phos); color: #05231D; }
+.btn--apply:hover { background: #63E2CE; }
+.btn--apply .kbd { opacity: 0.6; }
+.btn--cancel { background: transparent; border-color: var(--line-strong); color: var(--text-2); }
+.btn--cancel:hover { border-color: rgba(255,255,255,0.3); color: var(--text); }
+.undo-note {
+  margin-left: auto; font-family: var(--mono); font-size: var(--fs-readout);
+  color: var(--text-3); letter-spacing: 0.02em;
+}
+
+/* chip vocabulary strip */
+.chipstrip {
+  display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+  padding: 18px 20px; border: 1px solid var(--line); border-radius: 12px;
+  background: var(--glass-solid);
+}
+.chipstrip .cap {
+  font-family: var(--mono); font-size: var(--fs-readout); letter-spacing: var(--track-caps);
+  text-transform: uppercase; color: var(--text-3); margin-right: 8px;
+}
+
+/* ═══ journal ═══ */
+.jwin {
+  max-width: 720px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  background: var(--raise);
+  box-shadow: 0 18px 44px rgba(0,0,0,0.4);
+}
+.jwin .titlebar { background: #1B2025; }
+.jhead {
+  padding: 12px 16px 10px; border-bottom: 1px solid var(--line);
+  display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+}
+.jhead .t { font-size: 13px; font-weight: 600; color: var(--text); letter-spacing: -0.005em; }
+.jhead .s { font-family: var(--mono); font-size: var(--fs-readout); color: var(--text-3); }
+.jrow {
+  display: flex; align-items: center; gap: 12px; padding: 11px 16px;
+  border-bottom: 1px solid var(--line); font-size: var(--fs-body);
+}
+.jrow .kind {
+  flex: none; font-family: var(--mono); font-size: var(--fs-label); font-weight: 600;
+  letter-spacing: var(--track-caps); text-transform: uppercase;
+  border: 1px solid var(--line-strong); border-radius: 5px; padding: 2px 7px; color: var(--text-2);
+}
+.jrow .app { color: var(--text-2); flex: none; }
+.jrow .time { font-family: var(--mono); font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; flex: none; }
+.jrow .sum { color: var(--text); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jrow .delta { font-family: var(--mono); font-size: 11px; color: var(--text-3); flex: none; margin-left: auto; }
+.jrow .undo {
+  flex: none; border: 1px solid var(--line-strong); background: transparent; color: var(--text-2);
+  border-radius: var(--r-btn); padding: 3px 11px; font-size: 11.5px; font-weight: 600;
+  transition: border-color var(--t-fast) var(--ease), color var(--t-fast) var(--ease);
+}
+.jrow .undo:hover { border-color: var(--phos-line); color: var(--phos); }
+.jrow--ghost { opacity: 0.38; border-bottom: 0; }
+.jrow .dot { flex:none; width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); }
+
+/* ═══ palette ═══ */
+.palgroup { margin-bottom: 34px; }
+.palgroup h4 {
+  margin: 0 0 14px; font-family: var(--mono); font-size: var(--fs-readout);
+  letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-3); font-weight: 600;
+}
+.pal { display: grid; grid-template-columns: repeat(auto-fit, minmax(158px, 1fr)); gap: 10px; }
+.swatch { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+.swatch .c { height: 58px; border-bottom: 1px solid var(--line); }
+.swatch .i { padding: 9px 11px 10px; }
+.swatch .hex { font-family: var(--mono); font-size: 11px; color: var(--text); letter-spacing: 0.02em; }
+.swatch .role { font-size: 11px; color: var(--text-3); margin-top: 2px; line-height: 1.45; }
+.swatch--phos .role, .swatch--ins .role, .swatch--del .role, .swatch--warn .role, .swatch--mem .role { color: var(--text-2); }
+
+/* ═══ type specimen ═══ */
+.typegrid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.typecol { border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px 8px; background: var(--glass-solid); }
+.typecol h4 { margin: 0 0 4px; font-size: 14px; font-weight: 600; letter-spacing: -0.008em; }
+.typecol .fam { font-family: var(--mono); font-size: var(--fs-readout); color: var(--text-3); margin-bottom: 16px; }
+.tspec {
+  display: flex; justify-content: space-between; align-items: baseline; gap: 20px;
+  padding: 12px 0; border-top: 1px solid var(--line);
+}
+.tspec .sample { min-width: 0; }
+.tspec .ann {
+  flex: none; font-family: var(--mono); font-size: 11px; color: var(--text-3);
+  letter-spacing: 0.04em; text-align: right; white-space: nowrap;
+}
+.t-body   { font-size: var(--fs-body); color: var(--text); }
+.t-ui     { font-size: var(--fs-ui); font-weight: 500; color: var(--text-2); }
+.t-chip   { font-size: var(--fs-chip); font-weight: 500; letter-spacing: var(--track-chip); color: var(--text-2); }
+.t-label  { font-family: var(--mono); font-size: var(--fs-label); font-weight: 600; letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--phos); }
+.t-trans  { font-family: var(--mono); font-size: var(--fs-transcript); color: var(--text); }
+.t-diff   { font-family: var(--mono); font-size: var(--fs-diff); color: var(--text-2); }
+.t-diff del { color: var(--del); background: var(--del-dim); text-decoration: line-through; text-decoration-color: rgba(249,117,131,0.5); border-radius: 2px; padding: 0 2px; }
+.t-diff ins { color: var(--ins); background: var(--ins-dim); text-decoration: none; border-radius: 2px; padding: 0 2px; }
+.t-readout{ font-family: var(--mono); font-size: var(--fs-readout); letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-3); }
+
+/* motion strip */
+.motion { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.mcell { border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+.mcell .v { font-family: var(--mono); font-size: 13px; color: var(--text); }
+.mcell .r { font-size: 11.5px; color: var(--text-3); margin-top: 3px; line-height: 1.5; }
+
+/* rationale */
+.rationale { max-width: 74ch; }
+.rationale p { margin: 0 0 18px; font-size: 14.5px; line-height: 1.7; color: var(--text-2); }
+.rationale p b { color: var(--text); font-weight: 600; }
+.rationale .light {
+  border-top: 1px solid var(--line); padding-top: 18px; font-size: 13.5px; color: var(--text-3);
+}
+.rationale .light b { color: var(--text-2); }
+
+footer.colophon {
+  margin-top: 72px; padding-top: 18px; border-top: 1px solid var(--line);
+  display: flex; justify-content: space-between; gap: 20px;
+  font-family: var(--mono); font-size: var(--fs-readout);
+  letter-spacing: var(--track-caps); text-transform: uppercase; color: var(--text-3);
+}
+
+/* ═══ responsive ═══ */
+@media (max-width: 980px) {
+  .board { padding: 0 24px 72px; }
+  h1 { font-size: 46px; }
+  .staterow { grid-template-columns: 1fr; gap: 20px; }
+  .typegrid { grid-template-columns: 1fr; }
+  .stage { overflow-x: auto; }
+}
+
+/* ═══ reduced motion: static levels, fades only ═══ */
+@media (prefers-reduced-motion: reduce) {
+  .hud--listening .orb::after { animation: none; opacity: 0.35; transform: scale(1.4); }
+  .hud--listening .wave span { animation: none; }
+  .hud--listening .wave span:nth-child(odd)  { transform: scaleY(0.55); }
+  .hud--listening .wave span:nth-child(even) { transform: scaleY(0.3); }
+  .hud--listening .wave span:nth-child(3),
+  .hud--listening .wave span:nth-child(7)    { transform: scaleY(0.85); }
+  .caret { animation: none; }
+  .chip, .diffcard { animation: none; }
+  .hud, .btn, .jrow .undo, .orb i { transition-property: opacity; }
+}
+</style>
+
+<div class="board">
+
+  <div class="meta">
+    <span><b>Mull</b> · D2 direction boards</span>
+    <span>board 01 / 04</span>
+    <span>lead appearance — <b>dark</b> · 13 Sep 2026</span>
+  </div>
+
+  <header class="masthead">
+    <h1>Instrument</h1>
+    <p class="thesis">Dark optical glass, hairline precision, a monospace data voice — <em>an oscilloscope you talk to</em>. Every surface reports; nothing performs. The one phosphor accent is spent only on what is live or about to act.</p>
+  </header>
+
+  <!-- ════════════ HUD · 3 STATES ════════════ -->
+  <section>
+    <div class="shead">
+      <h2>The HUD in three states</h2>
+      <div class="note">rendered at 472px — actual size · non-activating panel · Mail stays key</div>
+    </div>
+
+    <!-- STATE A — IDLE -->
+    <div class="staterow">
+      <div class="rail">
+        <h3>State A <span>— Idle</span></h3>
+        <p>The HUD at its most invisible: static core, flat trace, the last action held as a ghost with its undo path still named.</p>
+        <div class="specs">
+          <div>surface <b>glass 92% · blur 22</b></div>
+          <div>edge <b>1px hairline + inset light</b></div>
+          <div>label <b>mono 10px caps · +0.14em</b></div>
+          <div>ghost <b>last action · ⌥Z live</b></div>
+        </div>
+      </div>
+      <div class="stage stage-a">
+        <div class="menubar"><span class="app">Mail</span><span>File</span><span>Edit</span><span>View</span><span>Message</span><div class="sp"></div><div class="mull-dot"></div><span class="clock">Sat 13 Sep 2:41 PM</span></div>
+        <div class="bgwin"><div class="tb"><div class="lights"><i></i><i></i><i></i></div></div><div class="row"></div><div class="row w2"></div><div class="row w3"></div><div class="row"></div><div class="row w2"></div></div>
+        <div class="mailwin">
+          <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Re: Q4 partnership terms — Draft</div></div>
+          <div class="mail-toolbar"><button>Send</button><button>Attach</button><span class="auto">draft · autosaved 2:39 PM</span></div>
+          <div class="mail-fields">
+            <div class="frow"><span class="k">To:</span><span class="v"><span class="pill">Sarah Kim</span></span></div>
+            <div class="frow"><span class="k">Subject:</span><span class="v">Re: Q4 partnership terms</span></div>
+          </div>
+          <div class="mail-body">Hi Sarah,
+
+I’m so sorry to bother you again, but I was just wondering if maybe you’d had a chance to look at the revised terms. Could you send your redlines whenever you get a chance, no rush at all.
+
+Best,
+Maya</div>
+        </div>
+        <div class="hud hud--idle">
+          <div class="hud-row">
+            <div class="orb"><i></i></div>
+            <div class="wave"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="transcript settled"></div>
+            <div class="statelabel">idle</div>
+          </div>
+          <div class="ghost"><span><span class="ok">✓</span> applied — edit · Mail · 2:41 PM</span><span>⌥Z undo</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATE B — LISTENING -->
+    <div class="staterow">
+      <div class="rail">
+        <h3>State B <span>— Listening</span></h3>
+        <p>Core lights, trace goes live, words land as heard. The router’s decision — an intent chip — is visible before anything happens.</p>
+        <div class="specs">
+          <div>orb ring <b>1.6s pulse · ease-out</b></div>
+          <div>trace <b>scaleY bars · 1.1s loop</b></div>
+          <div>chip in <b>140ms rise</b></div>
+          <div>transcript <b>SF Mono 12.5</b></div>
+        </div>
+      </div>
+      <div class="stage stage-b">
+        <div class="menubar"><span class="app">Mail</span><span>File</span><span>Edit</span><span>View</span><span>Message</span><div class="sp"></div><div class="mull-dot"></div><span class="clock">Sat 13 Sep 2:41 PM</span></div>
+        <div class="bgwin"><div class="tb"><div class="lights"><i></i><i></i><i></i></div></div><div class="row"></div><div class="row w2"></div><div class="row w3"></div><div class="row"></div><div class="row w2"></div></div>
+        <div class="mailwin">
+          <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Re: Q4 partnership terms — Draft</div></div>
+          <div class="mail-toolbar"><button>Send</button><button>Attach</button><span class="auto">draft · autosaved 2:39 PM</span></div>
+          <div class="mail-fields">
+            <div class="frow"><span class="k">To:</span><span class="v"><span class="pill">Sarah Kim</span></span></div>
+            <div class="frow"><span class="k">Subject:</span><span class="v">Re: Q4 partnership terms</span></div>
+          </div>
+          <div class="mail-body">Hi Sarah,
+
+<span class="sel-range">I’m so sorry to bother you again, but I was just wondering if maybe you’d had a chance to look at the revised terms. Could you send your redlines whenever you get a chance, no rush at all.</span>
+
+Best,
+Maya</div>
+        </div>
+        <div class="hud hud--listening">
+          <div class="hud-row">
+            <div class="orb"><i></i></div>
+            <div class="wave"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="transcript">tighten this up and make it sound less apolo<span class="caret"></span></div>
+            <div class="statelabel">listening</div>
+          </div>
+          <div class="chips">
+            <span class="chip chip--intent">✎ Edit — tighten selection</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STATE C — DIFF PREVIEW -->
+    <div class="staterow">
+      <div class="rail">
+        <h3>State C <span>— Diff preview</span></h3>
+        <p>The edit as evidence: exact removals and insertions in the data voice, keyed Apply / Cancel, and the undo path named in the same breath. Nothing touches the draft until ⏎.</p>
+        <div class="specs">
+          <div>removed <b>#F97583 · struck</b></div>
+          <div>added <b>#85E89D</b></div>
+          <div>memory cited <b>#B392F0 · inspectable</b></div>
+          <div>card in <b>200ms ease-out</b></div>
+          <div>diff body <b>scrolls · max 150px</b></div>
+        </div>
+      </div>
+      <div class="stage stage-c">
+        <div class="menubar"><span class="app">Mail</span><span>File</span><span>Edit</span><span>View</span><span>Message</span><div class="sp"></div><div class="mull-dot"></div><span class="clock">Sat 13 Sep 2:41 PM</span></div>
+        <div class="bgwin"><div class="tb"><div class="lights"><i></i><i></i><i></i></div></div><div class="row"></div><div class="row w2"></div><div class="row w3"></div><div class="row"></div><div class="row w2"></div></div>
+        <div class="mailwin">
+          <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Re: Q4 partnership terms — Draft</div></div>
+          <div class="mail-toolbar"><button>Send</button><button>Attach</button><span class="auto">draft · autosaved 2:39 PM</span></div>
+          <div class="mail-fields">
+            <div class="frow"><span class="k">To:</span><span class="v"><span class="pill">Sarah Kim</span></span></div>
+            <div class="frow"><span class="k">Subject:</span><span class="v">Re: Q4 partnership terms</span></div>
+          </div>
+          <div class="mail-body">Hi Sarah,
+
+<span class="sel-range">I’m so sorry to bother you again, but I was just wondering if maybe you’d had a chance to look at the revised terms. Could you send your redlines whenever you get a chance, no rush at all.</span>
+
+Best,
+Maya</div>
+        </div>
+        <div class="hud hud--preview">
+          <div class="hud-row">
+            <div class="orb"><i></i></div>
+            <div class="wave"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+            <div class="transcript settled">tighten this up and make it sound less apologetic</div>
+            <div class="statelabel">preview</div>
+          </div>
+          <div class="chips">
+            <span class="chip chip--intent">✎ Edit — tighten selection</span>
+            <span class="chip chip--mem">◈ using: Q3 planning thread</span>
+          </div>
+          <div class="diffcard">
+            <div class="dtitle"><span>Proposed edit — Mail · selection</span><span class="m">2 ranges</span></div>
+            <div class="diffbody">
+              <div class="dline dline--del"><span class="gut">−</span><span><del>I’m so sorry to bother you again, but I was just wondering if maybe</del></span></div>
+              <div class="dline dline--ins"><span class="gut">+</span><span><ins>Following up:</ins></span></div>
+              <div class="rsep"></div>
+              <div class="dline dline--del"><span class="gut">−</span><span><del>whenever you get a chance, no rush at all</del></span></div>
+              <div class="dline dline--ins"><span class="gut">+</span><span><ins>by Friday</ins></span></div>
+            </div>
+            <div class="diffacts">
+              <button class="btn btn--apply">Apply <span class="kbd">⏎</span></button>
+              <button class="btn btn--cancel">Cancel <span class="kbd">⎋</span></button>
+              <span class="undo-note">⌥Z reverts after apply</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- chip vocabulary -->
+    <div class="chipstrip">
+      <span class="cap">Chip vocabulary</span>
+      <span class="chip chip--intent">✎ Edit — tighten selection</span>
+      <span class="chip chip--cmd">▸ Command — 3 steps</span>
+      <span class="chip chip--mem">◈ using: Q3 planning thread</span>
+      <span class="chip">dictation — insert at caret</span>
+      <span class="chip chip--warn">secure input — paused</span>
+    </div>
+  </section>
+
+  <!-- ════════════ JOURNAL ════════════ -->
+  <section>
+    <div class="shead">
+      <h2>Journal — one entry</h2>
+      <div class="note">normal window · appearance-adaptive · every action undoable</div>
+    </div>
+    <div class="jwin">
+      <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Mull — Journal</div></div>
+      <div class="jhead"><span class="t">Today</span><span class="s">stored locally · append-only</span></div>
+      <div class="jrow">
+        <span class="kind">Edit</span>
+        <span class="app">Mail</span>
+        <span class="time">2:41 PM</span>
+        <span class="dot"></span>
+        <span class="sum">“tighten + de-apologize”</span>
+        <span class="delta">2 changes</span>
+        <button class="undo">Undo</button>
+      </div>
+      <div class="jrow jrow--ghost">
+        <span class="kind">Dictate</span>
+        <span class="app">Slack</span>
+        <span class="time">11:26 AM</span>
+        <span class="dot"></span>
+        <span class="sum">Inserted 17 words at caret</span>
+        <span class="delta">2 fillers removed</span>
+        <button class="undo">Undo</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ PALETTE ════════════ -->
+  <section>
+    <div class="shead">
+      <h2>Color</h2>
+      <div class="note">neutral optics · five hues carry meaning · nothing decorative</div>
+    </div>
+    <div class="palgroup">
+      <h4>Optics — neutral</h4>
+      <div class="pal">
+        <div class="swatch"><div class="c" style="background:#0A0C0E"></div><div class="i"><div class="hex">#0A0C0E</div><div class="role">ground — desktop &amp; board</div></div></div>
+        <div class="swatch"><div class="c" style="background:#101418"></div><div class="i"><div class="hex">#101418 · 92%</div><div class="role">optical glass — HUD surface</div></div></div>
+        <div class="swatch"><div class="c" style="background:#0C0F12"></div><div class="i"><div class="hex">#0C0F12</div><div class="role">well — diff card interior</div></div></div>
+        <div class="swatch"><div class="c" style="background:#E8EDF1"></div><div class="i"><div class="hex">#E8EDF1</div><div class="role">text — primary</div></div></div>
+        <div class="swatch"><div class="c" style="background:#98A4AD"></div><div class="i"><div class="hex">#98A4AD</div><div class="role">text — secondary</div></div></div>
+        <div class="swatch"><div class="c" style="background:rgba(255,255,255,0.09)"></div><div class="i"><div class="hex">#FFFFFF · 9%</div><div class="role">hairline — all rules &amp; edges</div></div></div>
+      </div>
+    </div>
+    <div class="palgroup">
+      <h4>Signal — meaning-bearing</h4>
+      <div class="pal">
+        <div class="swatch swatch--phos"><div class="c" style="background:#4FD8C2"></div><div class="i"><div class="hex">#4FD8C2</div><div class="role">phosphor — live signal, primary action</div></div></div>
+        <div class="swatch swatch--ins"><div class="c" style="background:#85E89D"></div><div class="i"><div class="hex">#85E89D</div><div class="role">added — diff insertions</div></div></div>
+        <div class="swatch swatch--del"><div class="c" style="background:#F97583"></div><div class="i"><div class="hex">#F97583</div><div class="role">removed — diff deletions</div></div></div>
+        <div class="swatch swatch--warn"><div class="c" style="background:#E3B341"></div><div class="i"><div class="hex">#E3B341</div><div class="role">warning — secure input, rate limit</div></div></div>
+        <div class="swatch swatch--mem"><div class="c" style="background:#B392F0"></div><div class="i"><div class="hex">#B392F0</div><div class="role">memory citation — inspectable</div></div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ TYPE ════════════ -->
+  <section>
+    <div class="shead">
+      <h2>Type</h2>
+      <div class="note">system stacks only · two voices · shown at real size</div>
+    </div>
+    <div class="typegrid">
+      <div class="typecol">
+        <h4>Interface voice — SF Pro Text</h4>
+        <div class="fam">-apple-system · labels, buttons, journal, prose</div>
+        <div class="tspec"><span class="sample t-body">Nothing changes until you apply it.</span><span class="ann">13px · 400 · 0em</span></div>
+        <div class="tspec"><span class="sample t-ui">Proposed edit — preview before it touches your text</span><span class="ann">12px · 500 · 0em</span></div>
+        <div class="tspec"><span class="sample t-chip">Every action lands in the journal, undoable</span><span class="ann">11px · 500 · +0.01em</span></div>
+      </div>
+      <div class="typecol">
+        <h4>Data voice — SF Mono</h4>
+        <div class="fam">ui-monospace · transcript, diff, readouts, time</div>
+        <div class="tspec"><span class="sample t-trans">tighten this up and make it sound less apologetic</span><span class="ann">12.5px · 400 · 0em</span></div>
+        <div class="tspec"><span class="sample t-diff"><del>no rush at all</del> <ins>by Friday</ins></span><span class="ann">12px · 400 · 0em</span></div>
+        <div class="tspec"><span class="sample t-label">listening</span><span class="ann">10px · 600 · +0.14em</span></div>
+        <div class="tspec"><span class="sample t-readout">2 ranges · selection · Mail</span><span class="ann">11px · 500 · +0.14em</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ════════════ MOTION ════════════ -->
+  <section>
+    <div class="shead">
+      <h2>Motion</h2>
+      <div class="note">state changes read instantly · nothing bounces · nothing blocks</div>
+    </div>
+    <div class="motion">
+      <div class="mcell"><div class="v">140ms · ease-out</div><div class="r">chips land, hovers, key-state flips</div></div>
+      <div class="mcell"><div class="v">200ms · ease-out</div><div class="r">cards rise, HUD grows, state swaps — opacity + transform only</div></div>
+      <div class="mcell"><div class="v">1.6s ring · 1.1s trace</div><div class="r">listening pulse; loops only while the mic is hot</div></div>
+      <div class="mcell"><div class="v">reduced-motion</div><div class="r">pulse and trace freeze to static levels; transitions become fades</div></div>
+    </div>
+  </section>
+
+  <!-- ════════════ RATIONALE ════════════ -->
+  <section>
+    <div class="shead">
+      <h2>Why this reads as a trustworthy instrument</h2>
+      <div class="note">precise · calm · legible · honest · quick</div>
+    </div>
+    <div class="rationale">
+      <p>An oscilloscope earns trust by <b>showing the signal, not talking about it</b> — and this direction makes every layer a measurement: the trace says you are being heard, the mono data voice reports words and edits as evidence, and hairline rules with tracked-caps labels frame the panel like calibrated equipment. The single phosphor accent is rationed to what is live or about to act, so when color appears, it always means something — the exact opposite of assistant theater.</p>
+      <p class="light"><b>Light mode:</b> the HUD stays this always-dark optical glass — appearance-invariant, like a camera viewfinder — while the journal, settings, and onboarding flip to a cool paper-white neutral set with the same five signal hues deepened ~25% for contrast on light ground.</p>
+    </div>
+  </section>
+
+  <footer class="colophon">
+    <span>Mull · direction 01 — Instrument</span>
+    <span>self-contained · system fonts · tokens as custom properties</span>
+  </footer>
+
+</div>
