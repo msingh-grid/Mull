@@ -18,8 +18,8 @@ import Foundation
 /// first *notifications* — messages the sidecar sends unprompted. `init`
 /// rejects a mismatch loudly, so a stale binary fails at boot rather than
 /// returning shapes the host cannot parse.
-public let SIDECAR_PROTOCOL_VERSION = 3
-public let SIDECAR_VERSION = "0.3.0"
+public let SIDECAR_PROTOCOL_VERSION = 4
+public let SIDECAR_VERSION = "0.4.0"
 
 // MARK: - Param structs (mirror the zod schemas)
 
@@ -36,6 +36,10 @@ struct InsertTextParams: Decodable {
 
 struct FocusedElementParams: Decodable {
     let contextBytes: Int?
+}
+
+struct SelectedTextParams: Decodable {
+    let allowCopy: Bool?
 }
 
 struct ReplaceRangeParams: Decodable {
@@ -105,6 +109,24 @@ public struct FocusedElementInfo {
     }
 }
 
+/// A selection found anywhere in the frontmost app, and whether it can be
+/// written back to. `editable: false` is the interesting case: text the user
+/// can point at but Mull cannot rewrite in place — a sent message, a web page,
+/// somebody else's document.
+public struct SelectionLookup {
+    public let text: String?
+    public let editable: Bool
+    /// "focused" | "tree" | "copy", or nil when nothing was found.
+    public let source: String?
+    public let reason: String?
+    public init(text: String?, editable: Bool, source: String?, reason: String?) {
+        self.text = text
+        self.editable = editable
+        self.source = source
+        self.reason = reason
+    }
+}
+
 public enum FocusedElementLookup {
     case found(FocusedElementInfo)
     /// 'no-accessibility' | 'no-focused-element' | 'unreadable'
@@ -150,6 +172,10 @@ public protocol SystemActions {
     func secureInputActive() -> Bool
     /// Read the focused element, clamped to `context` UTF-16 units per side.
     func focusedElement(context: Int) -> FocusedElementLookup
+    /// The selection, wherever it is in the frontmost app. `allowCopy` permits
+    /// the ⌘C fallback, which presses a key in someone else's app and so is
+    /// never taken without the host asking for it.
+    func selectedText(allowCopy: Bool) -> SelectionLookup
     /// Insert at the caret with a concrete strategy ("ax" | "paste" | "type").
     func insert(text: String, strategy: String, settleMs: Int) -> InsertOutcome
     /// Replace the current selection, reporting what was there before.
@@ -242,6 +268,19 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
             "active": .bool(system.secureInputActive()),
             // The OS does not cleanly expose the holding pid; null for v0.
             "pid": .null
+        ])
+    }
+
+    d.register("selectedText") { raw in
+        let params = try decodeParams(
+            SelectedTextParams.self, from: raw,
+            defaultIfMissing: SelectedTextParams(allowCopy: nil))
+        let found = system.selectedText(allowCopy: params.allowCopy ?? false)
+        return .object([
+            "text": optional(found.text),
+            "editable": .bool(found.editable),
+            "source": optional(found.source),
+            "reason": optional(found.reason)
         ])
     }
 

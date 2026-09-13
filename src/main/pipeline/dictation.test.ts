@@ -568,3 +568,111 @@ describe('DictationPipeline — an instruction about the field in front of you',
     h.pipe.dispose()
   })
 })
+
+/**
+ * The second report (M4.2): text selected in a *sent* Slack message while the
+ * empty composer holds focus.
+ *
+ * M4.1 saw nothing selected and an empty field, took the fast path, and typed
+ * the user's question into the box. The selection was always there — just not
+ * in the focused element, which is the only place Mull was looking.
+ */
+describe('DictationPipeline — a selection that is not in the focused element', () => {
+  const SENT = 'I am so sorry to bother you again about the terms doc.'
+
+  async function utterance(h: Harness): Promise<void> {
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+  }
+
+  it('edits read-only text into the caret instead of typing the question', async () => {
+    const h = harness({
+      sidecar: new FakeSidecar({
+        accessibility: true,
+        text: SENT,
+        caret: 0,
+        selectionLength: SENT.length,
+        // Found by walking the app's tree, and not writable — a sent message.
+        selectionSource: 'tree',
+        selectionEditable: false
+      }),
+      transcript: 'Can you please make it less apologetic?',
+      sculpt: true,
+      classifies: { kind: 'edit', target: 'selection', instruction: 'make it less apologetic' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted.length).toBe(1)
+    expect(h.sculpted[0]?.target).toMatchObject({
+      kind: 'reference',
+      text: SENT,
+      keystrokesSafe: false
+    })
+    // The question itself never reaches the composer.
+    expect(h.sidecar.insertions).toEqual([])
+    h.pipe.dispose()
+  })
+
+  it('replaces in place when the selection is where the caret is', async () => {
+    const h = harness({
+      sidecar: new FakeSidecar({
+        accessibility: true,
+        text: SENT,
+        caret: 0,
+        selectionLength: SENT.length,
+        selectionSource: 'focused'
+      }),
+      transcript: 'make this crisp',
+      sculpt: true,
+      classifies: { kind: 'edit', target: 'selection', instruction: 'make this crisp' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted[0]?.target).toMatchObject({ kind: 'selection', keystrokesSafe: true })
+    h.pipe.dispose()
+  })
+
+  it('asks the app with ⌘C when accessibility finds nothing', async () => {
+    // The last resort, and only for words that already look like an
+    // instruction — it presses a key in someone else's app.
+    const h = harness({
+      sidecar: new FakeSidecar({
+        accessibility: true,
+        text: '',
+        caret: 0,
+        selectionLength: 0,
+        copyable: SENT
+      }),
+      transcript: 'make it less apologetic',
+      sculpt: true,
+      classifies: { kind: 'edit', target: 'selection', instruction: 'make it less apologetic' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted[0]?.target).toMatchObject({ kind: 'reference', text: SENT })
+    h.pipe.dispose()
+  })
+
+  it('does not press ⌘C for ordinary speech', async () => {
+    const h = harness({
+      sidecar: new FakeSidecar({
+        accessibility: true,
+        text: '',
+        caret: 0,
+        selectionLength: 0,
+        copyable: SENT
+      }),
+      transcript: 'and I will send the deck tonight',
+      sculpt: true,
+      classifies: { kind: 'dictate' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted).toEqual([])
+    expect(h.sidecar.insertions).toEqual(['And I will send the deck tonight'])
+    h.pipe.dispose()
+  })
+})

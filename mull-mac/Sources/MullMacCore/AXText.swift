@@ -210,3 +210,113 @@ enum AXText {
         range(element, kAXSelectedTextRangeAttribute).map { $0.location + $0.length }
     }
 }
+
+// MARK: - Finding a selection that is not in the focused element
+
+extension AXText {
+
+    /// A selection Mull found somewhere, and whether it can be written back to.
+    struct FoundSelection {
+        /// The element that actually holds it. Reads and writes must use the
+        /// *same* element — writing to the focused one after reading from
+        /// another is how you overwrite the wrong text.
+        let element: AXUIElement
+        let text: String
+        /// True only when an AX write into this exact element has a chance.
+        let editable: Bool
+        /// How it was found: "focused" | "tree". For the journal and for bugs.
+        let source: String
+    }
+
+    /// Look past the focused element.
+    ///
+    /// The case that forced this: text selected in a sent Slack message while
+    /// the (empty) composer holds focus. `AXFocusedUIElement` is the composer,
+    /// so the focused-element read reports no selection at all — and Mull
+    /// concluded there was nothing to edit and typed the user's instruction
+    /// into the box.
+    ///
+    /// So when the focused element has nothing, walk the frontmost app's own
+    /// tree looking for any element reporting `AXSelectedText`. Breadth-first
+    /// and hard-bounded: this runs while the user is still speaking, and an
+    /// unbounded walk of a big Electron tree is a hang, not a feature.
+    static func anySelection(pid: pid_t) -> FoundSelection? {
+        if let element = focusedElement(), let text = nonEmptySelectedText(element) {
+            return FoundSelection(
+                element: element, text: text, editable: isEditable(element), source: "focused")
+        }
+        return searchTree(AXUIElementCreateApplication(pid))
+    }
+
+    /// Selected text that is actually text. Whitespace-only is not a selection
+    /// anyone meant to make.
+    private static func nonEmptySelectedText(_ element: AXUIElement) -> String? {
+        guard let text = string(element, kAXSelectedTextAttribute),
+            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return text
+    }
+
+    private static func isEditable(_ element: AXUIElement) -> Bool {
+        settable(element, kAXValueAttribute) || settable(element, kAXSelectedTextAttribute)
+    }
+
+    /// Nodes visited before giving up. Chosen to stay inside a few milliseconds
+    /// on a Chromium tree, which is the deepest thing we expect to meet.
+    private static let maxNodes = 600
+    private static let maxDepth = 24
+
+    private static func searchTree(_ root: AXUIElement) -> FoundSelection? {
+        var queue: [(element: AXUIElement, depth: Int)] = [(root, 0)]
+        var visited = 0
+
+        while !queue.isEmpty, visited < maxNodes {
+            let (element, depth) = queue.removeFirst()
+            visited += 1
+
+            if let text = nonEmptySelectedText(element) {
+                return FoundSelection(
+                    element: element, text: text, editable: isEditable(element), source: "tree")
+            }
+            guard depth < maxDepth else { continue }
+
+            var value: CFTypeRef?
+            guard
+                AXUIElementCopyAttributeValue(element, kAXChildrenAttribute as CFString, &value)
+                    == .success,
+                let children = value as? [AXUIElement]
+            else { continue }
+
+            for child in children {
+                queue.append((child, depth + 1))
+            }
+        }
+        return nil
+    }
+}
+
+// MARK: - Choosing the element a write goes to
+
+extension AXText {
+
+    /// The element an AX text write should target.
+    ///
+    /// The focused element first, because that is where the caret is and where
+    /// the user is looking. But `AXFocusedUIElement` on the system-wide element
+    /// is not always answered — measured in TextEdit, frontmost and with a live
+    /// selection, it returned nothing while a per-application tree walk found
+    /// the selection immediately. When that happens, writing to "the focused
+    /// element" is not an option, and the element holding the selection is both
+    /// the correct target and the only one we can be sure of.
+    ///
+    /// Nothing weaker is attempted. A tree walk for "some field that looks
+    /// writable" would eventually pick the wrong box in a window with several,
+    /// and the whole point of this file is not guessing.
+    static func writeTarget(pid: pid_t) -> AXUIElement? {
+        if let focused = focusedElement(), settable(focused, kAXSelectedTextAttribute) {
+            return focused
+        }
+        guard let found = anySelection(pid: pid), found.editable else { return nil }
+        return found.element
+    }
+}

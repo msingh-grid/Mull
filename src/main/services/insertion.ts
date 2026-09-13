@@ -96,16 +96,32 @@ export class InsertionService {
     return this.write('insert', text, target)
   }
 
-  async replaceSelection(text: string, target: InsertionTarget | null): Promise<InsertionResult> {
-    return this.write('replace', text, target)
+  /**
+   * Replace what is selected.
+   *
+   * `onlyAx` narrows the chain to the one strategy that targets the element
+   * holding the selection. Paste and type post keystrokes, which land wherever
+   * the caret is — fine when the selection *is* the caret's element, and a way
+   * to overwrite the wrong text when it is not (M4.2: a selection found
+   * elsewhere in the app's accessibility tree).
+   */
+  async replaceSelection(
+    text: string,
+    target: InsertionTarget | null,
+    options: { onlyAx?: boolean } = {}
+  ): Promise<InsertionResult> {
+    return this.write('replace', text, target, options)
   }
 
   private async write(
     mode: 'insert' | 'replace',
     text: string,
-    target: InsertionTarget | null
+    target: InsertionTarget | null,
+    options: { onlyAx?: boolean } = {}
   ): Promise<InsertionResult> {
-    const { profile, chain } = this.planFor(target)
+    const planned = this.planFor(target)
+    const profile = planned.profile
+    const chain = options.onlyAx ? planned.chain.filter((s) => s === 'ax') : planned.chain
     const attempts: InsertionAttempt[] = []
 
     if (profile.refuse) {

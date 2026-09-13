@@ -247,6 +247,7 @@ export class SidecarClient extends EventEmitter<SidecarEvents> implements Sideca
     this.call('promptAccessibility', p)
   frontmostApp = (p: SidecarParams<'frontmostApp'>) => this.call('frontmostApp', p)
   focusedElement = (p: SidecarParams<'focusedElement'>) => this.call('focusedElement', p)
+  selectedText = (p: SidecarParams<'selectedText'>) => this.call('selectedText', p)
   insertText = (p: SidecarParams<'insertText'>) => this.call('insertText', p)
   replaceSelection = (p: SidecarParams<'replaceSelection'>) => this.call('replaceSelection', p)
   replaceRange = (p: SidecarParams<'replaceRange'>) => this.call('replaceRange', p)
@@ -335,6 +336,16 @@ export interface FakeSidecarOptions {
   /** No text element has focus. */
   noFocus?: boolean
   /**
+   * Where the pretend app's selection was found: 'focused' | 'tree' | 'copy'.
+   * The host only allows an in-place replace through the paste chain for
+   * 'focused', so this is the switch that exercises that rule.
+   */
+  selectionSource?: string
+  /** False models read-only text — a sent message, a web page. */
+  selectionEditable?: boolean
+  /** What a ⌘C probe would return when AX finds nothing. */
+  copyable?: string
+  /**
    * Focus exists and reports a caret, but refuses to hand over its value —
    * web text areas and terminals do this. Callers then have no local copy to
    * check against and must rely on the sidecar's own `expect` guard.
@@ -409,6 +420,32 @@ export class FakeSidecar implements SidecarApi {
           : this.overrides.app,
       windowTitle: null
     }
+  }
+
+  /**
+   * The selection, as the real sidecar reports it.
+   *
+   * `selectionSource` lets a test say where it was found, because the host
+   * treats the three differently: only a selection in the focused element may
+   * be written back through the paste chain.
+   */
+  async selectedText(p: SidecarParams<'selectedText'>) {
+    if (this.overrides.accessibility === false || this.overrides.accessibility === undefined) {
+      return { text: null, editable: false, source: null, reason: 'no-accessibility' }
+    }
+    const text = this.text.slice(this.caret, this.caret + this.selectionLength)
+    if (text.trim()) {
+      return {
+        text,
+        editable: this.overrides.selectionEditable ?? true,
+        source: this.overrides.selectionSource ?? 'focused',
+        reason: null
+      }
+    }
+    if (p?.allowCopy && this.overrides.copyable) {
+      return { text: this.overrides.copyable, editable: false, source: 'copy', reason: null }
+    }
+    return { text: null, editable: false, source: null, reason: 'no-selection' }
   }
 
   async focusedElement(p: SidecarParams<'focusedElement'>) {

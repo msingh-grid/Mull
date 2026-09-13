@@ -23,8 +23,12 @@ export interface EditIntent {
   kind: 'edit'
   /** The user's instruction, e.g. "tighten this up". */
   instruction: string
-  /** What the edit applies to. */
-  target: 'selection' | 'document'
+  /**
+   * What the edit applies to. `reference` is text Mull could read but not
+   * rewrite — a sent message, a web page — so the result was inserted at the
+   * caret rather than replacing anything.
+   */
+  target: 'selection' | 'document' | 'reference'
   /** Raw transcript the instruction was parsed from (for the journal). */
   transcript: string
 }

@@ -14,20 +14,32 @@ import type { SidecarApi } from '@shared/sidecar-api'
  * write, for the same reason `UndoService` refuses: replacing text the user has
  * moved on from is how an assistant destroys someone's writing.
  *
- * There are two things an edit can act on, and M4.1 added the second:
+ * There are three things an edit can act on:
  *
- *   selection  what is highlighted. Written through the M2 insertion chain, so
- *              it degrades to paste and works in Electron apps.
- *   document   the whole focused field, when nothing is highlighted. This is
- *              the Slack-composer case — "make my last message less
- *              apologetic" with the message sitting right there. AX-only,
+ *   selection  what is highlighted, in a place Mull can write to. Through the
+ *              M2 insertion chain when the selection is in the focused element
+ *              (so it degrades to paste and works in Electron apps), AX-only
+ *              when it is somewhere else — a keystroke always lands on the
+ *              focused element, so pasting over a selection held elsewhere
+ *              would overwrite the wrong text.
+ *   document   the whole focused field, when nothing is highlighted. AX-only,
  *              because a whole-field rewrite has to be exact.
+ *   reference  text the user can point at but Mull cannot rewrite: a sent
+ *              message, a web page, someone else's document. The rewrite is
+ *              **inserted at the caret** instead of replacing anything. This is
+ *              the case that produced the second bug report — selecting a sent
+ *              Slack message and asking for it to be made less apologetic.
  */
 
 export interface FocusSnapshot {
   app: { bundleId: string; name: string } | null
-  /** What is highlighted right now, or null. */
-  selection: { start: number; length: number; text: string } | null
+  /**
+   * What is highlighted right now, anywhere in the frontmost app — not only in
+   * the focused element. `source` says where it was found and `editable`
+   * whether it can be written back to; together they decide which of the three
+   * targets an edit gets.
+   */
+  selection: { text: string; editable: boolean; source: string } | null
   /** The focused field itself, or null when nothing readable has focus. */
   field: {
     /** Absolute UTF-16 offset where `text` begins. */
@@ -41,12 +53,21 @@ export interface FocusSnapshot {
 }
 
 export interface EditTarget {
-  kind: 'selection' | 'document'
+  kind: 'selection' | 'document' | 'reference'
   app: { bundleId: string; name: string } | null
+  /** Meaningful for `document` only; the other two write by selection. */
   start: number
   length: number
   /** Never empty — an edit with nothing to act on is not a target. */
   text: string
+  /**
+   * May a keystroke strategy (paste, type) be used to write this?
+   *
+   * Only when the selection is in the focused element. Keystrokes go where the
+   * caret is, so pasting over a selection held in some other element would
+   * replace whatever the caret happens to be sitting in instead.
+   */
+  keystrokesSafe: boolean
 }
 
 export type EditTargetResult =
@@ -79,28 +100,72 @@ export async function captureFocus(
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
 ): Promise<FocusSnapshot> {
   const empty: FocusSnapshot = { app: null, selection: null, field: null }
-  try {
-    const focused = await sidecar.focusedElement({ contextBytes: CONTEXT_CHARS })
-    const app = focused.app ? { bundleId: focused.app.bundleId, name: focused.app.name } : null
-    if (!focused.element) return { ...empty, app }
 
-    const selection = focused.element.selection
+  // Two questions, and they are genuinely different: "what is the caret in"
+  // and "what has the user highlighted". Asked together and in parallel, both
+  // during the hold, so neither costs the utterance anything.
+  const [focused, selected] = await Promise.all([
+    sidecar.focusedElement({ contextBytes: CONTEXT_CHARS }).catch((err: unknown) => {
+      log?.('warn', 'focus: focusedElement failed', err)
+      return null
+    }),
+    sidecar.selectedText({}).catch((err: unknown) => {
+      log?.('warn', 'focus: selectedText failed', err)
+      return null
+    })
+  ])
+
+  const app = focused?.app ? { bundleId: focused.app.bundleId, name: focused.app.name } : null
+  return {
+    app,
+    selection:
+      selected?.text && selected.text.trim()
+        ? {
+            text: selected.text,
+            editable: selected.editable,
+            source: selected.source ?? 'focused'
+          }
+        : null,
+    field: focused?.element
+      ? {
+          start: focused.element.textStart,
+          text: focused.element.text,
+          truncated: focused.element.truncated,
+          editable: focused.element.editable
+        }
+      : null
+  }
+}
+
+/**
+ * A last look for a selection, using ⌘C.
+ *
+ * Reached only when AX found nothing *and* the words already look like an
+ * instruction — it presses a key in someone else's app, and that is not a thing
+ * to do on every utterance. The sidecar saves and restores the pasteboard
+ * around it, and refuses outright while secure input is on.
+ *
+ * Whatever comes back is a `reference`: a copy says nothing about whether its
+ * source can be written to, and assuming it can is how you try to overwrite a
+ * web page.
+ */
+export async function probeSelectionByCopy(
+  sidecar: SidecarApi,
+  snapshot: FocusSnapshot,
+  log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
+): Promise<FocusSnapshot> {
+  if (snapshot.selection) return snapshot
+  try {
+    const found = await sidecar.selectedText({ allowCopy: true })
+    if (!found.text || !found.text.trim()) return snapshot
+    log?.('info', 'focus: selection found by copy', { chars: found.text.length })
     return {
-      app,
-      selection:
-        selection && selection.text
-          ? { start: selection.start, length: selection.length, text: selection.text }
-          : null,
-      field: {
-        start: focused.element.textStart,
-        text: focused.element.text,
-        truncated: focused.element.truncated,
-        editable: focused.element.editable
-      }
+      ...snapshot,
+      selection: { text: found.text, editable: false, source: found.source ?? 'copy' }
     }
   } catch (err) {
-    log?.('warn', 'focus: focusedElement failed', err)
-    return empty
+    log?.('warn', 'focus: the copy probe failed', err)
+    return snapshot
   }
 }
 
@@ -141,14 +206,19 @@ export function editTarget(
     if (!selection?.text) {
       return { ok: false, message: 'Nothing was selected — select the text and try again.' }
     }
+    // Read-only text becomes a `reference`: the rewrite goes to the caret
+    // rather than nowhere. Refusing instead would be technically correct and
+    // useless — "select your own sent message and improve it" is a thing people
+    // want, and the composer is right there.
     return {
       ok: true,
       target: {
-        kind: 'selection',
+        kind: selection.editable ? 'selection' : 'reference',
         app: snapshot.app,
-        start: selection.start,
-        length: selection.length,
-        text: selection.text
+        start: 0,
+        length: selection.text.length,
+        text: selection.text,
+        keystrokesSafe: selection.source === 'focused'
       }
     }
   }
@@ -175,7 +245,8 @@ export function editTarget(
       app: snapshot.app,
       start: field.start,
       length: field.text.length,
-      text: field.text
+      text: field.text,
+      keystrokesSafe: false
     }
   }
 }
@@ -203,9 +274,11 @@ export async function stillMatches(
   }
   if (!live.element) return { ok: false, reason: 'unreadable' }
 
-  if (target.kind === 'selection') {
-    const selection = live.element.selection
-    if (!selection || !selection.text) return { ok: false, reason: 'no-selection' }
+  if (target.kind !== 'document') {
+    // Re-read the same way it was found, so a selection held outside the
+    // focused element is still checkable.
+    const selection = await sidecar.selectedText({}).catch(() => null)
+    if (!selection?.text) return { ok: false, reason: 'no-selection' }
     return selection.text === target.text ? { ok: true } : { ok: false, reason: 'text-changed' }
   }
 

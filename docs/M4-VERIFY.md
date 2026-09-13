@@ -14,15 +14,16 @@ and the panel can be dragged out of the way.
 Automated first — all of this passes now:
 
 ```bash
-npm run typecheck && npm test && npm run build   # 375 unit tests
+npm run build:sidecar                            # protocol 4, sidecar 0.4.0
+npm run typecheck && npm test && npm run build   # 383 unit tests
 npm run bench:engine                             # the 1.2s first-token budget
 npm run smoke && npm run check:native
 npm run pack:local                               # the DMG you actually install
 ```
 
-The sidecar is **unchanged** — still protocol 3, still `0.3.0`. M4 is assembled
-from parts M2 and M3 already built, so there is no `build:sidecar` step and no
-stale-binary trap this time.
+**The sidecar changed in M4.2 — protocol 4, `0.4.0`.** Run
+`npm run build:sidecar`, or `init` will fail loudly at boot with a version
+mismatch, which is the point of it failing loudly.
 
 ---
 
@@ -38,6 +39,7 @@ stale-binary trap this time.
 | Engine | none | Claude subscription, or an API key |
 | Credentials | none | `safeStorage`, never logged, never sent to a renderer |
 | Undo | caret-relative only | also where the write reported landing |
+| Selection | the focused element's only | anywhere in the app; ⌘C as a last resort |
 
 ## 2. The rule, in one sentence
 
@@ -198,3 +200,26 @@ sitting on Slack's composer toolbar.
       Settings → Appearance → HUD position.
 - [ ] **Buttons still work.** With a card open, Apply and Cancel respond to the
       mouse, and dragging from a button does not move the window.
+
+## 10. Text you can point at but not edit
+
+The second thing M4 got wrong: selecting a **sent** Slack message and asking for
+a rewrite. The selection was never in the focused element — the composer was —
+so Mull concluded there was nothing to edit and typed the question into the box.
+
+- [ ] **Select one of your own sent messages** in Slack, then hold ⌥Space and
+      say *"make it less apologetic"*. A card appears over the selected text.
+- [ ] **The card says where it will land**: `EDIT PREVIEW · Slack — to cursor`.
+      A sent message cannot be rewritten in place, so ⏎ puts the result in the
+      composer instead of trying.
+- [ ] **⏎ inserts it at the caret** and ⌥Z removes it again.
+- [ ] **The same works on a web page.** Select a paragraph in Safari, click into
+      any text field, and ask for a summary.
+- [ ] **An editable selection still replaces in place** — the TextEdit case from
+      §3 is unchanged.
+- [ ] **Your clipboard survives.** Copy `MULL-CLIPBOARD-CANARY`, then do a
+      reference edit somewhere AX cannot see the selection; ⌘V afterwards still
+      pastes the canary. (Mull may press ⌘C to find the selection; it puts the
+      pasteboard back.)
+- [ ] **It does not press ⌘C for ordinary speech.** Dictate a plain sentence and
+      confirm the canary is still on the clipboard and nothing was selected.

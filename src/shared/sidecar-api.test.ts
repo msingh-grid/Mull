@@ -65,6 +65,7 @@ describe('sidecar-api zod contract', () => {
       'promptAccessibility',
       'frontmostApp',
       'focusedElement',
+    'selectedText',
       'insertText',
       'replaceSelection',
       'replaceRange',
@@ -75,7 +76,7 @@ describe('sidecar-api zod contract', () => {
       'stopHotkeyTap'
     ])
     // Bumped whenever a shape changes; the sidecar's `init` refuses a mismatch.
-    expect(SIDECAR_PROTOCOL_VERSION).toBe(3)
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(4)
   })
 })
 

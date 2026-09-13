@@ -141,7 +141,10 @@ public final class RealSystem: SystemActions {
     public func replaceSelection(text: String, strategy: String, settleMs: Int) -> InsertOutcome {
         // Read what is about to be destroyed first — it is the `before` half of
         // the journal entry, and there is no second chance to read it.
-        let element = AXText.focusedElement()
+        // Read from the element the write will target, not from whatever has
+        // focus — they are not always the same, and a `before` taken from the
+        // wrong element would be a lie in the journal.
+        let element = AXText.writeTarget(pid: frontmostPid())
         let previous = element.flatMap { AXText.string($0, kAXSelectedTextAttribute) }
 
         let outcome: InsertOutcome
@@ -171,7 +174,7 @@ public final class RealSystem: SystemActions {
     public func replaceRange(start: Int, length: Int, text: String, expect: String?)
         -> InsertOutcome
     {
-        guard let element = AXText.focusedElement() else {
+        guard let element = AXText.writeTarget(pid: frontmostPid()) else {
             return InsertOutcome(inserted: false, strategyUsed: nil, reason: "no-focused-element")
         }
         guard AXText.settable(element, kAXSelectedTextAttribute) else {
@@ -216,7 +219,7 @@ public final class RealSystem: SystemActions {
     // MARK: ax: write AXSelectedText, then read it back
 
     private func axWrite(_ text: String, replacingSelection: Bool) -> InsertOutcome {
-        guard let element = AXText.focusedElement() else {
+        guard let element = AXText.writeTarget(pid: frontmostPid()) else {
             return InsertOutcome(inserted: false, strategyUsed: nil, reason: "no-focused-element")
         }
         guard AXText.settable(element, kAXSelectedTextAttribute) else {
@@ -276,6 +279,86 @@ public final class RealSystem: SystemActions {
         let (verified, caret) = verifyAfterKeyWrite(text)
         return InsertOutcome(
             inserted: true, strategyUsed: "paste", reason: nil, verified: verified, caret: caret)
+    }
+
+    // MARK: selectedText: the selection, wherever it is
+
+    /// Find what the user has selected, even when it is not in the focused
+    /// element.
+    ///
+    /// Three ways, in increasing order of how much they disturb the machine:
+    ///
+    ///   focused  the focused element's own `AXSelectedText`. Free.
+    ///   tree     a bounded walk of the frontmost app's AX tree. Cheap, and the
+    ///            one that catches "selected a sent message while the composer
+    ///            has focus" — the case that made Mull type an instruction into
+    ///            a Slack box instead of acting on it.
+    ///   copy     post ⌘C and read the pasteboard. Universal, because it is
+    ///            what every Mac app implements, and the only option in an app
+    ///            whose AX tree hides its selection. It is also the only one
+    ///            that presses a key in someone else's app, so the host asks
+    ///            for it explicitly and only when the other two found nothing.
+    ///
+    /// The pasteboard is saved and restored around the copy, the same way the
+    /// paste strategy does, so the user's clipboard survives.
+    private func frontmostPid() -> pid_t {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+    }
+
+    public func selectedText(allowCopy: Bool) -> SelectionLookup {
+        guard AXIsProcessTrusted() else {
+            return SelectionLookup(text: nil, editable: false, source: nil, reason: "no-accessibility")
+        }
+
+        let pid = frontmostPid()
+        if pid != 0, let found = AXText.anySelection(pid: pid) {
+            return SelectionLookup(
+                text: found.text, editable: found.editable, source: found.source, reason: nil)
+        }
+
+        guard allowCopy else {
+            return SelectionLookup(text: nil, editable: false, source: nil, reason: "no-selection")
+        }
+        // Never while a password field holds the keyboard: ⌘C there is both
+        // useless and exactly the kind of thing this app promises not to do.
+        if IsSecureEventInputEnabled() {
+            return SelectionLookup(text: nil, editable: false, source: nil, reason: "secure-input")
+        }
+        return copySelection()
+    }
+
+    private func copySelection() -> SelectionLookup {
+        let pasteboard = NSPasteboard.general
+        let saved = savePasteboard(pasteboard)
+        let before = pasteboard.changeCount
+
+        guard postKey(CGKeyCode(kVK_ANSI_C), flags: .maskCommand) else {
+            return SelectionLookup(
+                text: nil, editable: false, source: nil, reason: "cgevent-post-failed")
+        }
+
+        // Poll rather than sleep a fixed amount: a native app answers in a few
+        // milliseconds, Electron takes longer, and waiting the worst case every
+        // time would be felt.
+        var copied: String?
+        for _ in 0..<24 {
+            usleep(10_000)
+            if pasteboard.changeCount != before {
+                copied = pasteboard.string(forType: .string)
+                break
+            }
+        }
+
+        restorePasteboard(pasteboard, saved: saved)
+
+        guard let copied, !copied.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            // Nothing was selected, or the app ignored ⌘C. Either way there is
+            // nothing to edit, which is a fine answer.
+            return SelectionLookup(text: nil, editable: false, source: nil, reason: "no-selection")
+        }
+        // A copy says nothing about whether the source can be written back to,
+        // and guessing "yes" would let an edit try to overwrite a web page.
+        return SelectionLookup(text: copied, editable: false, source: "copy", reason: nil)
     }
 
     private func savePasteboard(_ pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {

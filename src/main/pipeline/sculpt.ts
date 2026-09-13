@@ -103,7 +103,14 @@ export class SculptLane {
     // What ⏎ will rewrite, said out loud in both the chip and the card title.
     // "the whole field" and "what I highlighted" are very different promises,
     // and the user is about to approve one of them.
-    const scope = request.target.kind === 'selection' ? 'selection' : 'whole field'
+    // What ⏎ will do, in three words, because "replaces what you highlighted"
+    // and "adds it where your cursor is" are very different promises.
+    const scope =
+      request.target.kind === 'selection'
+        ? 'selection'
+        : request.target.kind === 'document'
+          ? 'whole field'
+          : 'to cursor'
     const appName = request.app?.name ?? null
     const cardApp = appName ? `${appName} — ${scope}` : scope
 
@@ -296,7 +303,9 @@ export class SculptLane {
       // `replacedText` is what the sidecar actually overwrote; it and the
       // snapshot agree by rule 2, but the write's own account of itself is the
       // one worth keeping.
-      before: outcome.replacedText ?? request.target.text,
+      // A reference edit replaced nothing, so it has no `before` — and undo
+      // must remove the insertion rather than restore anything.
+      before: request.target.kind === 'reference' ? null : outcome.replacedText ?? request.target.text,
       after,
       strategyUsed: outcome.strategyUsed,
       status: 'applied',
@@ -337,17 +346,24 @@ export class SculptLane {
   /**
    * Put the proposal where the target is.
    *
-   * The two kinds are written differently on purpose:
+   * Three kinds, three write paths, and the differences are all about not
+   * writing to the wrong place:
    *
-   *   selection  the M2 insertion chain (`ax → paste → type`), so Sculpt works
-   *              in Electron apps that refuse AX writes — pasted, honest about
-   *              not being verified, and not offered an undo it cannot keep.
-   *   document   `replaceRange` with `expect`, which is AX-only and refuses
-   *              unless that exact range still holds exactly the text the
-   *              preview was built from. A whole-field rewrite has to be exact:
-   *              a paste fallback would need ⌘A first, and "select everything
-   *              in whatever has focus, then overwrite it" is not a thing to do
-   *              on a guess.
+   *   selection   the M2 insertion chain (`ax → paste → type`) when the
+   *               selection is in the focused element, so Sculpt still works in
+   *               Electron apps that refuse AX writes. When the selection lives
+   *               somewhere else in the app, AX only: a keystroke lands where
+   *               the caret is, and pasting over a selection held elsewhere
+   *               would replace whatever the caret is sitting in instead.
+   *   document    `replaceRange` with `expect` — AX-only, refuses unless that
+   *               exact range still holds exactly the text the preview was
+   *               built from. A whole-field rewrite has to be exact; a paste
+   *               fallback would need ⌘A first, and "select everything in
+   *               whatever has focus, then overwrite it" is not a thing to do
+   *               on a guess.
+   *   reference   nothing is replaced. The rewrite is inserted at the caret,
+   *               because the text it came from cannot be written to — a sent
+   *               message, a web page, someone else's document.
    *
    * `replaceRange` reports `verified` but no caret, so the caret is computed —
    * and only when the write was read back, which is what makes it a fact rather
@@ -364,8 +380,16 @@ export class SculptLane {
     replacedText: string | null
     reason: string | null
   }> {
+    if (target.kind === 'reference') {
+      // Insert, don't replace. There is nothing here Mull is allowed to
+      // destroy, which also makes this the one path with no `before`.
+      return this.deps.insertion.insert(after, target.app)
+    }
+
     if (target.kind === 'selection') {
-      return this.deps.insertion.replaceSelection(after, target.app)
+      return target.keystrokesSafe
+        ? this.deps.insertion.replaceSelection(after, target.app)
+        : this.deps.insertion.replaceSelection(after, target.app, { onlyAx: true })
     }
 
     const result = await this.deps.sidecar.replaceRange({

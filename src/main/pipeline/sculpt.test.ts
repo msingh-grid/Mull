@@ -113,7 +113,8 @@ function harness(
         app: APP,
         start: 0,
         length: selected.length,
-        text: selected
+        text: selected,
+        keystrokesSafe: true
       },
       app: APP
     }
@@ -195,6 +196,9 @@ describe('SculptLane — apply', () => {
       unreadable: true
     })
     const h = harness({ sidecar })
+    // A selection in the focused element may fall through to paste; one found
+    // elsewhere in the app may not. This is the former.
+    h.request.target.keystrokesSafe = true
     await h.lane.run(h.request)
     h.hud.respond('apply')
     await settle()
@@ -367,7 +371,8 @@ describe('SculptLane — a document target', () => {
       app: APP,
       start: 0,
       length: BEFORE.length,
-      text: BEFORE
+      text: BEFORE,
+      keystrokesSafe: false
     }
     // Nothing is highlighted; the caret is just sitting in the field.
     h.sidecar.selectionLength = 0
@@ -422,13 +427,124 @@ describe('SculptLane — a document target', () => {
       supports: { ax: false, paste: true, type: true }
     })
     const h = harness({ sidecar })
-    h.request.target = { kind: 'document', app: APP, start: 0, length: BEFORE.length, text: BEFORE }
+    h.request.target = {
+      kind: 'document',
+      app: APP,
+      start: 0,
+      length: BEFORE.length,
+      text: BEFORE,
+      keystrokesSafe: false
+    }
 
     await h.lane.run(h.request)
     h.hud.respond('apply')
     await settle()
 
     expect(h.sidecar.text).toBe(BEFORE)
+    expect(lastEntry(h.journal).status).toBe('failed')
+  })
+})
+
+/**
+ * The reported case (M4.2): a selection in a sent Slack message.
+ *
+ * Mull can read it and cannot write to it, so the rewrite is *inserted at the
+ * caret* — which is the composer, which is where the user wanted it. Refusing
+ * instead would be technically correct and useless.
+ */
+describe('SculptLane — a reference target', () => {
+  const SENT = 'I am so sorry to bother you again about the terms doc.'
+
+  function referenceHarness(): ReturnType<typeof harness> {
+    // Nothing is selected in the focused element: the selection lives in a
+    // read-only part of the app, found by the tree walk.
+    const sidecar = new FakeSidecar({
+      accessibility: true,
+      app: { ...APP, pid: 1 },
+      text: '',
+      caret: 0,
+      selectionLength: 0
+    })
+    const h = harness({ sidecar })
+    h.request.target = {
+      kind: 'reference',
+      app: APP,
+      start: 0,
+      length: SENT.length,
+      text: SENT,
+      keystrokesSafe: false
+    }
+    return h
+  }
+
+  it('tells you the rewrite is going to your cursor, not over the text', async () => {
+    const h = referenceHarness()
+    await h.lane.run(h.request)
+    expect((h.hud.cards.at(-1) as DiffCard).app).toBe('Mail — to cursor')
+  })
+
+  it('inserts rather than replaces, and records no `before`', async () => {
+    const h = referenceHarness()
+    // The selection is still there when Apply lands.
+    h.sidecar.text = SENT
+    h.sidecar.caret = 0
+    h.sidecar.selectionLength = SENT.length
+
+    await h.lane.run(h.request)
+    h.hud.respond('apply')
+    await settle()
+
+    const entry = lastEntry(h.journal)
+    expect(entry.status).toBe('applied')
+    expect(entry.intent).toMatchObject({ target: 'reference' })
+    // Nothing was overwritten, so there is nothing to restore — ⌥Z removes the
+    // insertion instead.
+    expect(entry.before).toBeNull()
+    expect(entry.after).toBe(h.sidecar.insertions[0])
+  })
+
+  it('still refuses when the text it read has changed', async () => {
+    const h = referenceHarness()
+    h.sidecar.text = SENT
+    h.sidecar.caret = 0
+    h.sidecar.selectionLength = SENT.length
+    await h.lane.run(h.request)
+
+    h.sidecar.text = 'something else entirely'
+    h.sidecar.selectionLength = h.sidecar.text.length
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.sidecar.insertions).toEqual([])
+    expect(lastEntry(h.journal).status).toBe('failed')
+  })
+})
+
+/**
+ * A selection Mull found outside the focused element can only be written
+ * through AX. Paste and type post keystrokes, which land wherever the caret is
+ * — so falling back to them would replace whatever the user's cursor happened
+ * to be sitting in, which is the worst outcome this app has.
+ */
+describe('SculptLane — a selection that is not where the caret is', () => {
+  it('refuses rather than pasting over whatever has focus', async () => {
+    const sidecar = new FakeSidecar({
+      accessibility: true,
+      app: { ...APP, pid: 1 },
+      text: BEFORE,
+      caret: 0,
+      selectionLength: BEFORE.length,
+      // The app refuses AX writes, and paste is not an option here.
+      supports: { ax: false, paste: true, type: true }
+    })
+    const h = harness({ sidecar })
+    h.request.target.keystrokesSafe = false
+
+    await h.lane.run(h.request)
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.sidecar.insertions).toEqual([])
     expect(lastEntry(h.journal).status).toBe('failed')
   })
 })

@@ -87,6 +87,17 @@ async function checkSidecar(): Promise<void> {
       focused.element ? `role=${focused.element.role} editable=${focused.element.editable}` : `null (${focused.reason})`
     )
 
+    // M4.2: the selection, wherever it is. `allowCopy` is deliberately false —
+    // smoke must never press ⌘C into whatever app happens to be frontmost.
+    const selected = await client.selectedText({ allowCopy: false })
+    check(
+      'selectedText answers without touching the pasteboard',
+      typeof selected.editable === 'boolean',
+      selected.text
+        ? `${selected.source}: ${selected.text.length} chars, editable=${selected.editable}`
+        : `null (${selected.reason})`
+    )
+
     // A sentinel no real document contains, so the guard is what gets
     // exercised and nothing on this machine can be edited by running smoke.
     const sentinel = 'mull-smoke-sentinel-0d6f1c4a-never-present'

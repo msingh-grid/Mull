@@ -111,6 +111,38 @@ export const FocusedElementResultSchema = z.object({
   reason: z.string().nullable()
 })
 
+/**
+ * The selection, wherever it is — not only in the focused element.
+ *
+ * `focusedElement` answers "what is the caret in", which is a different
+ * question from "what has the user highlighted". They came apart the first time
+ * someone selected a sent Slack message while the composer held focus: Mull saw
+ * nothing selected, decided there was nothing to edit, and typed the
+ * instruction into the box.
+ */
+export const SelectedTextParamsSchema = z.object({
+  /**
+   * Permit the ⌘C fallback when AX finds nothing.
+   *
+   * It presses a key in someone else's app and swaps their pasteboard (and
+   * swaps it back), so it is never taken unless the host asks — which it does
+   * only for an utterance that already looks like an instruction.
+   */
+  allowCopy: z.boolean().optional()
+})
+export const SelectedTextResultSchema = z.object({
+  text: z.string().nullable(),
+  /**
+   * Whether an AX write into the element holding this selection has a chance.
+   * False is the interesting case: text the user can point at but Mull must not
+   * try to rewrite in place — a sent message, a web page, a PDF.
+   */
+  editable: z.boolean(),
+  /** 'focused' | 'tree' | 'copy'; null when nothing was found. */
+  source: z.string().nullable(),
+  reason: z.string().nullable()
+})
+
 export const InsertTextParamsSchema = z.object({
   text: z.string(),
   /** Forced strategy; omit and the sidecar pastes (the host owns the chain). */
@@ -228,11 +260,15 @@ export const KeyChordResultSchema = z.object({
  * verbs gained `verified`/`caret`, and `replaceRange` was added.
  * 3 (M3): the hotkey event tap — `startHotkeyTap`/`stopHotkeyTap`, and with
  * them the sidecar's first *notifications*, messages it sends unprompted.
+ * 4 (M4.2): `selectedText`, which looks past the focused element. The writes
+ * moved with it: an AX write now targets the element that holds the selection
+ * rather than whatever has focus, because reading from one and writing to the
+ * other is how you overwrite the wrong text.
  *
  * The `init` handshake rejects a mismatch, so a stale `mull-mac` binary fails
  * loudly at boot instead of returning shapes the host can't parse.
  */
-export const SIDECAR_PROTOCOL_VERSION = 3
+export const SIDECAR_PROTOCOL_VERSION = 4
 
 // ---------------------------------------------------------------------------
 // Notifications: sidecar -> host, no id, no reply.
@@ -267,6 +303,7 @@ export const SidecarMethods = {
   },
   frontmostApp: { params: FrontmostAppParamsSchema, result: FrontmostAppResultSchema },
   focusedElement: { params: FocusedElementParamsSchema, result: FocusedElementResultSchema },
+  selectedText: { params: SelectedTextParamsSchema, result: SelectedTextResultSchema },
   insertText: { params: InsertTextParamsSchema, result: InsertTextResultSchema },
   replaceSelection: { params: ReplaceSelectionParamsSchema, result: ReplaceSelectionResultSchema },
   replaceRange: { params: ReplaceRangeParamsSchema, result: ReplaceRangeResultSchema },

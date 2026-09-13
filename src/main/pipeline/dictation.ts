@@ -17,10 +17,12 @@ import {
   countWords,
   editTarget,
   hasEditableText,
+  probeSelectionByCopy,
   type EditTarget,
   type FocusSnapshot
 } from './selection'
 import type { IntentRouter } from './intent'
+import { mightBeInstruction } from './router'
 import type { JournalStore } from '../store/journal'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 
@@ -488,7 +490,15 @@ export class DictationPipeline {
     | null
   > {
     if (!this.deps.sculpt || !this.deps.intent || !this.focusPromise) return null
-    const snapshot = await this.focusPromise
+    let snapshot = await this.focusPromise
+
+    // Nothing highlighted that AX could see, but the words sound like an
+    // instruction about *something*. Ask the app the way every other Mac tool
+    // does — ⌘C — before concluding there is nothing to edit. Narrowly gated
+    // because it presses a key in someone else's app.
+    if (!snapshot.selection && mightBeInstruction(text)) {
+      snapshot = await probeSelectionByCopy(this.deps.sidecar, snapshot, this.log)
+    }
     const decision = await this.deps.intent.decide({
       transcript: text,
       app: this.state.app ?? snapshot.app,
