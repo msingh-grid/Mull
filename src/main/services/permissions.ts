@@ -1,0 +1,94 @@
+import type { SidecarApi } from '@shared/sidecar-api'
+import type { PermissionKey, PermissionsSnapshot } from '@shared/permissions'
+
+/**
+ * The three permissions Mull needs, in one place.
+ *
+ * Each one is asked for by a different API and lives in a different pane of
+ * System Settings, which is exactly why a user who has "granted everything"
+ * can still have a Mull that does nothing. This service answers one question —
+ * *what did macOS actually grant?* — for the settings pane, for onboarding,
+ * and for the boot log.
+ *
+ * The rule that matters, from docs/DESIGN.md §6.8: **a ✓ never comes from the
+ * click.** Granting happens in System Settings, asynchronously, and sometimes
+ * requires a relaunch. So the UI polls this and reports what it finds; the
+ * Grant button only opens the right pane.
+ */
+
+/** `x-apple.systempreferences:` targets for each pane. */
+const SETTINGS_URL: Record<PermissionKey, string> = {
+  microphone: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+  accessibility: 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility',
+  inputMonitoring: 'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent'
+}
+
+const COPY: Record<PermissionKey, { label: string; reason: string }> = {
+  microphone: {
+    label: 'Microphone',
+    reason: 'To hear you while you hold the key. Audio never leaves this Mac.'
+  },
+  accessibility: {
+    label: 'Accessibility',
+    reason: 'To place text at your caret in other apps, and to take it back with ⌥Z.'
+  },
+  inputMonitoring: {
+    label: 'Input Monitoring',
+    reason: 'To notice the hotkey while you are working in another app.'
+  }
+}
+
+export interface PermissionsDeps {
+  sidecar: SidecarApi
+  /** `systemPreferences.getMediaAccessStatus('microphone')`, injected. */
+  microphoneStatus: () => string
+  /** `shell.openExternal`, injected. */
+  openExternal: (url: string) => void
+  log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
+}
+
+export class PermissionsService {
+  constructor(private readonly deps: PermissionsDeps) {}
+
+  async snapshot(): Promise<PermissionsSnapshot> {
+    const microphone = this.deps.microphoneStatus() === 'granted'
+    const fromSidecar = await this.deps.sidecar
+      .checkPermissions({})
+      .catch(() => ({ accessibility: false, inputMonitoring: false }))
+    const secure = await this.deps.sidecar
+      .secureInputState({})
+      .catch(() => ({ active: false, processName: null }))
+
+    const granted: Record<PermissionKey, boolean> = {
+      microphone,
+      accessibility: fromSidecar.accessibility,
+      inputMonitoring: fromSidecar.inputMonitoring
+    }
+
+    const permissions = (Object.keys(granted) as PermissionKey[]).map((key) => ({
+      key,
+      label: COPY[key].label,
+      reason: COPY[key].reason,
+      granted: granted[key]
+    }))
+
+    return { permissions, secureInput: secure.active }
+  }
+
+  /** Open the pane. Nothing here decides whether it was granted. */
+  open(key: PermissionKey): void {
+    this.deps.openExternal(SETTINGS_URL[key])
+  }
+
+  /**
+   * The one grant macOS will prompt for in-process. Accessibility and Input
+   * Monitoring have no such API — the pane is the only route.
+   */
+  async prompt(key: PermissionKey): Promise<void> {
+    if (key === 'accessibility') {
+      await this.deps.sidecar.promptAccessibility({}).catch(() => undefined)
+      return
+    }
+    this.open(key)
+  }
+}

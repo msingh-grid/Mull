@@ -7,6 +7,10 @@ import {
   type MullWindow
 } from '@shared/ipc'
 import type { DiffSegment } from '@shared/hud'
+import type { AboutInfo } from '@shared/about'
+import type { Settings } from '@shared/settings'
+import type { PermissionKey, PermissionsSnapshot } from '@shared/permissions'
+import type { DownloadProgress, ModelStatus } from '@shared/model'
 import type { JournalEntryView } from '@shared/types'
 
 /**
@@ -45,6 +49,25 @@ export interface MullApi {
     /** Main pushes this whenever an entry is written or undone. */
     onChanged: (handler: () => void) => () => void
   }
+  settings: {
+    get: () => Promise<Settings>
+    /** Returns the settings as the store made of them, not as you sent them. */
+    set: (patch: Partial<Settings>) => Promise<Settings>
+    onChanged: (handler: (settings: Settings) => void) => () => void
+  }
+  permissions: {
+    /** What macOS actually granted, right now. */
+    get: () => Promise<PermissionsSnapshot>
+    /** Opens the System Settings pane. Never decides whether it worked. */
+    open: (key: PermissionKey) => Promise<void>
+  }
+  model: {
+    status: () => Promise<ModelStatus>
+    download: () => Promise<{ ok: boolean; message: string }>
+    onProgress: (handler: (progress: DownloadProgress) => void) => () => void
+  }
+  /** Versions and paths, for the about pane and bug reports. */
+  about: () => Promise<AboutInfo>
   capture: {
     onStart: (handler: () => void) => void
     onStop: (handler: () => void) => void
@@ -92,6 +115,34 @@ const api: MullApi = {
       return () => ipcRenderer.removeListener(IPC.journalChanged, listener)
     }
   },
+
+  settings: {
+    get: () => ipcRenderer.invoke(IPC.settingsGet) as Promise<Settings>,
+    set: (patch) => ipcRenderer.invoke(IPC.settingsSet, patch) as Promise<Settings>,
+    onChanged: (handler) => {
+      const listener = (_event: unknown, settings: Settings): void => handler(settings)
+      ipcRenderer.on(IPC.settingsChanged, listener)
+      return () => ipcRenderer.removeListener(IPC.settingsChanged, listener)
+    }
+  },
+
+  permissions: {
+    get: () => ipcRenderer.invoke(IPC.permissionsGet) as Promise<PermissionsSnapshot>,
+    open: (key) => ipcRenderer.invoke(IPC.permissionsOpen, key) as Promise<void>
+  },
+
+  model: {
+    status: () => ipcRenderer.invoke(IPC.modelStatus) as Promise<ModelStatus>,
+    download: () =>
+      ipcRenderer.invoke(IPC.modelDownload) as Promise<{ ok: boolean; message: string }>,
+    onProgress: (handler) => {
+      const listener = (_event: unknown, progress: DownloadProgress): void => handler(progress)
+      ipcRenderer.on(IPC.modelProgress, listener)
+      return () => ipcRenderer.removeListener(IPC.modelProgress, listener)
+    }
+  },
+
+  about: () => ipcRenderer.invoke(IPC.about) as Promise<AboutInfo>,
 
   capture: {
     onStart: (handler) => {

@@ -107,6 +107,27 @@ export const IPC = {
   /** any renderer -> main: bring one of Mull's own windows up. */
   windowOpen: 'mull:window:open',
 
+  /** settings/onboarding -> main: read or change settings. */
+  settingsGet: 'mull:settings:get',
+  settingsSet: 'mull:settings:set',
+  /** main -> every renderer: settings changed (theme, hotkey, …). */
+  settingsChanged: 'mull:settings:changed',
+
+  /** settings/onboarding -> main: what macOS actually granted. */
+  permissionsGet: 'mull:permissions:get',
+  /** settings/onboarding -> main: open the System Settings pane for one. */
+  permissionsOpen: 'mull:permissions:open',
+
+  /** settings/onboarding -> main: is the speech model here? */
+  modelStatus: 'mull:model:status',
+  /** onboarding -> main: fetch it. Never happens without a click. */
+  modelDownload: 'mull:model:download',
+  /** main -> requesting renderer: download progress. */
+  modelProgress: 'mull:model:progress',
+
+  /** settings/onboarding -> main: versions, paths, hotkey mode. */
+  about: 'mull:about',
+
   /** Dev affordance: trigger an utterance without the hotkey. */
   devTrigger: 'mull:dev:trigger',
   /** Dev affordance: open a FakeEngine card so the surfaces can be exercised. */

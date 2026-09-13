@@ -37,6 +37,11 @@ export function journalPath(): string {
   return join(userDataDir(), 'journal.db')
 }
 
+/** User settings. Small, hand-editable, and never required to exist. */
+export function settingsPath(): string {
+  return join(userDataDir(), 'settings.json')
+}
+
 /** Places whisper.cpp's CLI lands, in preference order. */
 const WHISPER_CLI_CANDIDATES = [
   '/opt/homebrew/bin/whisper-cli',

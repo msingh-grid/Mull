@@ -4,6 +4,7 @@ import type { DiffSegment } from '@shared/hud'
 import type { JournalEntryView } from '@shared/types'
 import { DiffBody } from './components/Cards'
 import { KIND_LABEL, rowKind, rowMeasure, rowTime, undoAffordance } from './journal/row-model'
+import { applyTheme } from './theme'
 import './tokens.css'
 import './hud.css'
 import './windows.css'
@@ -116,7 +117,13 @@ function Journal(): JSX.Element {
 
   useEffect(() => {
     refresh()
-    return window.mull?.journal.onChanged(refresh)
+    void window.mull?.settings.get().then(applyTheme)
+    const offTheme = window.mull?.settings.onChanged(applyTheme)
+    const offJournal = window.mull?.journal.onChanged(refresh)
+    return () => {
+      offTheme?.()
+      offJournal?.()
+    }
   }, [refresh])
 
   const toggle = (id: string): void => {

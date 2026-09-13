@@ -1,4 +1,12 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, screen, systemPreferences } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  globalShortcut,
+  ipcMain,
+  screen,
+  shell,
+  systemPreferences
+} from 'electron'
 import { join } from 'node:path'
 import log from 'electron-log/main'
 import {
@@ -12,7 +20,7 @@ import {
 import type { PlanStep } from '@shared/hud'
 import type { JournalEntryView } from '@shared/types'
 import type { SidecarApi } from '@shared/sidecar-api'
-import { benchPath, journalPath, resolveSidecarPath } from './locations'
+import { benchPath, journalPath, resolveSidecarPath, settingsPath } from './locations'
 import { Bench } from './bench'
 import { selectAsrProvider } from './asr'
 import { FakeSidecar, SidecarClient } from './services/sidecar'
@@ -22,6 +30,9 @@ import { UndoService } from './services/undo'
 import { ChordScope } from './services/chords'
 import { HudController } from './services/hud'
 import { TrayPresence } from './services/tray'
+import { PermissionsService } from './services/permissions'
+import { downloadModel, modelStatus } from './services/model'
+import { SettingsStore } from './store/settings'
 import { JournalStore } from './store/journal'
 import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
@@ -29,6 +40,10 @@ import { appliedText, diffText } from './pipeline/diff'
 import { FakeEngine } from './engine/fake'
 import type { Engine } from './engine/types'
 import type { AsrProvider } from './asr/types'
+import type { AboutInfo } from '@shared/about'
+import type { PermissionKey } from '@shared/permissions'
+import type { Settings } from '@shared/settings'
+import { SIDECAR_PROTOCOL_VERSION } from '@shared/sidecar-api'
 
 log.initialize()
 
@@ -43,11 +58,15 @@ let hud: HudController | null = null
 let chords: ChordScope | null = null
 let tray: TrayPresence | null = null
 let engine: Engine | null = null
+let settings: SettingsStore | null = null
+let permissions: PermissionsService | null = null
+/** Filled in at boot; the about pane reports what is actually running. */
+let runtime = { hotkeyMode: 'unavailable', asrProvider: 'none', sidecarVersion: null as string | null }
 let sidecar: SidecarApi & { dispose?: () => Promise<void> }
 let asr: AsrProvider
 
 /** Windows whose renderer exists. Each M3 stage adds one. */
-const BUILT_WINDOWS: MullWindow[] = ['journal']
+const BUILT_WINDOWS: MullWindow[] = ['journal', 'settings']
 
 const WINDOW_SIZES: Record<MullWindow, { width: number; height: number; minWidth: number }> = {
   journal: { width: 760, height: 620, minWidth: 560 },
@@ -307,6 +326,9 @@ async function createSidecar(): Promise<SidecarApi & { dispose?: () => Promise<v
   }
 
   const client = new SidecarClient({ binaryPath, onLog: logFn })
+  client.on('ready', ({ sidecarVersion }) => {
+    runtime = { ...runtime, sidecarVersion }
+  })
   try {
     await client.start()
     return client
@@ -341,6 +363,14 @@ async function bootstrap(): Promise<void> {
     log.error('journal unavailable — actions will not be recorded or undoable', err)
     journal = null
   }
+
+  settings = new SettingsStore({ path: settingsPath(), log: logFn })
+  permissions = new PermissionsService({
+    sidecar,
+    microphoneStatus: () => systemPreferences.getMediaAccessStatus('microphone'),
+    openExternal: (url) => void shell.openExternal(url),
+    log: logFn
+  })
 
   insertion = new InsertionService({ sidecar, log: logFn })
   undo = journal ? new UndoService({ sidecar, journal, log: logFn }) : null
@@ -396,6 +426,11 @@ async function bootstrap(): Promise<void> {
     log: logFn
   })
   const mode = hotkey.start(globalShortcut)
+  runtime = {
+    hotkeyMode: mode,
+    asrProvider: selection.degradedReason ? 'fake (degraded)' : 'whisper-cli',
+    sidecarVersion: runtime.sidecarVersion
+  }
   tray?.setStatus(
     mode === 'unavailable' ? 'Hotkey unavailable' : mode === 'toggle' ? '⌥Space to start/stop' : 'Hold ⌥Space to dictate'
   )
@@ -513,6 +548,84 @@ ipcMain.handle(IPC.windowOpen, (_event, name: MullWindow) => {
 })
 
 ipcMain.handle(IPC.devCard, (_event, kind: 'diff' | 'plan') => showDemoCard(kind))
+
+// ---------------------------------------------------------------------------
+// Settings, permissions, model
+// ---------------------------------------------------------------------------
+
+ipcMain.handle(IPC.settingsGet, () => settings?.get() ?? null)
+
+ipcMain.handle(IPC.settingsSet, (_event, patch: Partial<Settings>) => {
+  const next = settings?.set(patch) ?? null
+  if (next) {
+    // Every window stamps its own theme, so the change has to reach all of
+    // them — including the HUD, which has its own "page in the dark" rule.
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(IPC.settingsChanged, next)
+    }
+    applyLaunchAtLogin(next)
+  }
+  return next
+})
+
+ipcMain.handle(IPC.permissionsGet, () => permissions?.snapshot() ?? null)
+ipcMain.handle(IPC.permissionsOpen, (_event, key: PermissionKey) => permissions?.open(key))
+
+ipcMain.handle(IPC.modelStatus, () => modelStatus())
+
+/**
+ * Download the speech model. Only ever from a click — onboarding page 4 and
+ * the settings pane are the two callers, and both are explicit.
+ */
+ipcMain.handle(IPC.modelDownload, async (event) => {
+  try {
+    await downloadModel('base.en', (progress) => {
+      if (!event.sender.isDestroyed()) event.sender.send(IPC.modelProgress, progress)
+    })
+    return { ok: true, message: 'The model is ready. Reopen Mull to start using it.' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    log.error('model download failed', err)
+    return { ok: false, message: `Download failed: ${message}` }
+  }
+})
+
+ipcMain.handle(IPC.about, async (): Promise<AboutInfo> => {
+  const snapshot = await permissions?.snapshot()
+  const model = await modelStatus()
+  return {
+    appVersion: app.getVersion(),
+    electron: process.versions.electron ?? 'unknown',
+    chrome: process.versions.chrome ?? 'unknown',
+    node: process.versions.node ?? 'unknown',
+    sidecarVersion: runtime.sidecarVersion,
+    sidecarProtocol: runtime.sidecarVersion ? SIDECAR_PROTOCOL_VERSION : null,
+    hotkeyMode: runtime.hotkeyMode,
+    asrProvider: runtime.asrProvider,
+    paths: {
+      journal: journalPath(),
+      settings: settingsPath(),
+      bench: benchPath(),
+      model: model.path,
+      whisperCli: model.whisperCli,
+      logs: log.transports.file.getFile().path
+    },
+    missingPermissions: (snapshot?.permissions ?? [])
+      .filter((permission) => !permission.granted)
+      .map((permission) => permission.key)
+  }
+})
+
+/** macOS login items. Failing to set one is a warning, never fatal. */
+function applyLaunchAtLogin(next: Settings): void {
+  try {
+    if (app.getLoginItemSettings().openAtLogin !== next.launchAtLogin) {
+      app.setLoginItemSettings({ openAtLogin: next.launchAtLogin })
+    }
+  } catch (err) {
+    log.warn('could not update the login item', err)
+  }
+}
 
 ipcMain.on(IPC.captureChunk, (_event, data: Float32Array | ArrayBufferView) => {
   const pcm =

@@ -197,3 +197,117 @@ body.window {
   font-size: 12px;
   color: var(--ink-2);
 }
+
+/* ── Settings rows ───────────────────────────────────────────────────────── */
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 7px 0;
+}
+.set-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--fs-body);
+  color: var(--ink);
+}
+.set-hint {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  word-break: break-all;
+}
+.set-control { flex: none; }
+
+select {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--paper-bright);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-chip);
+  padding: 4px 8px;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.warn-line {
+  font-size: 12.5px;
+  color: var(--warn);
+  background: var(--warn-wash);
+  border: 1px solid var(--warn-edge);
+  border-radius: var(--r-inner);
+  padding: 8px 11px;
+  max-width: 62ch;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 5px 14px;
+  font-size: 12px;
+  color: var(--ink-3);
+  align-items: baseline;
+}
+
+/* ── Permission rows (§6.4 step shape, §6.8 page 3) ──────────────────────── */
+.perm-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.perm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 0;
+}
+.perm-row + .perm-row { border-top: 1px solid var(--hairline-soft); }
+.perm-row .st {
+  font-family: var(--mono);
+  font-size: var(--fs-diff);
+  min-width: 16px;
+  text-align: center;
+  color: var(--ink-3);
+  padding-top: 2px;
+}
+.perm-row.is-done .st { color: var(--mem); }
+.perm-text { flex: 1; min-width: 0; }
+.perm-name {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--ink);
+}
+.perm-reason {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  max-width: 54ch;
+}
+.perm-granted {
+  flex: none;
+  font-size: var(--fs-chip);
+  font-weight: 600;
+  color: var(--mem);
+  padding-top: 3px;
+}
+
+/* Visually hidden, still announced — the ✓ is decoration, the word is not. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
