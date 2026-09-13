@@ -1,0 +1,952 @@
+<title>Mull Onboarding</title>
+<style>
+/* ============================================================================
+   MULL — Onboarding prototype (Studio Paper)
+   Tokens copied verbatim from src/renderer/tokens.css (D3, frozen 2026-09-13).
+   Interactive board: step nav, simulated permissions, model download, and a
+   hold-to-speak dictation demo, so the flow can be felt before M1 ships.
+   ========================================================================== */
+:root {
+  color-scheme: light;
+  --paper:          #faf7ef;
+  --paper-bright:   #fffdf6;
+  --paper-recessed: #f1ecdf;
+  --ink:            #2b2418;
+  --ink-2:          #5b523f;
+  --ink-3:          #766c55;
+  --hairline:       rgba(43, 36, 24, 0.18);
+  --hairline-soft:  rgba(43, 36, 24, 0.10);
+  --selection:      rgba(39, 79, 142, 0.20);
+  --del:       #b23a2e;
+  --del-wash:  rgba(178, 58, 46, 0.10);
+  --del-line:  rgba(178, 58, 46, 0.72);
+  --ins:       #274f8e;
+  --ins-wash:  rgba(39, 79, 142, 0.09);
+  --ins-line:  rgba(39, 79, 142, 0.42);
+  --warn:      #9a6410;
+  --warn-wash: rgba(154, 100, 16, 0.11);
+  --warn-edge: rgba(154, 100, 16, 0.42);
+  --mem:       #4f6b33;
+  --mem-wash:  rgba(79, 107, 51, 0.10);
+  --mem-edge:  rgba(79, 107, 51, 0.42);
+  --on-ink: #fffdf6;
+  --on-ins: #fffdf6;
+  --ins-hover: #1f4177;
+  --serif: ui-serif, "New York", "Iowan Old Style", "Palatino", Charter, Georgia, serif;
+  --sans:  -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --mono:  ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --fs-transcript: 13px;
+  --fs-diff:       12px;
+  --fs-chip:       11px;
+  --fs-label:      11px;
+  --fs-kbd:        11px;
+  --fs-body:       13.5px;
+  --fs-title:      21px;
+  --track-label:   0.10em;
+  --lh-transcript: 1.45;
+  --lh-diff:       1.7;
+  --lh-body:       1.55;
+  --r-panel: 10px;
+  --r-inner: 7px;
+  --r-chip:  5px;
+  --r-kbd:   3px;
+  --hud-w:   480px;
+  --shadow-hud: 0 0 0 0.5px rgba(43, 36, 24, 0.38),
+                0 18px 44px rgba(35, 26, 12, 0.32),
+                0 4px 12px rgba(35, 26, 12, 0.16);
+  --shadow-row: 0 2px 8px rgba(35, 26, 12, 0.07);
+  --shadow-window: 0 0 0 0.5px rgba(30, 24, 14, 0.22),
+                   0 16px 40px rgba(35, 26, 12, 0.24);
+  --t-fast:  140ms;
+  --t-med:   220ms;
+  --ease-out: cubic-bezier(0.22, 0.7, 0.3, 1);
+  --pulse-period: 1.6s;
+  --wave-period:  0.95s;
+  --desk: #eae4d4;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --paper:          #211c13;
+    --paper-bright:   #2a2418;
+    --paper-recessed: #1a1610;
+    --ink:            #ece5d3;
+    --ink-2:          #bfb397;
+    --ink-3:          #96896c;
+    --hairline:       rgba(236, 229, 211, 0.20);
+    --hairline-soft:  rgba(236, 229, 211, 0.11);
+    --selection:      rgba(143, 176, 232, 0.28);
+    --del:       #e0796b;
+    --del-wash:  rgba(224, 121, 107, 0.13);
+    --del-line:  rgba(224, 121, 107, 0.72);
+    --ins:       #8fb0e8;
+    --ins-wash:  rgba(143, 176, 232, 0.12);
+    --ins-line:  rgba(143, 176, 232, 0.48);
+    --warn:      #d2a04f;
+    --warn-wash: rgba(210, 160, 79, 0.13);
+    --warn-edge: rgba(210, 160, 79, 0.45);
+    --mem:       #a3bf7d;
+    --mem-wash:  rgba(163, 191, 125, 0.12);
+    --mem-edge:  rgba(163, 191, 125, 0.45);
+    --on-ink: #211c13;
+    --on-ins: #211c13;
+    --ins-hover: #a3bfef;
+    --shadow-hud: 0 0 0 0.5px rgba(0, 0, 0, 0.65),
+                  0 18px 48px rgba(0, 0, 0, 0.55),
+                  0 4px 14px rgba(0, 0, 0, 0.35);
+    --shadow-row: 0 2px 8px rgba(0, 0, 0, 0.30);
+    --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.55),
+                     0 16px 40px rgba(0, 0, 0, 0.50);
+    --desk: #17130c;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --paper:          #211c13;
+  --paper-bright:   #2a2418;
+  --paper-recessed: #1a1610;
+  --ink:            #ece5d3;
+  --ink-2:          #bfb397;
+  --ink-3:          #96896c;
+  --hairline:       rgba(236, 229, 211, 0.20);
+  --hairline-soft:  rgba(236, 229, 211, 0.11);
+  --selection:      rgba(143, 176, 232, 0.28);
+  --del:       #e0796b;
+  --del-wash:  rgba(224, 121, 107, 0.13);
+  --del-line:  rgba(224, 121, 107, 0.72);
+  --ins:       #8fb0e8;
+  --ins-wash:  rgba(143, 176, 232, 0.12);
+  --ins-line:  rgba(143, 176, 232, 0.48);
+  --warn:      #d2a04f;
+  --warn-wash: rgba(210, 160, 79, 0.13);
+  --warn-edge: rgba(210, 160, 79, 0.45);
+  --mem:       #a3bf7d;
+  --mem-wash:  rgba(163, 191, 125, 0.12);
+  --mem-edge:  rgba(163, 191, 125, 0.45);
+  --on-ink: #211c13;
+  --on-ins: #211c13;
+  --ins-hover: #a3bfef;
+  --shadow-hud: 0 0 0 0.5px rgba(0, 0, 0, 0.65),
+                0 18px 48px rgba(0, 0, 0, 0.55),
+                0 4px 14px rgba(0, 0, 0, 0.35);
+  --shadow-row: 0 2px 8px rgba(0, 0, 0, 0.30);
+  --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.55),
+                   0 16px 40px rgba(0, 0, 0, 0.50);
+  --desk: #17130c;
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--desk);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+::selection { background: var(--selection); color: var(--ink); }
+button { font: inherit; cursor: pointer; color: inherit; }
+button:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--ins);
+  outline-offset: 2px;
+}
+@keyframes rise-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes ping { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ink) 28%, transparent); }
+                  100% { box-shadow: 0 0 0 9px transparent; } }
+@keyframes wave { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(var(--amp, 3)); } }
+@keyframes blink { 0%,49% { opacity: 1; } 50%,100% { opacity: 0; } }
+
+/* ── Board chrome ────────────────────────────────────────────────────────── */
+.board {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 34px 24px 72px;
+  display: grid;
+  grid-template-columns: minmax(0, 660px) minmax(220px, 1fr);
+  gap: 34px;
+  align-items: start;
+  justify-content: center;
+}
+.board-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+}
+.board-head h1 { font: 600 var(--fs-title)/1.2 var(--serif); margin: 0; letter-spacing: -0.01em; }
+.board-head .meta { font: 400 12px var(--sans); color: var(--ink-3); }
+.theme-toggle {
+  margin-left: auto;
+  font: 600 var(--fs-chip) var(--sans);
+  color: var(--ink-2);
+  background: var(--paper-bright);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-chip);
+  padding: 3px 10px;
+}
+.theme-toggle:hover { background: var(--paper); }
+
+/* ── The onboarding window ───────────────────────────────────────────────── */
+.window {
+  background: var(--paper);
+  border-radius: var(--r-panel);
+  box-shadow: var(--shadow-window);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 560px;
+}
+.titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.traffic { display: flex; gap: 6px; }
+.traffic i { width: 10px; height: 10px; border-radius: 50%; background: var(--paper-recessed); border: 1px solid var(--hairline-soft); }
+.titlebar .app-name { font: 600 12px var(--sans); color: var(--ink-3); margin: 0 auto; transform: translateX(-21px); }
+
+.page {
+  flex: 1;
+  padding: 30px 40px 26px;
+  display: none;
+  animation: rise-in var(--t-med) var(--ease-out);
+}
+.page.active { display: block; }
+.step-no {
+  font: 400 15px/1 var(--serif);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 10px;
+}
+.page h2 {
+  font: 600 var(--fs-title)/1.25 var(--serif);
+  letter-spacing: -0.01em;
+  margin: 0 0 10px;
+  text-wrap: balance;
+}
+.page .lede { color: var(--ink-2); margin: 0 0 20px; max-width: 46ch; }
+.page .lede strong { color: var(--ink); font-weight: 600; }
+
+/* labels, kbd, chips, buttons — per DESIGN.md §6 */
+.label {
+  font: 700 var(--fs-label) var(--sans);
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+kbd {
+  font: 500 var(--fs-kbd) var(--mono);
+  background: var(--paper-recessed);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-kbd);
+  padding: 0.5px 4px;
+  color: var(--ink-2);
+}
+.btn {
+  border: 1px solid var(--hairline);
+  background: transparent;
+  border-radius: var(--r-chip);
+  font: 650 12px var(--sans);
+  padding: 5px 13px;
+  color: var(--ink);
+  transition: background var(--t-fast) var(--ease-out);
+}
+.btn:hover { background: var(--paper-bright); }
+.btn:active { transform: translateY(1px); }
+.btn .hint { font: 500 11px var(--mono); opacity: 0.75; margin-left: 6px; }
+.btn-primary { background: var(--ins); border-color: var(--ins); color: var(--on-ins); }
+.btn-primary:hover { background: var(--ins-hover); border-color: var(--ins-hover); }
+.btn[disabled] { cursor: default; opacity: 0.55; }
+.btn[disabled]:hover { background: transparent; }
+.btn-primary[disabled]:hover { background: var(--ins); }
+
+/* tenets (step 1) */
+.tenets { display: flex; flex-direction: column; gap: 0; margin: 18px 0 22px; border-top: 1px solid var(--hairline-soft); }
+.tenet {
+  display: flex; align-items: baseline; gap: 12px;
+  padding: 11px 2px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.tenet .t-mark { font: 500 12px var(--mono); min-width: 16px; }
+.tenet .t-mark.m-mem { color: var(--mem); }
+.tenet .t-mark.m-ins { color: var(--ins); }
+.tenet .t-mark.m-warn { color: var(--warn); }
+.tenet .t-body { color: var(--ink-2); font-size: 13px; }
+.tenet .t-body strong { color: var(--ink); font-weight: 600; }
+
+/* ── HUD (per DESIGN.md §6.1) ───────────────────────────────────────────── */
+.hud {
+  width: min(var(--hud-w), 100%);
+  background: var(--paper);
+  border-radius: var(--r-panel);
+  box-shadow: var(--shadow-hud);
+  padding: 13px 15px 12px;
+  margin: 0 auto;
+}
+.hud-top { display: flex; align-items: center; gap: 10px; height: 24px; }
+.orb {
+  width: 13px; height: 13px; border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px var(--ink-3);
+  flex: none;
+}
+.hud.is-listening .orb, .hud.is-thinking .orb, .hud.is-applied .orb {
+  background: var(--ink);
+  box-shadow: none;
+}
+.hud.is-listening .orb { animation: ping var(--pulse-period) var(--ease-out) infinite; }
+.wave { display: flex; align-items: center; gap: 2.5px; height: 16px; flex: none; }
+.wave i { width: 2px; height: 4px; border-radius: 1px; background: var(--ink-3); transform-origin: center; }
+.hud.is-listening .wave i { background: var(--ink-2); animation: wave var(--wave-period) ease-in-out infinite; }
+.hud.is-listening .wave i:nth-child(1) { --amp: 2.2; animation-delay: 0ms; }
+.hud.is-listening .wave i:nth-child(2) { --amp: 3.6; animation-delay: 120ms; }
+.hud.is-listening .wave i:nth-child(3) { --amp: 2.8; animation-delay: 240ms; }
+.hud.is-listening .wave i:nth-child(4) { --amp: 4.0; animation-delay: 90ms; }
+.hud.is-listening .wave i:nth-child(5) { --amp: 2.4; animation-delay: 300ms; }
+.hud-transcript {
+  flex: 1;
+  font: 400 var(--fs-transcript)/var(--lh-transcript) var(--serif);
+  color: var(--ink);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.hud-transcript .ghost { font-style: italic; color: var(--ink-3); }
+.caret {
+  display: inline-block; width: 1.5px; height: 13px;
+  background: var(--ins); vertical-align: -2px; margin-left: 1px;
+  animation: blink 1s steps(1) infinite;
+}
+.hud-state { font: 700 var(--fs-label) var(--sans); letter-spacing: var(--track-label); color: var(--ink-3); flex: none; }
+.hud.is-listening .hud-state { color: var(--ink); }
+.hud-ghostrow {
+  display: none;
+  margin-top: 10px; padding-top: 9px;
+  border-top: 1px solid var(--hairline-soft);
+  font: 400 11px var(--sans); color: var(--ink-3);
+  align-items: center; gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.hud.has-ghost .hud-ghostrow { display: flex; animation: rise-in var(--t-med) var(--ease-out); }
+.hud-ghostrow .spacer { flex: 1; }
+
+/* chips */
+.chips { display: flex; gap: 7px; margin-top: 10px; }
+.chip {
+  font: 600 var(--fs-chip) var(--sans);
+  border-radius: var(--r-chip);
+  border: 1px solid var(--hairline);
+  background: var(--paper-bright);
+  color: var(--ink);
+  padding: 3px 9px;
+  animation: rise-in var(--t-fast) var(--ease-out);
+}
+.chip-intent { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.chip-warn { background: var(--warn-wash); border-color: var(--warn-edge); color: var(--warn); }
+.chip-mem { background: var(--mem-wash); border-color: var(--mem-edge); color: var(--mem); }
+
+/* ── Diff card (§6.3) ───────────────────────────────────────────────────── */
+.card {
+  background: var(--paper-bright);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-inner);
+  padding: 10px 12px 11px;
+  margin-top: 11px;
+  animation: rise-in var(--t-med) var(--ease-out);
+}
+.card-title { display: flex; justify-content: space-between; margin-bottom: 7px; }
+.card-body {
+  font: 400 var(--fs-diff)/var(--lh-diff) var(--mono);
+  color: var(--ink-2);
+}
+.card-body del {
+  color: var(--del); background: var(--del-wash);
+  text-decoration: line-through;
+  text-decoration-color: var(--del-line);
+  text-decoration-thickness: 1.5px;
+  border-radius: 2px; padding: 0 1px;
+}
+.card-body ins {
+  color: var(--ins); background: var(--ins-wash);
+  font-weight: 600; text-decoration: none;
+  border-bottom: 1px solid var(--ins-line);
+  padding: 0 1px;
+}
+.card-actions { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.undo-promise { margin-left: auto; font: 400 11px var(--sans); color: var(--ink-3); }
+
+/* plan-style step rows (permissions & model — §6.4 state cells) */
+.rows { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 18px; }
+.prow {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--paper-bright);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-inner);
+  padding: 11px 14px;
+}
+.prow .p-state {
+  font: 500 13px var(--mono);
+  min-width: 18px; text-align: center;
+  color: var(--ink-3); flex: none;
+}
+.prow.s-running .p-state { color: var(--ins); }
+.prow.s-done .p-state { color: var(--mem); }
+.prow.s-failed .p-state { color: var(--del); }
+.prow .p-text { flex: 1; min-width: 0; }
+.prow .p-name { font: 600 13px var(--sans); color: var(--ink); }
+.prow.s-done .p-name { color: var(--ink-2); }
+.prow .p-why { font: 400 12px var(--sans); color: var(--ink-3); margin-top: 1px; }
+.prow .btn { flex: none; }
+
+.foot-note {
+  display: flex; align-items: baseline; gap: 8px;
+  font: 400 12px var(--sans); color: var(--ink-3);
+  border-top: 1px solid var(--hairline-soft);
+  padding-top: 12px;
+  max-width: 52ch;
+}
+
+/* model download */
+.dl-progress { margin: 6px 0 2px; }
+.dl-track {
+  height: 4px; border-radius: 2px;
+  background: var(--paper-recessed);
+  overflow: hidden;
+}
+.dl-fill {
+  height: 100%; width: 0%;
+  background: var(--ins);
+  border-radius: 2px;
+  transition: width 120ms linear;
+}
+.dl-meta {
+  display: flex; justify-content: space-between;
+  font: 400 11px var(--mono); color: var(--ink-3);
+  margin-top: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* try-it stage */
+.stage {
+  background: var(--paper-recessed);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-inner);
+  padding: 18px 18px 16px;
+  margin: 4px 0 14px;
+}
+.fake-note {
+  background: var(--paper-bright);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-inner);
+  padding: 13px 15px;
+  min-height: 88px;
+  font: 400 14px/1.55 var(--serif);
+  color: var(--ink);
+  box-shadow: var(--shadow-row);
+  margin-bottom: 16px;
+}
+.fake-note .n-title { font: 700 10px var(--sans); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-3); margin-bottom: 7px; }
+.note-caret {
+  display: inline-block; width: 1.5px; height: 15px;
+  background: var(--ink); vertical-align: -2px;
+  animation: blink 1s steps(1) infinite;
+}
+.hold-row { display: flex; align-items: center; gap: 12px; margin-top: 14px; }
+.hold-hint { font: 400 12px var(--sans); color: var(--ink-3); }
+.btn-hold { user-select: none; -webkit-user-select: none; touch-action: none; }
+.btn-hold.holding { background: var(--ins); border-color: var(--ins); color: var(--on-ins); }
+
+/* footer nav */
+.window-foot {
+  display: flex; align-items: center; gap: 10px;
+  padding: 14px 40px 16px;
+  border-top: 1px solid var(--hairline-soft);
+}
+.progress-ticks { display: flex; gap: 5px; margin-right: 4px; }
+.progress-ticks i {
+  width: 14px; height: 3px; border-radius: 2px;
+  background: var(--paper-recessed);
+  border: 0.5px solid var(--hairline-soft);
+}
+.progress-ticks i.done { background: var(--ins); border-color: var(--ins); }
+.step-count { font: 400 11px var(--sans); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.window-foot .grow { flex: 1; }
+
+/* annotations rail */
+.rail { display: flex; flex-direction: column; gap: 14px; padding-top: 6px; }
+.rail h3 { font: 700 var(--fs-label) var(--sans); letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-3); margin: 0 0 2px; }
+.note-card {
+  background: var(--paper);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-inner);
+  padding: 12px 14px;
+  font: 400 12px/1.6 var(--sans);
+  color: var(--ink-2);
+  box-shadow: var(--shadow-row);
+}
+.note-card b { color: var(--ink); font-weight: 600; }
+.note-card .n-step { font: 500 11px var(--mono); color: var(--ink-3); display: block; margin-bottom: 4px; }
+
+@media (max-width: 1000px) {
+  .board { grid-template-columns: minmax(0, 660px); }
+  .rail { display: none; }
+}
+@media (max-width: 620px) {
+  .page { padding: 24px 22px 20px; }
+  .window-foot { padding: 12px 22px 14px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .hud.is-listening .wave i { transform: scaleY(2); }
+}
+</style>
+
+<div class="board">
+  <div class="board-head">
+    <h1>Mull — Onboarding</h1>
+    <span class="meta">Studio Paper · five pages · prototype, everything simulated</span>
+    <button class="theme-toggle" id="themeToggle" type="button">Theme: system</button>
+  </div>
+
+  <!-- ══════════════ The onboarding window ══════════════ -->
+  <div class="window" aria-label="Mull onboarding window prototype">
+    <div class="titlebar">
+      <div class="traffic" aria-hidden="true"><i></i><i></i><i></i></div>
+      <span class="app-name">Mull</span>
+    </div>
+
+    <!-- ── Page 1 · What Mull is ─────────────────────────────────────────── -->
+    <section class="page active" data-step="1">
+      <div class="step-no">1.</div>
+      <h2>A thinking layer for your&nbsp;Mac</h2>
+      <p class="lede">Hold <kbd>⌥&nbsp;Space</kbd> in any app — Mail, Notes, your editor — and speak.
+      Mull turns your words into clean text, placed exactly where your cursor is.
+      Ask for changes, and it shows every mark before anything lands.</p>
+
+      <div class="tenets">
+        <div class="tenet">
+          <span class="t-mark m-mem" aria-hidden="true">✓</span>
+          <span class="t-body"><strong>On-device.</strong> Your voice is transcribed on this Mac and discarded. Nothing is uploaded.</span>
+        </div>
+        <div class="tenet">
+          <span class="t-mark m-ins" aria-hidden="true">✎</span>
+          <span class="t-body"><strong>Nothing changes without a preview.</strong> Edits appear as editor's marks you approve — or don't.</span>
+        </div>
+        <div class="tenet">
+          <span class="t-mark m-warn" aria-hidden="true">⌥Z</span>
+          <span class="t-body"><strong>Everything is undoable.</strong> Every action lands in a journal, and <kbd>⌥&nbsp;Z</kbd> takes it back.</span>
+        </div>
+      </div>
+
+      <div class="label" style="margin-bottom: 9px;">This is Mull, waiting</div>
+      <div class="hud is-idle" aria-hidden="true">
+        <div class="hud-top">
+          <div class="orb"></div>
+          <div class="wave"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="hud-transcript"><span class="ghost">Hold ⌥ Space and speak</span></div>
+          <div class="hud-state">Idle</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Page 2 · The marks ────────────────────────────────────────────── -->
+    <section class="page" data-step="2">
+      <div class="step-no">2.</div>
+      <h2>Every change shows its&nbsp;marks</h2>
+      <p class="lede">Select text anywhere and say what you want. Mull marks it up the way an
+      editor would — <strong>red pencil</strong> for what goes, <strong>ink</strong> for what
+      replaces it. Nothing changes until you press Apply. Try it:</p>
+
+      <div class="hud is-preview" id="diffDemo">
+        <div class="hud-top">
+          <div class="orb"></div>
+          <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+          <div class="hud-transcript">“tighten this up and make it sound less apologetic”</div>
+          <div class="hud-state" id="diffState">Preview</div>
+        </div>
+        <div class="chips">
+          <span class="chip chip-intent">✎ Edit</span>
+          <span class="chip">Mail — selection</span>
+        </div>
+        <div class="card" id="diffCard">
+          <div class="card-title">
+            <span class="label">Edit preview · Mail</span>
+            <span class="label">2 changes</span>
+          </div>
+          <div class="card-body"><del>I’m so sorry to bother you again, but I was just wondering if maybe</del> <ins>Following up:</ins> you’d had a chance to look at the numbers <del>whenever you get a chance, no rush at all</del> <ins>by Friday</ins>.</div>
+          <div class="card-actions">
+            <button class="btn btn-primary" id="applyBtn" type="button">Apply<span class="hint">⏎</span></button>
+            <button class="btn" id="cancelBtn" type="button">Cancel<span class="hint">esc</span></button>
+            <span class="undo-promise"><kbd>⌥&nbsp;Z</kbd> undoes after apply</span>
+          </div>
+        </div>
+        <div class="hud-ghostrow">
+          <span>Applied · “tighten + de-apologize” · 2 changes</span>
+          <span class="spacer"></span>
+          <kbd>⌥&nbsp;Z</kbd><span>undo</span>
+        </div>
+      </div>
+      <p style="font: 400 12px var(--sans); color: var(--ink-3); margin: 12px 2px 0;">
+        <button class="btn" id="resetDiff" type="button" style="padding: 2px 9px; font-size: 11px;">Reset demo</button>
+      </p>
+    </section>
+
+    <!-- ── Page 3 · Permissions ──────────────────────────────────────────── -->
+    <section class="page" data-step="3">
+      <div class="step-no">3.</div>
+      <h2>Three permissions, each with a&nbsp;reason</h2>
+      <p class="lede">macOS will ask you to grant these. Mull asks for nothing it can’t
+      explain — and works with whatever you grant.</p>
+
+      <div class="rows" id="permRows">
+        <div class="prow" data-perm="mic">
+          <span class="p-state" aria-hidden="true">·</span>
+          <span class="p-text">
+            <span class="p-name">Microphone</span>
+            <span class="p-why" style="display:block;">To hear you. Audio becomes text on this Mac, then is discarded.</span>
+          </span>
+          <button class="btn" type="button" data-grant>Grant…</button>
+        </div>
+        <div class="prow" data-perm="ax">
+          <span class="p-state" aria-hidden="true">·</span>
+          <span class="p-text">
+            <span class="p-name">Accessibility</span>
+            <span class="p-why" style="display:block;">To place text at your cursor and read what you’ve selected.</span>
+          </span>
+          <button class="btn" type="button" data-grant>Grant…</button>
+        </div>
+        <div class="prow" data-perm="input">
+          <span class="p-state" aria-hidden="true">·</span>
+          <span class="p-text">
+            <span class="p-name">Input Monitoring</span>
+            <span class="p-why" style="display:block;">To notice <kbd>⌥&nbsp;Space</kbd> even while Mull is in the background.</span>
+          </span>
+          <button class="btn" type="button" data-grant>Grant…</button>
+        </div>
+      </div>
+
+      <div class="foot-note">
+        <span class="chip chip-warn" style="flex:none;">Secure input — paused</span>
+        <span>In password fields, macOS blocks listening tools — Mull pauses itself and says so, right in the HUD.</span>
+      </div>
+    </section>
+
+    <!-- ── Page 4 · The model ────────────────────────────────────────────── -->
+    <section class="page" data-step="4">
+      <div class="step-no">4.</div>
+      <h2>Your ears, kept&nbsp;local</h2>
+      <p class="lede">Mull listens with a speech model that runs entirely on this Mac.
+      One download, then it works everywhere — on planes, on VPNs, offline.</p>
+
+      <div class="rows">
+        <div class="prow" id="modelRow">
+          <span class="p-state" aria-hidden="true">·</span>
+          <span class="p-text">
+            <span class="p-name">Whisper — English + multilingual</span>
+            <span class="p-why" style="display:block;" id="modelWhy">≈500&nbsp;MB · saved to Application Support, removable anytime</span>
+            <span class="dl-progress" id="dlProgress" style="display:none;">
+              <span class="dl-track"><span class="dl-fill" id="dlFill"></span></span>
+              <span class="dl-meta"><span id="dlPct">0%</span><span id="dlRate">—</span></span>
+            </span>
+          </span>
+          <button class="btn btn-primary" type="button" id="dlBtn">Download</button>
+        </div>
+      </div>
+
+      <div class="foot-note">
+        <span>Because the model is local, the transcript never crosses the network — the privacy claim on page 1 is architecture, not policy.</span>
+      </div>
+    </section>
+
+    <!-- ── Page 5 · Try it ───────────────────────────────────────────────── -->
+    <section class="page" data-step="5">
+      <div class="step-no">5.</div>
+      <h2>Try it&nbsp;here</h2>
+      <p class="lede">A practice page. Hold the button below — it stands in for
+      <kbd>⌥&nbsp;Space</kbd> — and Mull will “hear” a sentence and place it at the caret.</p>
+
+      <div class="stage">
+        <div class="fake-note">
+          <div class="n-title">Notes — Q3 planning</div>
+          <span id="noteText">Follow-ups from Tuesday: </span><span id="inserted"></span><span class="note-caret" aria-hidden="true"></span>
+        </div>
+
+        <div class="hud is-idle" id="tryHud">
+          <div class="hud-top">
+            <div class="orb"></div>
+            <div class="wave" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="hud-transcript" aria-live="polite"><span class="ghost" id="tryGhost">Hold ⌥ Space and speak</span><span id="tryText"></span><span class="caret" id="tryCaret" style="display:none;"></span></div>
+            <div class="hud-state" role="status" id="tryState">Idle</div>
+          </div>
+          <div class="chips" id="tryChips" style="display:none;">
+            <span class="chip">Dictation</span>
+          </div>
+          <div class="hud-ghostrow" id="tryGhostrow">
+            <span>Applied · Dictation · Notes · just now</span>
+            <span class="spacer"></span>
+            <kbd>⌥&nbsp;Z</kbd><span>undo</span>
+          </div>
+        </div>
+
+        <div class="hold-row">
+          <button class="btn btn-hold" id="holdBtn" type="button" aria-label="Hold to simulate speaking">Hold to speak</button>
+          <span class="hold-hint" id="holdHint">Press and hold, then let go — like the real key.</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── Footer nav ────────────────────────────────────────────────────── -->
+    <div class="window-foot">
+      <div class="progress-ticks" id="ticks" aria-hidden="true"><i class="done"></i><i></i><i></i><i></i><i></i></div>
+      <span class="step-count" id="stepCount">Step 1 of 5</span>
+      <div class="grow"></div>
+      <button class="btn" id="backBtn" type="button" disabled>Back</button>
+      <button class="btn btn-primary" id="nextBtn" type="button">Continue<span class="hint">⏎</span></button>
+    </div>
+  </div>
+
+  <!-- ══════════════ Annotations rail ══════════════ -->
+  <aside class="rail">
+    <h3>Design notes</h3>
+    <div class="note-card"><span class="n-step">page 1</span>
+      <b>The HUD appears before it's explained.</b> The idle panel sits on the welcome page as an object, not a screenshot — the user meets the instrument at rest, ghost hint and all.</div>
+    <div class="note-card"><span class="n-step">page 2</span>
+      <b>The trust story is the demo.</b> Instead of describing previews, the page hands over a live diff card with the brief's canonical sample. Apply works; the undo promise is printed in the same breath (§7.2).</div>
+    <div class="note-card"><span class="n-step">page 3</span>
+      <b>Permissions use the plan-card grammar.</b> Each grant is a step row with the ·/…/✓ state cells from §6.4 — the same visual language the app will use for command plans, learned here for free. Every permission states its reason; the secure-input pause is disclosed up front.</div>
+    <div class="note-card"><span class="n-step">page 4</span>
+      <b>Privacy as architecture.</b> The model download is the proof of the on-device claim, so the page says so. Progress is mono, tabular, honest.</div>
+    <div class="note-card"><span class="n-step">page 5</span>
+      <b>Rehearsal, not tour.</b> The last page is a sandbox: hold, speak, watch the state run idle → listening → thinking → applied, see text land at a caret, see the journal ghost with ⌥ Z. The user leaves having done the core loop once.</div>
+    <div class="note-card"><span class="n-step">window</span>
+      <b>Numbered manuscript.</b> One step per serif-numbered page (§6.8), progress as quiet ink ticks. Sans = instrument voice for all labels; serif is reserved for headings and anything spoken.</div>
+  </aside>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* theme toggle: system → light → dark */
+  var themeBtn = document.getElementById('themeToggle');
+  var themes = ['system', 'light', 'dark'];
+  var ti = 0;
+  themeBtn.addEventListener('click', function () {
+    ti = (ti + 1) % 3;
+    var t = themes[ti];
+    if (t === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = t;
+    themeBtn.textContent = 'Theme: ' + t;
+  });
+
+  /* step navigation */
+  var pages = Array.prototype.slice.call(document.querySelectorAll('.page'));
+  var ticks = document.getElementById('ticks').children;
+  var stepCount = document.getElementById('stepCount');
+  var backBtn = document.getElementById('backBtn');
+  var nextBtn = document.getElementById('nextBtn');
+  var cur = 0;
+
+  function show(i) {
+    cur = Math.max(0, Math.min(pages.length - 1, i));
+    pages.forEach(function (p, j) { p.classList.toggle('active', j === cur); });
+    for (var j = 0; j < ticks.length; j++) ticks[j].classList.toggle('done', j <= cur);
+    stepCount.textContent = 'Step ' + (cur + 1) + ' of ' + pages.length;
+    backBtn.disabled = cur === 0;
+    if (cur === pages.length - 1) {
+      nextBtn.innerHTML = 'Start writing<span class="hint">⏎</span>';
+    } else {
+      nextBtn.innerHTML = 'Continue<span class="hint">⏎</span>';
+    }
+  }
+  backBtn.addEventListener('click', function () { show(cur - 1); });
+  nextBtn.addEventListener('click', function () {
+    if (cur === pages.length - 1) {
+      nextBtn.innerHTML = 'You’re set — this window closes';
+      nextBtn.disabled = true;
+      setTimeout(function () {
+        nextBtn.disabled = false;
+        show(cur);
+      }, 1800);
+      return;
+    }
+    show(cur + 1);
+  });
+  show(0);
+
+  /* ── page 2: diff demo ── */
+  var diffHud = document.getElementById('diffDemo');
+  var diffCard = document.getElementById('diffCard');
+  var diffChips = diffHud.querySelector('.chips');
+  var diffState = document.getElementById('diffState');
+  var applyBtn = document.getElementById('applyBtn');
+  var cancelBtn = document.getElementById('cancelBtn');
+  var resetDiff = document.getElementById('resetDiff');
+
+  function settleDiff(applied) {
+    diffCard.style.display = 'none';
+    diffChips.style.display = 'none';
+    diffState.textContent = applied ? 'Applied' : 'Idle';
+    diffHud.querySelector('.hud-transcript').innerHTML =
+      '<span class="ghost">Hold ⌥ Space and speak</span>';
+    if (applied) {
+      diffHud.classList.add('has-ghost');
+      setTimeout(function () { diffState.textContent = 'Idle'; }, 900);
+    }
+  }
+  applyBtn.addEventListener('click', function () { settleDiff(true); });
+  cancelBtn.addEventListener('click', function () { settleDiff(false); });
+  resetDiff.addEventListener('click', function () {
+    diffCard.style.display = '';
+    diffChips.style.display = '';
+    diffState.textContent = 'Preview';
+    diffHud.classList.remove('has-ghost');
+    diffHud.querySelector('.hud-transcript').textContent =
+      '“tighten this up and make it sound less apologetic”';
+  });
+
+  /* ── page 3: permissions ── */
+  document.querySelectorAll('#permRows [data-grant]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var row = btn.closest('.prow');
+      var cell = row.querySelector('.p-state');
+      row.classList.add('s-running');
+      cell.textContent = '…';
+      btn.disabled = true;
+      btn.textContent = 'Waiting for macOS…';
+      setTimeout(function () {
+        row.classList.remove('s-running');
+        row.classList.add('s-done');
+        cell.textContent = '✓';
+        btn.textContent = 'Granted';
+      }, 850);
+    });
+  });
+
+  /* ── page 4: model download ── */
+  var dlBtn = document.getElementById('dlBtn');
+  var dlProgress = document.getElementById('dlProgress');
+  var dlFill = document.getElementById('dlFill');
+  var dlPct = document.getElementById('dlPct');
+  var dlRate = document.getElementById('dlRate');
+  var modelWhy = document.getElementById('modelWhy');
+  var modelRow = document.getElementById('modelRow');
+  var dlTimer = null;
+
+  dlBtn.addEventListener('click', function () {
+    if (dlTimer) return;
+    modelWhy.style.display = 'none';
+    dlProgress.style.display = 'block';
+    modelRow.classList.add('s-running');
+    modelRow.querySelector('.p-state').textContent = '…';
+    dlBtn.disabled = true;
+    dlBtn.textContent = 'Downloading…';
+    var pct = 0;
+    dlTimer = setInterval(function () {
+      pct = Math.min(100, pct + 2 + Math.floor(pct / 18));
+      dlFill.style.width = pct + '%';
+      dlPct.textContent = pct + '%';
+      dlRate.textContent = pct < 100 ? (34 + (pct % 7)) + ' MB/s' : 'verifying…';
+      if (pct >= 100) {
+        clearInterval(dlTimer);
+        setTimeout(function () {
+          modelRow.classList.remove('s-running');
+          modelRow.classList.add('s-done');
+          modelRow.querySelector('.p-state').textContent = '✓';
+          dlProgress.style.display = 'none';
+          modelWhy.style.display = 'block';
+          modelWhy.textContent = 'Ready · 500 MB on disk · remove anytime in Settings';
+          dlBtn.textContent = 'Downloaded';
+        }, 700);
+      }
+    }, 55);
+  });
+
+  /* ── page 5: hold-to-speak rehearsal ── */
+  var tryHud = document.getElementById('tryHud');
+  var tryGhost = document.getElementById('tryGhost');
+  var tryText = document.getElementById('tryText');
+  var tryCaret = document.getElementById('tryCaret');
+  var tryState = document.getElementById('tryState');
+  var tryChips = document.getElementById('tryChips');
+  var inserted = document.getElementById('inserted');
+  var holdBtn = document.getElementById('holdBtn');
+  var holdHint = document.getElementById('holdHint');
+
+  var SENTENCE = 'Send the revised deck to Priya before Friday, and flag the churn numbers for the sync.';
+  var typeTimer = null;
+  var holding = false;
+  var pos = 0;
+
+  function startHold() {
+    if (holding) return;
+    holding = true;
+    pos = 0;
+    holdBtn.classList.add('holding');
+    tryHud.className = 'hud is-listening';
+    tryGhost.style.display = 'none';
+    tryText.textContent = '';
+    tryCaret.style.display = 'inline-block';
+    tryState.textContent = 'Listening';
+    tryChips.style.display = 'flex';
+    inserted.textContent = '';
+    typeTimer = setInterval(function () {
+      if (pos < SENTENCE.length) {
+        pos += 1;
+        tryText.textContent = SENTENCE.slice(0, pos);
+      }
+    }, 42);
+  }
+
+  function endHold() {
+    if (!holding) return;
+    holding = false;
+    holdBtn.classList.remove('holding');
+    clearInterval(typeTimer);
+    var heard = SENTENCE.slice(0, pos).replace(/\s+\S*$/, pos >= SENTENCE.length ? '' : '');
+    if (pos >= SENTENCE.length) heard = SENTENCE;
+    if (!heard.trim()) {
+      tryHud.className = 'hud is-idle';
+      tryGhost.style.display = '';
+      tryText.textContent = '';
+      tryCaret.style.display = 'none';
+      tryState.textContent = 'Idle';
+      tryChips.style.display = 'none';
+      holdHint.textContent = 'Hold a little longer — Mull inserts on release.';
+      return;
+    }
+    tryHud.className = 'hud is-thinking';
+    tryState.textContent = 'Thinking';
+    tryCaret.style.display = 'none';
+    setTimeout(function () {
+      inserted.textContent = heard;
+      tryHud.className = 'hud is-applied has-ghost';
+      tryState.textContent = 'Applied';
+      tryText.textContent = '';
+      tryChips.style.display = 'none';
+      holdHint.textContent = 'That’s the whole loop. ⌥ Z would take it back.';
+      setTimeout(function () {
+        tryHud.className = 'hud is-idle has-ghost';
+        tryGhost.style.display = '';
+        tryState.textContent = 'Idle';
+      }, 950);
+    }, 520);
+  }
+
+  holdBtn.addEventListener('pointerdown', function (e) { e.preventDefault(); startHold(); });
+  window.addEventListener('pointerup', endHold);
+  window.addEventListener('pointercancel', endHold);
+  holdBtn.addEventListener('keydown', function (e) {
+    if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); startHold(); }
+  });
+  holdBtn.addEventListener('keyup', function (e) {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); endHold(); }
+  });
+})();
+</script>
