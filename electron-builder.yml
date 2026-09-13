@@ -1,0 +1,13 @@
+# electron-builder config STUB — real packaging config lands in M6
+# (hardened runtime, entitlements, notarization, `binaries:` for the signed
+# Swift sidecar, DMG + electron-updater). Kept minimal so `electron-builder`
+# has a valid target once needed; not exercised in M1.
+appId: com.mull.app
+productName: Mull
+directories:
+  output: release
+files:
+  - out/**
+mac:
+  category: public.app-category.productivity
+  target: dmg

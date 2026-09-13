@@ -1,9 +1,17 @@
+# deps / build output
 node_modules/
-dist/
 out/
-.DS_Store
+dist/
+release/
+
+# typescript incremental state
+*.tsbuildinfo
+
+# logs & OS noise
 *.log
+npm-debug.log*
+.DS_Store
+
+# local env
 .env
-bench.jsonl
-.build/
-DerivedData/
+.env.local
