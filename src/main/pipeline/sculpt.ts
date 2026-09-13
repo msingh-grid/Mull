@@ -11,6 +11,7 @@ import { sendChord, type SendChord } from '../services/send-table'
 import { describeSend, Sender, type SendOutcome } from '../services/sender'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
+import { kb, Trace } from '../trace'
 import { summarise } from './cleanup'
 import { diffText } from './diff'
 import { describeTargetCheck, stillMatches, type EditTarget } from './selection'
@@ -89,6 +90,11 @@ export interface SculptDeps {
    * simply cannot explain itself, which is what every row did before M5a.
    */
   captures?: CaptureStore
+  /**
+   * The utterance's trace, so the engine's cost is logged beside the
+   * classification that preceded it rather than in a story of its own.
+   */
+  trace?: () => Trace
   bench?: Bench
   onJournalChanged?: () => void
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
@@ -219,8 +225,25 @@ export class SculptLane {
     // Started before the card is opened so the first token can land in it, but
     // never awaited here — the card must be on screen (and escapable) while
     // the engine is still writing.
+    const trace = this.deps.trace?.()
+    trace?.step(request.target.kind === 'draft' ? 'compose.ask' : 'edit.ask', {
+      engine: this.deps.engine.name,
+      model: this.deps.engine.model,
+      instruction: request.instruction,
+      before: before.length,
+      screen: request.context?.chars ?? 0,
+      image: kb(request.context?.image?.bytes),
+      commit: commit?.hint
+    })
+
     const onPartial = (partial: string): void => {
-      if (session.firstTokenMs === null) session.firstTokenMs = this.now() - session.startedAt
+      if (session.firstTokenMs === null) {
+        session.firstTokenMs = this.now() - session.startedAt
+        // The number that decides whether the card feels alive or hung. Worth
+        // its own line, because it is the one the user perceives and it is
+        // nowhere near the total.
+        trace?.step('engine.firstToken', { ms: session.firstTokenMs })
+      }
       const { segments, changes } = diffText(before, partial)
       this.deps.hud.updateCard({ kind: 'diff', app: cardApp, segments, changes, commit })
     }
@@ -255,12 +278,14 @@ export class SculptLane {
         // handler awaits this promise too, and an unhandled rejection from a
         // keypress nobody is awaiting would take the process down.
         session.failure = err instanceof Error ? err.message : String(err)
+        trace?.fail('engine.failed', { ms: this.now() - session.startedAt }, err)
         this.log('error', 'sculpt: the engine failed', err)
         return before
       })
 
     this.deps.hud.openCard({ kind: 'diff', app: cardApp, segments: [], changes: 0, commit }, (action) => {
       session.answered = true
+      trace?.step('card.action', { action, whileStreaming: true })
       void this.answer(action, request, stream, session)
     })
 
@@ -450,6 +475,11 @@ export class SculptLane {
     session: Session
   ): Promise<void> {
     const after = await stream
+    this.deps.trace?.()?.step('engine.done', {
+      after: after.length,
+      changes: diffText(request.target.text, after).changes,
+      ms: this.now() - session.startedAt
+    })
     if (session.failure) {
       this.fail(request, session, `The engine couldn’t finish that: ${session.failure}`)
       return

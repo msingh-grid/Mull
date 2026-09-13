@@ -5,6 +5,7 @@ import type { SidecarApi, UiTarget } from '@shared/sidecar-api'
 import type { Engine } from '../engine/types'
 import { describeStep } from '../engine/prompts'
 import { ActionExecutor, type Scan } from './actions'
+import { Trace } from '../trace'
 
 /**
  * Going to look somewhere else, and coming back.
@@ -72,6 +73,13 @@ export interface NavigateDeps {
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   sleep?: (ms: number) => Promise<void>
   maxSteps?: number
+  /**
+   * The utterance's trace. Forked when the plan runs, because a plan outlives
+   * its utterance — the user reads the card and presses Run whenever they like,
+   * and measuring the first press from the key-down would produce a column of
+   * numbers about how long somebody spent deciding.
+   */
+  trace?: () => Trace
 }
 
 export class NavigateLane {
@@ -95,6 +103,13 @@ export class NavigateLane {
   async propose(request: NavigateRequest): Promise<void> {
     const origin = await this.where()
     this.stopped = false
+    const parent = this.deps.trace?.() ?? new Trace({ log: this.deps.log })
+    parent.step('plan.propose', {
+      goal: request.goal,
+      app: origin.app?.name,
+      window: origin.windowTitle,
+      limit: this.maxSteps
+    })
 
     const card = (patch: Partial<PlanCard> = {}): PlanCard => ({
       kind: 'plan',
@@ -113,12 +128,15 @@ export class NavigateLane {
     this.deps.hud.openCard(card(), (action) => {
       if (action === 'cancel') {
         this.stopped = true
+        parent.step('plan.cancelled', { beforeRunning: true })
         return
       }
       if (action !== 'apply') return
       // Run. From here the card belongs to the loop, and Escape means stop.
-      void this.walk(request, origin, card).catch((err) => {
-        this.deps.log?.('error', 'navigate: the plan threw', err)
+      const trace = parent.fork()
+      trace.step('plan.run', { goal: request.goal })
+      void this.walk(request, origin, card, trace).catch((err) => {
+        trace.fail('plan.threw', {}, err)
         this.deps.hud.closeCard()
       })
     })
@@ -129,7 +147,8 @@ export class NavigateLane {
   private async walk(
     request: NavigateRequest,
     origin: { app: { bundleId: string; name: string } | null; windowTitle: string | null },
-    card: (patch?: Partial<PlanCard>) => PlanCard
+    card: (patch?: Partial<PlanCard>) => PlanCard,
+    trace: Trace
   ): Promise<void> {
     const steps: PlanStep[] = []
     const history: NavAttempt[] = []
@@ -143,13 +162,23 @@ export class NavigateLane {
     for (let taken = 0; taken < this.maxSteps; taken += 1) {
       if (this.stopped) {
         note = 'stopped'
+        trace.step('plan.stopped', { afterSteps: taken })
         break
       }
 
+      const scanMs = trace.mark()
       scan = await this.scan()
+      trace.step('scan', {
+        step: taken + 1,
+        targets: scan.targets.length,
+        press: scan.targets.filter((t) => t.kind === 'press').length,
+        type: scan.targets.filter((t) => t.kind === 'type').length,
+        ms: scanMs()
+      })
       const context =
         taken === 0 && request.context ? request.context : await this.read(request)
 
+      const askMs = trace.mark()
       let step: NavStep
       try {
         step = await this.deps.engine.navigate({
@@ -163,10 +192,18 @@ export class NavigateLane {
       } catch (err) {
         // A step that did not parse, or an engine that refused. Either way the
         // plan ends here rather than improvising in someone else's window.
+        trace.fail('step.unusable', { ms: askMs() }, err)
         this.deps.log?.('warn', 'navigate: no usable step', err)
         note = engineNote(err)
         break
       }
+
+      trace.step('step.chosen', {
+        n: taken + 1,
+        what: describeStep(step),
+        askMs: askMs(),
+        screen: context?.chars ?? 0
+      })
 
       if (step.verb === 'done') {
         note = step.because
@@ -180,6 +217,12 @@ export class NavigateLane {
       const result = await this.deps.executor.perform(step, scan, {
         app: request.app,
         goal: request.goal
+      })
+      trace[result.ok ? 'step' : 'fail'](result.ok ? 'step.done' : 'step.refused', {
+        n: taken + 1,
+        what: describeStep(step),
+        detail: result.detail,
+        refusedBy: result.refusedBy
       })
       const shown = steps.find((candidate) => candidate.id === id)
       if (shown) {
@@ -201,6 +244,7 @@ export class NavigateLane {
     // leaving someone's Slack on a stranger's DM is rude in a way no amount of
     // correctness elsewhere makes up for.
     const back = await this.deps.executor.restore(origin, await this.scan())
+    trace.step('plan.restore', { ok: back.ok, detail: back.detail, note })
     this.deps.hud.updateCard(
       card({ steps: [...steps], running: false, note: `${note} · ${back.detail}` })
     )

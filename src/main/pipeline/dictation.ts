@@ -29,6 +29,7 @@ import type { HotkeyIntent } from '../services/hotkey'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
 import type { JournalDraft, JournalEntry } from '@shared/types'
+import { kb, Trace } from '../trace'
 
 /**
  * The loop: hold key -> capture -> transcribe -> clean -> route -> insert.
@@ -146,6 +147,8 @@ export class DictationPipeline {
   private focusPromise: Promise<FocusSnapshot> | null = null
   /** Which key started this utterance. See `begin`. */
   private intent: HotkeyIntent = 'dictate'
+  /** One per utterance, from key-down. Every step of this loop reports to it. */
+  private trace: Trace = new Trace()
   private readonly now: () => number
   private readonly log: NonNullable<DictationDeps['log']>
 
@@ -160,6 +163,18 @@ export class DictationPipeline {
 
   getState(): HudState {
     return this.state
+  }
+
+  /**
+   * The trace for the utterance in flight.
+   *
+   * Handed out so collaborators that run *inside* one — the classifier, the
+   * lanes — file their steps under the same id and the same clock. Otherwise
+   * the slowest part of the pipeline reports its timing somewhere the rest of
+   * the story cannot be read beside it.
+   */
+  currentTrace(): Trace {
+    return this.trace
   }
 
   private setState(patch: Partial<HudState>): void {
@@ -218,6 +233,8 @@ export class DictationPipeline {
     this.phase = 'capturing'
     this.chunks = []
     this.startedAt = this.now()
+    this.trace = new Trace({ log: this.log, now: this.now })
+    this.trace.step('hold.begin', { key: intent === 'instruct' ? 'Fn' : '⌥Space' })
     this.deps.capture.start()
     this.setState({ phase: 'listening', transcript: '', partial: true, notice: null, chips: [] })
 
@@ -238,6 +255,21 @@ export class DictationPipeline {
       // it has to be accountable, and an utterance abandoned halfway is exactly
       // the case where nobody would otherwise look.
       this.seeing = snapshot.context
+      this.trace.step('focus.read', {
+        app: snapshot.app?.name,
+        field: snapshot.field?.text.length ?? 0,
+        selection: snapshot.selection?.text.length ?? 0,
+        editable: snapshot.field?.editable
+      })
+      if (snapshot.context) {
+        this.trace.step('context.read', {
+          blocks: snapshot.context.blocks.length,
+          chars: snapshot.context.chars,
+          truncated: snapshot.context.truncated || undefined,
+          image: kb(snapshot.context.image?.bytes) ?? snapshot.context.imageReason,
+          harvestMs: snapshot.context.harvestMs
+        })
+      }
       if (this.phase !== 'capturing') return
       // Announced before the user finishes speaking, so they can see what Mull
       // is looking at in time to change their mind (docs/DESIGN.md §7.5).
@@ -308,6 +340,7 @@ export class DictationPipeline {
     this.deps.capture.stop()
     this.phase = 'processing'
     const captureMs = this.now() - this.startedAt
+    this.trace.step('hold.end', { heldMs: captureMs })
     void this.process(captureMs)
   }
 
@@ -340,6 +373,7 @@ export class DictationPipeline {
     if (captureMs < MIN_UTTERANCE_MS) return discard('too-short', null)
     if (pcm.length === 0) return discard('no-audio', 'No audio captured — is the microphone allowed?')
     if (peakAmplitude(pcm) < SILENCE_PEAK) return discard('silence', null)
+    this.trace.step('asr.start', { seconds: audioSeconds, provider: this.deps.asr.name })
 
     this.setState({ phase: 'thinking', partial: false })
 
@@ -353,6 +387,14 @@ export class DictationPipeline {
       const cleanupMs = this.now() - cleanStart
 
       if (!text) return discard('empty-transcript', null)
+      // The user's own words, which are theirs — and the only way to make sense
+      // of the routing line that follows. Nothing else quoted here is.
+      this.trace.step('asr.done', {
+        ms: asrMs,
+        chars: text.length,
+        fillers: removedFillers || undefined,
+        said: text
+      })
       this.setState({ transcript: text })
 
       // Second secure-input check: focus can move while we were transcribing.
@@ -386,12 +428,24 @@ export class DictationPipeline {
       // edit could act on, which is the case this loop must never slow down;
       // only an utterance with text in front of it can reach the model.
       const routed = await this.decide(text)
+      if (routed) {
+        this.trace.step('route', {
+          kind: routed.route.kind,
+          by: routed.by,
+          classifyMs: routed.classifyMs ?? undefined,
+          fellBackTo: routed.fallbackReason ?? undefined
+        })
+      } else {
+        // ⌥Space, or no router at all. Neither asks anything; both type.
+        this.trace.step('route', { kind: 'dictate', by: 'key' })
+      }
       let hint: string | null = null
 
       // A bare send writes nothing at all, so it never reaches the insertion
       // path below — the words were a command, not a message.
       if (routed?.route.kind === 'send' && this.deps.sculpt) {
         this.phase = 'idle'
+        this.trace.step('lane.send', { chars: routed.snapshot.field?.text.length ?? 0 })
         await this.deps.sculpt.sendOnly({
           app: this.state.app ?? routed.snapshot.app,
           text: routed.snapshot.field?.text ?? '',
@@ -406,6 +460,7 @@ export class DictationPipeline {
       // presses Run. Only the model can choose this route (see `router.ts`).
       if (routed?.route.kind === 'navigate' && this.deps.navigate) {
         this.phase = 'idle'
+        this.trace.step('lane.navigate', { goal: routed.route.goal })
         await this.deps.navigate.propose({
           goal: routed.route.goal,
           transcript: text,
@@ -433,6 +488,11 @@ export class DictationPipeline {
           // Idle before handing off: the lane owns the panel from here, and a
           // new utterance must be able to interrupt it.
           this.phase = 'idle'
+          this.trace.step(`lane.${routed.route.kind}`, {
+            target: target.target.kind,
+            before: target.target.text.length,
+            send: wish.send || undefined
+          })
           await this.deps.sculpt.run({
             instruction: wish.send
               ? wantsSend(routed.route.instruction).without
@@ -472,6 +532,14 @@ export class DictationPipeline {
 
       if (!inserted.inserted) {
         const notice = describeInsertionReason(inserted.reason)
+        // Every strategy the chain tried and why each refused — the one case
+        // where the interesting information is the list of failures, not the
+        // outcome.
+        this.trace.fail('insert.failed', {
+          app: target?.name,
+          reason: inserted.reason,
+          tried: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(',')
+        })
         this.journal({
           intent: { kind: 'dictate', text },
           app: target,
@@ -504,6 +572,13 @@ export class DictationPipeline {
         })
         return
       }
+
+      this.trace.step('insert.done', {
+        strategy: inserted.strategyUsed,
+        verified: inserted.verified,
+        chars: text.length,
+        ms: insertMs
+      })
 
       const entry = this.journal({
         intent: { kind: 'dictate', text },

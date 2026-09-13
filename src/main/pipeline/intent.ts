@@ -61,6 +61,8 @@ export interface IntentInput {
 
 export interface IntentRouterDeps {
   engine: Engine
+  /** The utterance's trace, so classify's cost lands in the same story. */
+  trace?: () => { step: (name: string, fields?: Record<string, unknown>) => void }
   /** False puts Mull on rules only — nothing about the field leaves the Mac. */
   useModel?: () => boolean
   /** Budget for the classifier. Past this, the rules answer. */
@@ -190,6 +192,14 @@ export class IntentRouter {
     if (state.kind !== 'ready') return rules(state.kind)
 
     const startedAt = this.now()
+    const trace = this.deps.trace?.()
+    trace?.step('classify.ask', {
+      model: 'haiku',
+      screen: input.context?.chars ?? 0,
+      field: input.fieldText?.length ?? 0,
+      selection: input.selection?.length ?? 0,
+      budgetMs: this.timeoutMs
+    })
     let classified: ClassifiedIntent
     try {
       classified = await withTimeout(
@@ -210,6 +220,11 @@ export class IntentRouter {
       )
     } catch (err) {
       const reason = err instanceof TimeoutError ? 'timed-out' : 'engine-error'
+      trace?.step('classify.failed', {
+        reason,
+        ms: this.now() - startedAt,
+        strikes: reason === 'timed-out' ? this.consecutiveTimeouts + 1 : undefined
+      })
       this.log('warn', `intent: the classifier did not answer (${reason})`, err)
       if (err instanceof TimeoutError) {
         this.consecutiveTimeouts += 1
@@ -226,6 +241,7 @@ export class IntentRouter {
 
     this.consecutiveTimeouts = 0
     const classifyMs = this.now() - startedAt
+    trace?.step('classify.done', { kind: classified.kind, ms: classifyMs })
     return {
       route: toRoute(classified, transcript, context),
       by: 'model',

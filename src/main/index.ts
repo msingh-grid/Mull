@@ -31,6 +31,7 @@ import {
   settingsPath
 } from './locations'
 import { Bench } from './bench'
+import { Trace } from './trace'
 import { selectAsrProvider } from './asr'
 import { FakeSidecar, SidecarClient } from './services/sidecar'
 import { HotkeyService } from './services/hotkey'
@@ -498,6 +499,7 @@ async function bootstrap(): Promise<void> {
     insertion,
     journal: journal ?? undefined,
     captures,
+    trace: () => pipeline?.currentTrace() ?? new Trace(),
     bench,
     onJournalChanged: notifyJournalChanged,
     log: logFn,
@@ -527,6 +529,7 @@ async function bootstrap(): Promise<void> {
       updateCard: (card) => hud?.updateCard(card),
       closeCard: () => hud?.closeCard()
     },
+    trace: () => pipeline?.currentTrace() ?? new Trace(),
     log: logFn
   })
 
@@ -535,6 +538,10 @@ async function bootstrap(): Promise<void> {
   intent = new IntentRouter({
     engine,
     useModel: () => settings?.get().routing !== 'rules',
+    // The classifier is usually the longest step in the utterance, so its
+    // lines belong in the utterance's own trace rather than in a log of their
+    // own — "where did the eleven seconds go" is unanswerable otherwise.
+    trace: () => pipeline?.currentTrace() ?? { step: () => {} },
     log: logFn
   })
 
