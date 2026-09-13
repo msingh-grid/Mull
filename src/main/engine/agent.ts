@@ -1,6 +1,7 @@
 import { query, type Options, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { NavStep } from '@shared/nav'
 import type {
+  AnswerRequest,
   ClassifiedIntent,
   ClassifyRequest,
   ComposeRequest,
@@ -18,9 +19,11 @@ import {
   parseClassification
 } from './classify'
 import {
+  ANSWER_SYSTEM_PROMPT,
   COMPOSE_SYSTEM_PROMPT,
   EDIT_SYSTEM_PROMPT,
   NAVIGATE_SYSTEM_PROMPT,
+  answerPrompt,
   cleanEditOutput,
   cleanEditPartial,
   composeContent,
@@ -92,6 +95,7 @@ export class AgentEngine implements Engine {
   private readonly classifier: AgentSession
   private readonly composer: AgentSession
   private readonly navigator: AgentSession
+  private readonly answerer: AgentSession
 
   constructor(options: AgentEngineOptions) {
     this.model = options.model
@@ -127,6 +131,17 @@ export class AgentEngine implements Engine {
       label: 'navigate',
       model: options.model,
       systemPrompt: NAVIGATE_SYSTEM_PROMPT
+    })
+    // Separate from the navigator for the same reason the navigator is separate
+    // from the composer: one emits a line of JSON and is told at length what it
+    // may not press, the other writes prose to the user. Sharing a session
+    // would mean sending whichever system prompt was not wanted.
+    this.answerer = new AgentSession({
+      ...shared,
+      label: 'answer',
+      model: options.model,
+      systemPrompt: ANSWER_SYSTEM_PROMPT,
+      thinking: options.thinking
     })
   }
 
@@ -223,11 +238,37 @@ export class AgentEngine implements Engine {
     }
   }
 
+  /**
+   * What the window said, in answer to the goal.
+   *
+   * The last turn of a navigation and the only one the user reads as prose.
+   * Cleaned with the same two helpers as an edit — a fence or a "Here's what I
+   * found:" preamble is as unwelcome in a card as it is in someone's document.
+   */
+  async answer(
+    request: AnswerRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    try {
+      const text = await this.answerer.ask(
+        answerPrompt(request),
+        onPartial ? (partial) => onPartial(cleanEditPartial(partial)) : undefined
+      )
+      this.health.recover()
+      return { text: cleanEditOutput(text) }
+    } catch (err) {
+      this.health.degrade(err)
+      this.answerer.reset()
+      throw err
+    }
+  }
+
   async dispose(): Promise<void> {
     this.edit.reset()
     this.classifier.reset()
     this.composer.reset()
     this.navigator.reset()
+    this.answerer.reset()
   }
 }
 

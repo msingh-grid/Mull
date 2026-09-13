@@ -528,6 +528,12 @@ async function bootstrap(): Promise<void> {
       journal: journal ?? undefined,
       log: logFn
     }),
+    // The plan's own row, and the only one that can carry the picture: the
+    // executor's per-step rows are written as each press happens, and the
+    // photograph was taken at key-down before there was a plan to attach it to.
+    journal: journal ?? undefined,
+    captures,
+    onJournalChanged: notifyJournalChanged,
     hud: {
       openCard: (card, onAction) => hud?.openCard(card, onAction),
       updateCard: (card) => hud?.updateCard(card),

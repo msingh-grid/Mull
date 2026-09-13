@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type { NavStep } from '@shared/nav'
 import type {
+  AnswerRequest,
   ClassifiedIntent,
   ClassifyRequest,
   ComposeRequest,
@@ -19,9 +20,11 @@ import {
   parseClassification
 } from './classify'
 import {
+  ANSWER_SYSTEM_PROMPT,
   COMPOSE_SYSTEM_PROMPT,
   EDIT_SYSTEM_PROMPT,
   NAVIGATE_SYSTEM_PROMPT,
+  answerPrompt,
   cleanEditOutput,
   cleanEditPartial,
   composeContent,
@@ -198,6 +201,48 @@ export class ApiKeyEngine implements Engine {
         .map((block) => block.text)
         .join('')
       return parseNavStep(reply)
+    } catch (err) {
+      this.health.degrade(err)
+      throw err
+    }
+  }
+
+  /**
+   * What the window said, once the navigator has arrived.
+   *
+   * Streamed, unlike `navigate` and like everything else that produces prose:
+   * the card is already open and the user is watching it, so the sentences
+   * arriving one at a time is the difference between working and hung.
+   */
+  async answer(
+    request: AnswerRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    try {
+      const stream = this.messages.stream({
+        model: this.model,
+        // Read in a small panel, so the cap is also the brief — the prompt asks
+        // for a few sentences and this is what that costs.
+        max_tokens: 1_024,
+        system: [
+          { type: 'text', text: ANSWER_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
+        ],
+        messages: [{ role: 'user', content: answerPrompt(request) }]
+      })
+
+      if (onPartial) {
+        stream.on('text', (_delta, snapshot) => onPartial(cleanEditPartial(snapshot)))
+      }
+
+      const message = await stream.finalMessage()
+      this.health.recover()
+
+      const text = message.content
+        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+        .map((block) => block.text)
+        .join('')
+
+      return { text: cleanEditOutput(text) }
     } catch (err) {
       this.health.degrade(err)
       throw err

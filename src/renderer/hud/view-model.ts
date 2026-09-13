@@ -127,11 +127,16 @@ function stateClassFor(state: HudState): string {
 }
 
 function labelFor(state: HudState): string {
-  // A card on screen is a proposal waiting to be judged, whatever the phase
-  // says. Deciding this from `phase` alone meant every lane had to remember to
-  // announce one — and the navigator did not, so a plan card sat under the word
-  // THINKING and stayed there after the plan had finished. The card is the
-  // fact; the phase is a claim about it.
+  // A finished read-only plan is not a preview: there is no Apply on it and
+  // nothing is waiting on the user. What is on screen is the thing they asked
+  // for, so the label says so rather than inviting a decision that does not
+  // exist.
+  if (state.card?.kind === 'plan' && state.card.answer && !state.card.running) return 'FOUND'
+  // Otherwise a card on screen is a proposal waiting to be judged, whatever the
+  // phase says. Deciding this from `phase` alone meant every lane had to
+  // remember to announce one — and the navigator did not, so a plan card sat
+  // under the word THINKING and stayed there after the plan had finished. The
+  // card is the fact; the phase is a claim about it.
   if (state.card) return 'PREVIEW'
   switch (state.phase) {
     case 'idle':

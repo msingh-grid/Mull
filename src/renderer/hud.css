@@ -371,6 +371,24 @@
 .plan-step.is-done .st { color: var(--mem); }
 .plan-step.is-failed .st { color: var(--del); }
 
+/* What was found, under the steps that found it.
+
+   Set apart by a rule and given the body measure rather than the step grid,
+   because it is the one part of a plan card that is prose to be read rather
+   than a ledger to be scanned. Scrolls on its own past a few lines: a long
+   answer must not push Run and Cancel off the panel. */
+.plan-answer {
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline-soft);
+  color: var(--ink);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 190px;
+  overflow-y: auto;
+}
+
 /* The goal sits above the steps and reads as the thing they are serving, so it
    borrows the step's own two-column rhythm rather than being a heading: the
    label lines up where the step numbers line up. */

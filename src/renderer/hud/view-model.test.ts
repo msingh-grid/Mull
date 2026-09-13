@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { IDLE_HUD_STATE, type HudPhase, type HudState } from '@shared/ipc'
-import type { DiffCard } from '@shared/hud'
+import type { DiffCard, PlanCard } from '@shared/hud'
 import { hudView, relativeTime } from './view-model'
 
 const state = (patch: Partial<HudState>): HudState => ({ ...IDLE_HUD_STATE, ...patch })
@@ -10,6 +10,16 @@ const diffCard: DiffCard = {
   app: 'Mail',
   segments: [{ kind: 'ins', text: 'Following up:' }],
   changes: 1
+}
+
+const planCard: PlanCard = {
+  kind: 'plan',
+  steps: [],
+  context: null,
+  goal: 'open the conversation with Anil Turaga and read the recent messages',
+  app: 'Slack',
+  limit: 6,
+  running: false
 }
 
 const ALL_PHASES: HudPhase[] = [
@@ -67,6 +77,21 @@ describe('hudView', () => {
     for (const phase of ['thinking', 'listening', 'inserting'] as const) {
       expect(hudView(state({ phase, card: diffCard })).label).toBe('PREVIEW')
     }
+  })
+
+  /**
+   * A finished read-only plan has no Apply and nothing pending on it. Calling
+   * that a PREVIEW invites a decision that does not exist — the answer on the
+   * card is the thing the user asked for, not a proposal about it.
+   */
+  it('says FOUND once a plan has an answer and has stopped running', () => {
+    const walked = { ...planCard, running: true, answer: 'The redlines are with legal.' }
+    expect(hudView(state({ phase: 'thinking', card: walked })).label).toBe('PREVIEW')
+    expect(hudView(state({ phase: 'applied', card: { ...walked, running: false } })).label).toBe(
+      'FOUND'
+    )
+    // A plan still deciding its first step is a preview like any other.
+    expect(hudView(state({ phase: 'thinking', card: planCard })).label).toBe('PREVIEW')
   })
 
   it('treats inserting as thinking visually, but says INSERTING', () => {

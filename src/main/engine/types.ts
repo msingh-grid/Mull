@@ -63,6 +63,24 @@ export interface ComposeRequest {
 }
 
 /**
+ * Say what was found, once navigation has arrived somewhere.
+ *
+ * The counterpart to `compose`, and deliberately not the same call. A compose
+ * writes text *for* the user to send, in their voice; this writes text *to* the
+ * user, about a window they are not looking at. Pointing the composer at "what
+ * did Anil say about the terms doc" produces a message addressed to Anil.
+ *
+ * There is no `app` here because the answer names no application: by the time
+ * it is read, the window has already been put back.
+ */
+export interface AnswerRequest {
+  /** The goal the user approved on the card. */
+  goal: string
+  /** The window that was reached — the whole material for the answer. */
+  context?: ScreenContext | null
+}
+
+/**
  * What the classifier is shown: what was said, and what is on screen to say it
  * about. Never called when there is neither a selection nor field text — see
  * the fast path in `src/main/pipeline/router.ts`.
@@ -194,5 +212,15 @@ export interface Engine {
    * because improvising in someone else's window is not a recovery strategy.
    */
   navigate(request: NavigateRequest): Promise<NavStep>
+  /**
+   * Report what the window says, once the navigator has arrived.
+   *
+   * Streams like `transform` and `compose`, for the same reason and to the same
+   * effect: the card fills in as the sentences arrive, which is the difference
+   * between an instrument that is working and one that is hung. Unlike those
+   * two, the result is never inserted anywhere — it is read in the panel and
+   * dismissed, which is why `AnswerRequest` has no app and no target.
+   */
+  answer(request: AnswerRequest, onPartial?: (text: string) => void): Promise<TransformResult>
   dispose?(): Promise<void>
 }

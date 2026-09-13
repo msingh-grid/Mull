@@ -69,7 +69,8 @@ function harness(options: {
     classify: async () => options.classifies as ClassifiedIntent,
     transform: async () => ({ text: '' }),
     compose: async () => ({ text: '' }),
-    navigate: async () => ({ verb: 'done' as const, because: 'not this test' })
+    navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
+    answer: async () => ({ text: 'not this test' })
   }
 
   const pipe = new DictationPipeline(

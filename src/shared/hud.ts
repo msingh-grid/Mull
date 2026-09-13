@@ -114,6 +114,19 @@ export interface PlanCard {
   note?: string | null
   /** True once the loop is running; Run becomes unavailable and esc stops it. */
   running?: boolean
+  /**
+   * What was found — the point of the whole expedition.
+   *
+   * Arrives last and streams in like a diff card's text, because it is written
+   * by the same kind of turn. Without it a plan could only report what it *did*
+   * ("51 blocks · 6023 chars"), which is a receipt for work rather than an
+   * answer to a question, and made a working navigation indistinguishable from
+   * a broken one.
+   *
+   * It is never inserted anywhere. There is no Apply on a plan card; the user
+   * reads this and dismisses it.
+   */
+  answer?: string | null
 }
 
 /**

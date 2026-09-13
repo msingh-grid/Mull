@@ -121,6 +121,12 @@ function PlanCardView({
             </span>
           </div>
         ))}
+        {/*
+          What was found, under the steps that found it. Streams in, so the
+          card is visibly writing rather than sitting still — and it is the
+          only part of a plan card the user is actually reading for.
+        */}
+        {card.answer ? <div className="plan-answer">{card.answer}</div> : null}
       </div>
       <div className="card-actions">
         {card.running ? null : (

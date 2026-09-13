@@ -1,10 +1,14 @@
+import { randomUUID } from 'node:crypto'
 import type { ScreenContext } from '@shared/context'
 import type { PlanCard, PlanStep } from '@shared/hud'
 import { MAX_NAV_STEPS, type NavAttempt, type NavStep } from '@shared/nav'
 import type { SidecarApi, UiTarget } from '@shared/sidecar-api'
+import type { JournalDraft, JournalStatus } from '@shared/types'
 import type { Engine } from '../engine/types'
 import { describeStep } from '../engine/prompts'
 import { ActionExecutor, type Scan } from './actions'
+import type { JournalStore } from '../store/journal'
+import type { CaptureStore } from '../store/captures'
 import { Trace } from '../trace'
 
 /**
@@ -19,7 +23,22 @@ import { Trace } from '../trace'
  *     do      the executor performs it, or refuses
  *
  * repeated until `done`, until the budget runs out, or until the user presses
- * Escape — and then `restore`, unconditionally.
+ * Escape — and then two more things, unconditionally: **say what was found**,
+ * and `restore`.
+ *
+ * ### Why "say what was found" is a step and not a detail
+ *
+ * It was missing, and its absence looked exactly like the whole feature being
+ * broken. The loop would walk to the right conversation, capture it, walk back,
+ * and report `51 blocks · 6023 chars` — a receipt for work done, handed to
+ * someone who had asked what a conversation said. Every mechanical part worked;
+ * nothing was answered. A navigation that ends in a number is indistinguishable
+ * from one that failed, and it is worse than failing, because it spent four
+ * seconds in someone else's window first.
+ *
+ * So a successful `read` is followed by one more engine turn — `answer`, not
+ * `compose`; see `ANSWER_SYSTEM_PROMPT` for why those cannot be the same call —
+ * and the text streams onto the card.
  *
  * ### Why one step at a time
  *
@@ -81,6 +100,19 @@ export interface NavigateDeps {
      */
     announce?(phase: 'applied' | 'error' | 'blocked', notice: string): void
   }
+  /**
+   * One row per plan, carrying the picture.
+   *
+   * The executor already writes a row per step, and none of them can carry a
+   * screenshot: a press is journalled the moment it happens and the photograph
+   * was taken at key-down, before there was a plan. So the utterance's own
+   * receipt had nowhere to live, and a session spent navigating produced a
+   * journal full of rows with no "What Mull saw" on any of them — which is
+   * indistinguishable, from the outside, from Mull never having looked.
+   */
+  journal?: JournalStore
+  captures?: CaptureStore
+  onJournalChanged?: () => void
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   sleep?: (ms: number) => Promise<void>
   maxSteps?: number
@@ -141,6 +173,17 @@ export class NavigateLane {
         this.stopped = true
         parent.step('plan.cancelled', { beforeRunning: true })
         this.deps.hud.closeCard()
+        // Journalled even though nothing was pressed. The window was still read
+        // and possibly photographed during the hold, and a capture with no row
+        // to account for it is the one thing the journal exists to make
+        // impossible — declining the plan is exactly when somebody checking up
+        // on Mull would look.
+        this.record(request, {
+          status: 'cancelled',
+          answer: null,
+          summary: `Declined · ${request.goal}`,
+          steps: 0
+        })
         this.deps.hud.announce?.('applied', 'Cancelled — nothing was pressed.')
         return
       }
@@ -171,9 +214,12 @@ export class NavigateLane {
     const history: NavAttempt[] = []
     let scan: Scan = { harvestId: '', targets: [] }
     let note = 'read-only · nothing is written or sent'
+    /** What was read, and then what was made of it. Both may stay null. */
+    let found: ScreenContext | null = null
+    let answer: string | null = null
 
     const draw = (): void =>
-      this.deps.hud.updateCard(card({ steps: [...steps], running: true, note }))
+      this.deps.hud.updateCard(card({ steps: [...steps], running: true, note, answer }))
     const stage = (text: string | null): void =>
       this.deps.hud.update?.({ stage: text, stageAt: text ? Date.now() : null })
     draw()
@@ -254,12 +300,42 @@ export class NavigateLane {
       history.push({ step, ok: result.ok, detail: result.detail })
       draw()
 
-      // A read is the answer, not a move: once the window has been captured
+      // A read is the arrival, not a move: once the window has been captured
       // there is nothing further to press for.
       if (step.verb === 'read' && result.ok) {
+        found = result.read ?? null
         note = result.detail
         break
       }
+    }
+
+    // Say what was found. The last turn, and the only one the user reads as
+    // prose — everything above this is Mull moving around, which is means.
+    if (found) {
+      const answerMs = trace.mark()
+      stage('reading what it found')
+      try {
+        const said = await this.deps.engine.answer(
+          { goal: request.goal, context: found },
+          (partial) => {
+            answer = partial
+            draw()
+          }
+        )
+        answer = said.text.trim() || null
+        trace.step('answer.done', {
+          ms: answerMs(),
+          chars: answer?.length ?? 0,
+          from: found.chars
+        })
+      } catch (err) {
+        // The walk succeeded and only the last turn failed, so the honest
+        // report is that: it got there, and could not say what it saw.
+        trace.fail('answer.failed', { ms: answerMs() }, err)
+        this.deps.log?.('warn', 'navigate: could not say what it found', err)
+        note = `read ${found.chars} characters, but couldn’t summarise them`
+      }
+      draw()
     }
 
     // Always. After a finished plan, a cancelled one and a failed one alike —
@@ -269,13 +345,84 @@ export class NavigateLane {
     const back = await this.deps.executor.restore(origin, await this.scan())
     stage(null)
     trace.step('plan.restore', { ok: back.ok, detail: back.detail, note })
+
+    // The answer is the note once there is one: "51 blocks · 6023 chars · back
+    // in Prahastha" under a card that has just printed three paragraphs about
+    // Anil would be Mull talking about itself over its own answer.
+    const closing = answer ? back.detail : `${note} · ${back.detail}`
     this.deps.hud.updateCard(
-      card({ steps: [...steps], running: false, note: `${note} · ${back.detail}` })
+      card({ steps: [...steps], running: false, note: closing, answer })
     )
+
+    // The receipt. One row for the whole plan, and the only one that can carry
+    // the photograph — see `NavigateDeps.journal`.
+    this.record(request, {
+      status: answer ? 'applied' : 'failed',
+      answer,
+      summary: answer ? `Looked · ${request.goal}` : `Looked · ${request.goal} · ${note}`,
+      steps: steps.length
+    })
+
     // The plan is over. Say so, or the panel keeps the phase it started in
     // forever — there is nothing else in the pipeline still running that would
     // ever move it on.
-    this.deps.hud.announce?.('applied', `${note} · ${back.detail}`)
+    this.deps.hud.announce?.('applied', answer ?? `${note} · ${back.detail}`)
+  }
+
+  /**
+   * One journal row for the whole expedition.
+   *
+   * Written after `restore`, so it can say where the window was left, and
+   * carrying the `ScreenContext` from key-down — which is the picture the model
+   * was actually shown when it chose the first step, not a fresh read of a
+   * window that has since been put back.
+   *
+   * Never throws. A plan that has already happened must not be undone by a
+   * failure to write it down, and the steps themselves are journalled
+   * separately by the executor.
+   */
+  private record(
+    request: NavigateRequest,
+    outcome: {
+      status: JournalStatus
+      /** The prose the user read, when there was any. */
+      answer: string | null
+      summary: string
+      steps: number
+    }
+  ): void {
+    if (!this.deps.journal) return
+    try {
+      const id = randomUUID()
+      const draft: JournalDraft = {
+        id,
+        intent: {
+          kind: 'command',
+          verb: 'nav.plan',
+          args: { goal: request.goal, steps: outcome.steps },
+          transcript: request.transcript
+        },
+        app: request.app,
+        before: null,
+        // The answer goes in `after` so the journal row shows it the way every
+        // other row shows what Mull produced, rather than inventing a second
+        // place for text to live.
+        after: outcome.answer,
+        strategyUsed: null,
+        status: outcome.status,
+        summary: outcome.summary,
+        verified: outcome.answer !== null,
+        caret: null,
+        // Nothing to take back: no text was written anywhere, and the window
+        // has already been put back where it was.
+        undoable: false,
+        capture: this.deps.captures?.save(id, request.context) ?? null
+      }
+      this.deps.journal.append(draft)
+      this.deps.onJournalChanged?.()
+    } catch (err) {
+      this.deps.log?.('error', 'navigate: journal write failed', err)
+    }
   }
 
   /** Where the user was when they spoke, so `restore` has somewhere to aim. */

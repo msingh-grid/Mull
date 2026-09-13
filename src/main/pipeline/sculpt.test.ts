@@ -294,7 +294,8 @@ describe('SculptLane — the refusals', () => {
         throw new Error('rate limited')
       },
       compose: async () => ({ text: '' }),
-      navigate: async () => ({ verb: 'done' as const, because: 'not this test' })
+      navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
+      answer: async () => ({ text: 'not this test' })
     }
     const h = harness({ engine: broken })
     await h.lane.run(h.request)
@@ -313,7 +314,8 @@ describe('SculptLane — the refusals', () => {
       classify: async () => ({ kind: 'dictate' as const }),
       transform: async (request) => ({ text: request.text }),
       compose: async () => ({ text: '' }),
-      navigate: async () => ({ verb: 'done' as const, because: 'not this test' })
+      navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
+      answer: async () => ({ text: 'not this test' })
     }
     const h = harness({ engine: unchanged })
     await h.lane.run(h.request)
@@ -341,7 +343,8 @@ describe('SculptLane — ⏎ while the engine is still writing', () => {
         return { text: CANONICAL_SAMPLE.after }
       },
       compose: async () => ({ text: '' }),
-      navigate: async () => ({ verb: 'done' as const, because: 'not this test' })
+      navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
+      answer: async () => ({ text: 'not this test' })
     }
     const h = harness({ engine: slow })
     const running = h.lane.run(h.request)
@@ -699,7 +702,8 @@ describe('SculptLane — drafting a reply', () => {
         expect(request.context?.blocks[0]?.text).toContain('redlines by EOD')
         return { text: 'Confirmed — you will have them by five.' }
       },
-      navigate: async () => ({ verb: 'done' as const, because: 'not this test' })
+      navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
+      answer: async () => ({ text: 'not this test' })
     }
 
     const h = harness({ engine })
@@ -782,7 +786,8 @@ describe('SculptLane — drafting a reply', () => {
       classify: async () => ({ kind: 'dictate' }),
       transform: async () => ({ text: '' }),
       compose: async () => ({ text: '' }),
-      navigate: async () => ({ verb: 'done' as const, because: 'not this test' })
+      navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
+      answer: async () => ({ text: 'not this test' })
     }
 
     const h = harness({ engine })

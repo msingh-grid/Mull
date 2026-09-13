@@ -5,6 +5,7 @@ import { AgentEngine } from './agent'
 import { ApiKeyEngine } from './api-key'
 import type { NavStep } from '@shared/nav'
 import type {
+  AnswerRequest,
   ClassifiedIntent,
   ClassifyRequest,
   ComposeRequest,
@@ -123,6 +124,10 @@ export class SignedOutEngine implements Engine {
   async navigate(): Promise<NavStep> {
     throw new Error(this.reason ?? 'No engine is connected.')
   }
+
+  async answer(): Promise<TransformResult> {
+    throw new Error(this.reason ?? 'No engine is connected.')
+  }
 }
 
 /**
@@ -180,6 +185,10 @@ export class EngineHolder implements Engine {
 
   navigate(request: NavigateRequest): Promise<NavStep> {
     return this.inner.navigate(request)
+  }
+
+  answer(request: AnswerRequest, onPartial?: (text: string) => void): Promise<TransformResult> {
+    return this.inner.answer(request, onPartial)
   }
 
   async dispose(): Promise<void> {

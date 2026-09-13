@@ -27,7 +27,8 @@ function engineThat(options: FakeEngineOptions = {}): Engine & { asked: Classify
     },
     transform: async () => ({ text: '' }),
     compose: async () => ({ text: '' }),
-    navigate: async () => ({ verb: 'done' as const, because: 'not this test' })
+    navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
+    answer: async () => ({ text: 'not this test' })
   }
 }
 
@@ -196,7 +197,8 @@ describe('IntentRouter — the fallback', () => {
       },
       transform: async () => ({ text: '' }),
       compose: async () => ({ text: '' }),
-      navigate: async () => ({ verb: 'done' as const, because: 'not this test' })
+      navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
+      answer: async () => ({ text: 'not this test' })
     }
     const decision = await new IntentRouter({ engine }).decide(INPUT)
     expect(decision.by).toBe('rules')
@@ -400,7 +402,8 @@ describe('IntentRouter — an engine that cannot answer in time', () => {
       },
       transform: async () => ({ text: '' }),
       compose: async () => ({ text: '' }),
-      navigate: async () => ({ verb: 'done' as const, because: 'not this test' })
+      navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
+      answer: async () => ({ text: 'not this test' })
     }
     const router = new IntentRouter({ engine, timeoutMs: 20 })
 

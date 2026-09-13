@@ -1,4 +1,5 @@
 import type { SidecarApi, UiTarget } from '@shared/sidecar-api'
+import type { ScreenContext } from '@shared/context'
 import type { NavStep } from '@shared/nav'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 import { insertionProfile } from '../services/insertion-table'
@@ -62,6 +63,17 @@ export interface StepResult {
   detail: string
   /** Set when the step was refused here rather than by the sidecar. */
   refusedBy?: 'destructive' | 'not-a-search-field' | 'no-such-target' | 'wrong-kind'
+  /**
+   * What a `read` step read. Set only by `read`, and only when it succeeded.
+   *
+   * This used to be thrown away the moment it was counted, and `detail` — "51
+   * blocks · 6023 chars" — was all that survived. The plan then reported that
+   * number to someone who had asked what a conversation said, which is the
+   * entire navigation feature failing at its last step with every part of it
+   * working. The words have to leave this method for anything to be answered
+   * from them.
+   */
+  read?: ScreenContext | null
 }
 
 /** Where a scan came from, and what it saw. Handed in, never fetched here. */
@@ -127,9 +139,23 @@ export class ActionExecutor {
       case 'read': {
         const seen = await this.deps.sidecar.windowContext({ maxChars: 6_000, screenshot: false })
         const chars = seen.blocks.reduce((n, block) => n + block.text.length, 0)
-        return chars > 0
-          ? { ok: true, detail: `${seen.blocks.length} blocks · ${chars} chars` }
-          : { ok: false, detail: `nothing readable here (${seen.stoppedBy})` }
+        if (chars === 0) return { ok: false, detail: `nothing readable here (${seen.stoppedBy})` }
+        return {
+          ok: true,
+          detail: `${seen.blocks.length} blocks · ${chars} chars`,
+          read: {
+            app: context.app,
+            windowTitle: seen.windowTitle,
+            blocks: seen.blocks,
+            truncated: seen.truncated,
+            // No second photograph. One was taken at key-down and the model has
+            // already seen it; the words are what moved since then.
+            image: null,
+            imageReason: 'not-retaken-mid-plan',
+            chars,
+            harvestMs: seen.harvestMs
+          }
+        }
       }
 
       case 'press': {
@@ -151,6 +177,9 @@ export class ActionExecutor {
             refusedBy: 'destructive'
           }
         }
+        // What the window was called before the press, so the result can say
+        // whether anything happened. See below.
+        const was = await this.windowTitle()
         const pressed = await this.deps.sidecar.pressTarget({
           harvestId: scan.harvestId,
           index: step.index,
@@ -163,6 +192,27 @@ export class ActionExecutor {
         // it settle before the loop looks again, or the next scan describes the
         // window we were already looking at.
         await this.sleep(STEP_SETTLE_MS)
+
+        /**
+         * Did it actually go anywhere?
+         *
+         * `AXPress` reports whether the action was *accepted*, not whether it
+         * did anything, and this is how the navigator got stuck in a loop:
+         * history said `press 37 "Anil Turaga" — ok: Anil Turaga` and then said
+         * exactly the same thing again, so pressing the same row a second time
+         * looked as reasonable as pressing it the first. The model had no
+         * evidence either way, because the only thing it was told about the
+         * press was the label it had already chosen.
+         *
+         * The window title is the cheapest honest evidence there is — one ~2ms
+         * round trip, and in every app where pressing a sidebar row means going
+         * somewhere, it is exactly the thing that changes.
+         */
+        const now = await this.windowTitle()
+        if (now && was && now !== was) return { ok: true, detail: `${target.title} → ${now}` }
+        if (now && was && now === was) {
+          return { ok: true, detail: `${target.title} — the window is still “${now}”` }
+        }
         return { ok: true, detail: target.title }
       }
 
@@ -259,6 +309,16 @@ export class ActionExecutor {
     return pressed.ok
       ? { ok: true, detail: `back in ${row.title}` }
       : { ok: true, detail: `left in ${wanted}` }
+  }
+
+  /** What the front window is called, or null if it will not say. Never throws. */
+  private async windowTitle(): Promise<string | null> {
+    try {
+      const front = await this.deps.sidecar.frontmostApp({})
+      return front.windowTitle?.trim() || null
+    } catch {
+      return null
+    }
   }
 
   private record(step: NavStep, result: StepResult, context: PlanContext): void {

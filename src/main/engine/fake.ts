@@ -1,5 +1,6 @@
 import type { NavStep } from '@shared/nav'
 import type {
+  AnswerRequest,
   ClassifiedIntent,
   ComposeRequest,
   Engine,
@@ -164,6 +165,35 @@ export class FakeEngine implements Engine {
       return { verb: 'read' }
     }
     return { verb: 'done', because: 'nothing here matches that' }
+  }
+
+  /**
+   * What was found, without reading it — the same honesty as `compose`.
+   *
+   * It reports the shape of what it was given rather than its substance,
+   * because summarising a real conversation is the one judgement a fake must
+   * not counterfeit. A caller that gets this back and shows it verbatim has
+   * demonstrated the whole path works; it has not demonstrated an answer.
+   */
+  async answer(
+    request: AnswerRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    const chars = request.context?.chars ?? 0
+    const text = chars
+      ? `(fake engine) ${chars} characters were read from ${
+          request.context?.windowTitle ?? 'that window'
+        }. There is no model here to read them.`
+      : '(fake engine) nothing readable was found in that window.'
+    if (onPartial) {
+      let sofar = ''
+      for (const word of text.split(/(\s+)/)) {
+        sofar += word
+        onPartial(sofar)
+        if (this.chunkMs > 0) await this.sleep(this.chunkMs)
+      }
+    }
+    return { text }
   }
 }
 

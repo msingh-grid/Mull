@@ -657,13 +657,29 @@ export class FakeSidecar implements SidecarApi {
     return { sent: true, reason: null }
   }
 
+  /**
+   * What the pretend front window is called.
+   *
+   * `null` unless a test says otherwise, which is the honest default for a fake
+   * with no window — but it has to be *settable*, because the navigator now
+   * reads this before and after every press to find out whether anything
+   * happened. A fake that always answers `null` would let "the press went
+   * nowhere and nobody noticed" pass as a working test.
+   */
+  windowTitle: string | null = null
+
+  /** The window the press took us to. Call it from a test's `retarget` step. */
+  moveTo(title: string | null): void {
+    this.windowTitle = title
+  }
+
   async frontmostApp() {
     return {
       app:
         this.overrides.app === undefined
           ? { bundleId: 'com.apple.TextEdit', name: 'TextEdit', pid: 1 }
           : this.overrides.app,
-      windowTitle: null
+      windowTitle: this.windowTitle
     }
   }
 

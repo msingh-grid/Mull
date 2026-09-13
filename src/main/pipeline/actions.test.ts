@@ -156,6 +156,43 @@ describe('press', () => {
     const result = await h.run({ verb: 'press', index: 1, label: 'Channel or user name' })
     expect(result).toMatchObject({ ok: false, refusedBy: 'wrong-kind' })
   })
+
+  /**
+   * `AXPress` reports that the action was *accepted*, not that it did anything,
+   * and reporting only the label back is how the navigator got stuck: history
+   * read `press 37 "Anil Turaga" — ok: Anil Turaga` twice in a row, so pressing
+   * the same row again looked exactly as reasonable as pressing it the first
+   * time. What it needed was evidence, and the window title is the cheapest
+   * honest evidence there is.
+   */
+  it('says where the press took us', async () => {
+    const h = harness()
+    h.sidecar.moveTo('Prahastha Shankesi (DM) - Slack')
+    await scanned(h.sidecar)
+    h.sidecar.moveTo('Anil Turaga (DM) - Slack')
+    const result = await h.run({ verb: 'press', index: 2, label: 'Anil Turaga' })
+    expect(result.ok).toBe(true)
+    expect(result.detail).toContain('Anil Turaga (DM) - Slack')
+  })
+
+  it('says plainly when the press changed nothing', async () => {
+    const h = harness()
+    h.sidecar.moveTo('Prahastha Shankesi (DM) - Slack')
+    await scanned(h.sidecar)
+    // No `moveTo`: the press was accepted and the window stayed put.
+    const result = await h.run({ verb: 'press', index: 2, label: 'Anil Turaga' })
+    expect(result.ok).toBe(true)
+    expect(result.detail).toMatch(/still/u)
+    expect(result.detail).toContain('Prahastha Shankesi (DM) - Slack')
+  })
+
+  /** An app that names no window is not an app that refuses to be navigated. */
+  it('still reports the press when there is no window title to compare', async () => {
+    const h = harness()
+    await scanned(h.sidecar)
+    const result = await h.run({ verb: 'press', index: 2, label: 'Anil Turaga' })
+    expect(result).toMatchObject({ ok: true, detail: SIDEBAR[2]?.title })
+  })
 })
 
 describe('type — the only text the navigator can put anywhere', () => {
