@@ -1,0 +1,1031 @@
+<title>Mull Playground</title>
+<style>
+  /* Committed single-theme design: a macOS-style light desktop. All colors painted explicitly. */
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: #1d2530;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    color: #1b2430;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input { font: inherit; }
+  button { cursor: pointer; }
+  button:focus-visible, .chip:focus-visible, input:focus-visible, .nitem:focus-visible, .mrow:focus-visible {
+    outline: 2px solid #0e8f7e; outline-offset: 2px;
+  }
+
+  #frame { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 16px; }
+  #stagewrap { flex: none; max-width: 100%; overflow-x: auto; border-radius: 14px; }
+  #stage {
+    position: relative; width: 1280px; height: 830px;
+    border-radius: 14px; overflow: hidden;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.55);
+    background:
+      radial-gradient(1300px 650px at 78% -12%, #cfe6df 0%, transparent 60%),
+      radial-gradient(1000px 750px at 8% 112%, #b9cfd8 0%, transparent 55%),
+      linear-gradient(160deg, #e2eae6 0%, #cbd9d7 45%, #a9bfc4 100%);
+    user-select: none;
+  }
+
+  /* ── Menu bar ─────────────────────────────── */
+  #menubar {
+    position: absolute; inset: 0 0 auto 0; height: 30px; z-index: 60;
+    display: flex; align-items: center; gap: 15px; padding: 0 14px;
+    background: rgba(250,252,251,0.75); backdrop-filter: blur(10px);
+    font-size: 13px; color: #22303c; border-bottom: 1px solid rgba(0,0,0,0.06);
+  }
+  #menubar .app { font-weight: 700; }
+  #menubar .m { color: #3d4b57; }
+  #menubar .spacer { flex: 1; }
+  #micdot { width: 8px; height: 8px; border-radius: 50%; background: #e8862d; margin-right: 2px; opacity: 0; transition: opacity .2s; }
+  #micdot.on { opacity: 1; box-shadow: 0 0 6px rgba(232,134,45,.8); }
+  #journalbtn {
+    border: 0; background: transparent; padding: 2px 8px; border-radius: 6px;
+    font-size: 12.5px; font-weight: 600; color: #0b6a5d; display: flex; align-items: center; gap: 6px;
+  }
+  #journalbtn:hover { background: rgba(14,143,126,0.12); }
+  #journalbtn .badge { background: #0e8f7e; color: #fff; border-radius: 8px; padding: 0 6px; font-size: 11px; min-width: 16px; text-align: center; }
+  #clock { font-variant-numeric: tabular-nums; color: #3c4a56; }
+
+  #caption {
+    position: absolute; top: 40px; left: 50%; transform: translateX(-50%); z-index: 65;
+    background: rgba(22,28,26,0.9); color: #cfe0d9; font-size: 12.5px; padding: 6px 15px; border-radius: 999px;
+    opacity: 0; transition: opacity .3s; pointer-events: none; max-width: 78%; text-align: center;
+  }
+  #caption.show { opacity: 1; }
+
+  /* ── Windows ──────────────────────────────── */
+  .window {
+    position: absolute; border-radius: 11px; overflow: hidden;
+    background: #ffffff; box-shadow: 0 18px 50px rgba(20,30,40,0.28), 0 0 0 0.5px rgba(0,0,0,0.15);
+    display: flex; flex-direction: column; transition: box-shadow .25s, transform .25s, filter .25s;
+  }
+  .window.dim { filter: saturate(.85) brightness(.97); }
+  .window.active { box-shadow: 0 28px 70px rgba(20,30,40,0.45), 0 0 0 0.5px rgba(0,0,0,0.22); z-index: 40; }
+  .window.flash { animation: winflash 0.9s ease; }
+  @keyframes winflash { 0% { transform: scale(1); } 12% { transform: scale(1.01); } 100% { transform: scale(1); } }
+  .titlebar {
+    height: 38px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+    border-bottom: 1px solid rgba(0,0,0,0.07); font-size: 13px; font-weight: 600; color: #4a5763;
+  }
+  .titlebar .tname { flex: 1; text-align: center; margin-right: 52px; }
+  .lights { display: flex; gap: 7px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights i:nth-child(1){ background: #ff5f57; } .lights i:nth-child(2){ background: #febc2e; } .lights i:nth-child(3){ background: #28c840; }
+  .caret { display: inline-block; width: 1.5px; height: 1.05em; background: #0e8f7e; vertical-align: text-bottom; margin-left: 1px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  /* Slack — full page */
+  #win-slack { left: 22px; top: 52px; width: 600px; height: 560px; }
+  #win-slack .titlebar { background: #46123f; color: #f4e9f2; border-bottom: 0; }
+  .slack-body { flex: 1; display: flex; min-height: 0; }
+  .slack-side { width: 158px; flex: none; background: #5a1e51; color: #d9bfd4; font-size: 12.5px; padding: 10px 0; display: flex; flex-direction: column; }
+  .slack-ws { padding: 2px 14px 10px; color: #fff; font-weight: 800; font-size: 13.5px; border-bottom: 1px solid rgba(255,255,255,0.12); margin-bottom: 8px; }
+  .slack-side .sh { padding: 6px 14px 3px; font-size: 11px; letter-spacing: .05em; text-transform: uppercase; color: #b48aab; }
+  .slack-side .ch { padding: 3.5px 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .slack-side .ch.sel { background: #7c3a6f; color: #fff; font-weight: 600; border-radius: 0 6px 6px 0; margin-right: 10px; }
+  .slack-side .dm i { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #3fbf6f; margin-right: 6px; }
+  .slack-main { flex: 1; display: flex; flex-direction: column; min-width: 0; background: #fff; }
+  .slack-chhead { flex: none; padding: 9px 16px; border-bottom: 1px solid #e6e9ec; }
+  .slack-chhead .chn { font-weight: 800; font-size: 14px; color: #1d1c1d; }
+  .slack-chhead .topic { font-size: 11.5px; color: #79808a; margin-top: 1px; }
+  .slack-msgs { flex: 1; overflow-y: auto; padding: 12px 16px 6px; font-size: 13px; line-height: 1.45; }
+  .sday { text-align: center; font-size: 11px; color: #8a96a0; margin: 4px 0 12px; display: flex; align-items: center; gap: 10px; }
+  .sday::before, .sday::after { content: ""; flex: 1; height: 1px; background: #e6e9ec; }
+  .smsg { display: flex; gap: 9px; margin-bottom: 13px; }
+  .smsg .av { width: 32px; height: 32px; border-radius: 7px; flex: none; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; }
+  .smsg .who { font-weight: 700; font-size: 13px; color: #1d1c1d; } .smsg .t { color: #8a96a0; font-weight: 400; font-size: 11px; margin-left: 6px; }
+  .smsg p { margin: 1px 0 0; color: #2b3540; }
+  .react { display: inline-flex; gap: 4px; margin-top: 5px; }
+  .react span { background: #eef3f6; border: 1px solid #dde5ea; border-radius: 11px; padding: 1px 7px; font-size: 11px; color: #3d4b57; }
+  .smsg.hl-src { background: #fff7e6; outline: 2px solid #f0c96a; border-radius: 8px; padding: 6px; margin: -6px -6px 8px; }
+  .smsg.sent-new { animation: inkin 1.4s ease; border-radius: 8px; }
+  .slack-composer { margin: 6px 14px 12px; border: 1.5px solid #c8d0d6; border-radius: 10px; background: #fff; }
+  .slack-tools { display: flex; gap: 10px; padding: 6px 10px 0; color: #9aa6af; font-size: 12px; }
+  .slack-input { padding: 8px 11px 10px; font-size: 13px; min-height: 38px; color: #2b3540; }
+  .ph { color: #9aa6af; }
+
+  /* Mail — full page */
+  #win-mail { right: 20px; top: 46px; width: 560px; height: 470px; }
+  #win-mail .titlebar { background: linear-gradient(#f7f8f9, #eceff1); }
+  .mail-toolbar { flex: none; display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-bottom: 1px solid #e4e8ea; background: #fafbfc; }
+  .mail-toolbar button { border: 1px solid #d5dce0; background: #fff; border-radius: 7px; padding: 4px 11px; font-size: 12px; color: #3d4b57; font-weight: 600; }
+  .mail-toolbar #sendbtn { background: #2f6fdb; border-color: #2f6fdb; color: #fff; }
+  .mail-body-wrap { flex: 1; display: flex; min-height: 0; }
+  .mail-list { width: 168px; flex: none; border-right: 1px solid #e8ecee; overflow-y: auto; background: #f6f8f9; }
+  .mrow { padding: 9px 11px; border-bottom: 1px solid #eceff1; font-size: 11.5px; color: #5a6771; }
+  .mrow .mf { font-weight: 700; color: #22303c; font-size: 12px; display: flex; justify-content: space-between; }
+  .mrow .mf .mt2 { color: #93a09a; font-weight: 400; font-size: 10.5px; }
+  .mrow .ms { color: #3d4b57; margin: 1px 0; }
+  .mrow.sel { background: #dfe9fb; }
+  .mail-compose { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .mail-fields { flex: none; font-size: 12.5px; }
+  .mail-fields .row { display: flex; gap: 8px; padding: 6px 14px; border-bottom: 1px solid #eef1f3; }
+  .mail-fields .k { color: #8a96a0; width: 56px; flex: none; }
+  .mail-fields .v { color: #22303c; }
+  .mail-fields .pill { background: #e3ecf9; color: #2456a8; border-radius: 10px; padding: 0 8px; }
+  .mail-body { flex: 1; padding: 12px 16px; font-size: 13.5px; line-height: 1.55; color: #22303c; overflow-y: auto; white-space: pre-wrap; }
+  .mail-body.edited { animation: inkin 1.2s ease; }
+
+  /* Notes — full page */
+  #win-notes { left: 400px; top: 340px; width: 600px; height: 450px; z-index: 30; }
+  #win-notes .titlebar { background: linear-gradient(#fbf6e8, #f5eed7); color: #6d6046; }
+  .notes-toolbar { flex: none; display: flex; gap: 14px; padding: 6px 14px; border-bottom: 1px solid #efe8d4; background: #fdf9ec; color: #a3946f; font-size: 13px; }
+  .notes-wrap { flex: 1; display: flex; min-height: 0; }
+  .notes-side { width: 170px; flex: none; border-right: 1px solid #efe8d4; background: #faf6e9; overflow-y: auto; }
+  .nitem { padding: 10px 12px; border-bottom: 1px solid #f1ead6; font-size: 12px; color: #6d6046; cursor: pointer; }
+  .nitem .nt { font-weight: 700; color: #33302a; font-size: 12.5px; }
+  .nitem .nd { font-size: 10.5px; color: #a3946f; margin-top: 1px; }
+  .nitem.sel { background: #f3e9c8; }
+  .notes-body { flex: 1; padding: 14px 20px; overflow-y: auto; background: #fffdf5; font-size: 13.5px; line-height: 1.62; color: #33302a; }
+  .notes-body h4 { margin: 0 0 2px; font-size: 15.5px; color: #201d18; }
+  .notes-body .ndate { font-size: 11px; color: #a3946f; margin-bottom: 12px; }
+  .notes-body p { margin: 0 0 10px; }
+  .notes-body ul { margin: 0 0 10px; padding-left: 20px; }
+  .notes-body li { margin-bottom: 4px; }
+  .notes-body .edited { animation: inkin 1.2s ease; }
+  @keyframes inkin { 0% { background: #dff3ec; } 100% { background: transparent; } }
+
+  /* ── HUD ─────────────────────────────────── */
+  #hud {
+    position: absolute; left: 50%; bottom: 108px; transform: translateX(-50%);
+    width: 620px; max-width: 92%; z-index: 70;
+    background: rgba(22,28,26,0.93); backdrop-filter: blur(14px);
+    border-radius: 16px; color: #e8f0ec; box-shadow: 0 16px 50px rgba(0,0,0,0.45);
+    padding: 12px 16px; transition: opacity .25s, transform .25s;
+  }
+  #hud.hidden { opacity: 0; transform: translate(-50%, 12px); pointer-events: none; }
+  .hud-top { display: flex; align-items: center; gap: 12px; }
+  #orb {
+    width: 34px; height: 34px; border-radius: 50%; flex: none;
+    background: radial-gradient(circle at 35% 30%, #7fe0cb, #0e8f7e 70%);
+    box-shadow: 0 0 0 0 rgba(14,143,126,0.5);
+  }
+  #hud.listening #orb { animation: pulse 1.4s ease infinite; }
+  @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(14,143,126,0.55);} 70% { box-shadow: 0 0 0 14px rgba(14,143,126,0);} 100% { box-shadow: 0 0 0 0 rgba(14,143,126,0);} }
+  #wave { display: flex; align-items: center; gap: 3px; height: 26px; flex: none; width: 74px; }
+  #wave i { width: 4px; border-radius: 2px; background: #58c9b4; height: 6px; }
+  #hud.listening #wave i { animation: wv 0.9s ease-in-out infinite; }
+  #wave i:nth-child(2){ animation-delay: .1s } #wave i:nth-child(3){ animation-delay: .2s } #wave i:nth-child(4){ animation-delay: .3s }
+  #wave i:nth-child(5){ animation-delay: .15s } #wave i:nth-child(6){ animation-delay: .05s } #wave i:nth-child(7){ animation-delay: .25s }
+  @keyframes wv { 0%,100% { height: 5px } 50% { height: 22px } }
+  @media (prefers-reduced-motion: reduce) {
+    #hud.listening #wave i, #hud.listening #orb, .window.flash, .smsg.sent-new, .mail-body.edited, .notes-body .edited { animation: none; }
+  }
+  #transcript { flex: 1; min-width: 0; font-size: 14px; line-height: 1.45; color: #cfe0d9; min-height: 22px; }
+  #transcript .fill { color: #5c6f68; text-decoration: line-through; text-decoration-color: rgba(255,255,255,0.25); }
+  #hudstate { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6fae9f; flex: none; font-weight: 700; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+  .chip {
+    font-size: 11.5px; font-weight: 650; letter-spacing: .02em; border-radius: 999px; padding: 4px 11px;
+    border: 1px solid rgba(255,255,255,0.14); background: rgba(255,255,255,0.07); color: #d7e6df;
+    display: inline-flex; align-items: center; gap: 6px; animation: chipin .3s ease both;
+  }
+  @keyframes chipin { from { opacity: 0; transform: translateY(4px);} to { opacity: 1; transform: none;} }
+  .chip.intent { background: #0e8f7e; border-color: #0e8f7e; color: #fff; }
+  .chip.cmd { background: #6a3d8f; border-color: #6a3d8f; color: #fff; }
+  .chip.mem { background: rgba(240,201,106,0.16); border-color: rgba(240,201,106,0.5); color: #f0c96a; cursor: pointer; }
+  .chip.dict { color: #9fd4c6; }
+  .chip.warn { border-color: rgba(240,166,106,0.5); color: #f0b06a; }
+  .chip .k { opacity: .65; font-weight: 500; }
+
+  /* Diff + plan cards */
+  .hudcard { margin-top: 12px; background: #101614; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 12px 14px; display: none; }
+  .hudcard.show { display: block; animation: chipin .3s ease both; }
+  .hudcard .dtitle { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #6fae9f; font-weight: 700; margin-bottom: 9px; display: flex; justify-content: space-between; gap: 10px; }
+  .diffblock { font-size: 12.5px; line-height: 1.6; color: #c3d4cc; margin-bottom: 9px; font-family: ui-monospace, "SF Mono", Menlo, monospace; max-height: 170px; overflow-y: auto; }
+  .diffblock .plabel { color: #6fae9f; font-weight: 700; }
+  .diffblock del { background: rgba(224,90,90,0.18); color: #e89f9f; text-decoration-color: rgba(224,90,90,0.6); }
+  .diffblock ins { background: rgba(88,201,180,0.16); color: #8fe0cd; text-decoration: none; }
+  #plansteps { margin: 0 0 8px; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+  #plansteps li { display: flex; align-items: center; gap: 9px; font-size: 13px; color: #d7e6df; }
+  #plansteps .stepn { width: 19px; height: 19px; border-radius: 50%; background: rgba(255,255,255,0.1); font-size: 11px; display: flex; align-items: center; justify-content: center; color: #9fd4c6; font-weight: 700; flex: none; }
+  #plansteps .stepapp { font-size: 10.5px; font-weight: 800; letter-spacing: .06em; border-radius: 5px; padding: 2px 7px; flex: none; }
+  .stepapp.slack { background: #5a1e51; color: #f0d9ec; } .stepapp.mail { background: #24466e; color: #d9e6f5; } .stepapp.notes { background: #6d6046; color: #f5eed7; }
+  #plansteps .stepstate { margin-left: auto; color: #58c9b4; font-weight: 700; font-size: 13px; min-width: 18px; text-align: right; }
+  .diffbtns { display: flex; gap: 8px; margin-top: 4px; }
+  .diffbtns button { border-radius: 8px; padding: 6px 14px; font-size: 12.5px; font-weight: 700; border: 1px solid transparent; }
+  .okbtn { background: #0e8f7e; color: #fff; }
+  .okbtn:hover { background: #0fa38f; }
+  .nobtn { background: transparent; color: #b9cac3; border-color: rgba(255,255,255,0.18); }
+
+  /* ── Control bar (scenes + freeform) ─────── */
+  #controlbar {
+    position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 70;
+    display: flex; gap: 8px; align-items: center; flex-wrap: nowrap;
+    background: rgba(250,252,251,0.88); backdrop-filter: blur(10px);
+    padding: 8px 10px; border-radius: 13px; box-shadow: 0 8px 26px rgba(0,0,0,0.25);
+    max-width: 96%;
+  }
+  #controlbar .lbl { font-size: 10.5px; letter-spacing: .07em; text-transform: uppercase; font-weight: 700; color: #5b6a63; padding: 0 2px; }
+  .scenebtn {
+    border: 1px solid #cfd9d4; background: #fff; color: #1f4d44; border-radius: 9px;
+    padding: 6px 9px; font-size: 12px; font-weight: 650; display: flex; align-items: center; gap: 6px; white-space: nowrap;
+  }
+  .scenebtn:hover:not(:disabled) { background: #e9f4f0; border-color: #0e8f7e; }
+  .scenebtn:disabled { opacity: .45; cursor: default; }
+  .scenebtn .n { background: #0e8f7e; color: #fff; width: 16px; height: 16px; border-radius: 50%; font-size: 10px; display: flex; align-items: center; justify-content: center; flex: none; }
+  .scenebtn.done .n { background: #97a8a1; }
+  #ffwrap { display: flex; align-items: center; gap: 6px; border-left: 1px solid #d5dcd8; padding-left: 10px; margin-left: 2px; }
+  #ffinput {
+    width: 240px; border: 1.5px solid #c8d2cd; border-radius: 9px; padding: 6px 10px; font-size: 12.5px;
+    background: #fff; color: #1b2430;
+  }
+  #ffinput::placeholder { color: #93a09a; }
+  #ffgo { border: 0; background: #0e8f7e; color: #fff; border-radius: 9px; padding: 6px 12px; font-size: 12.5px; font-weight: 800; }
+  #ffgo:hover:not(:disabled) { background: #0fa38f; }
+  #ffgo:disabled { opacity: .5; cursor: default; }
+  #resetbtn { border: 0; background: transparent; color: #6b7a73; font-size: 12px; font-weight: 600; padding: 6px 6px; border-radius: 8px; }
+  #resetbtn:hover { background: rgba(0,0,0,0.06); }
+
+  /* ── Journal drawer ───────────────────────── */
+  #journal {
+    position: absolute; top: 38px; right: 10px; width: 320px; max-height: 620px; z-index: 80;
+    background: rgba(250,252,251,0.97); backdrop-filter: blur(12px);
+    border-radius: 13px; box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    display: none; flex-direction: column; overflow: hidden;
+  }
+  #journal.open { display: flex; animation: chipin .25s ease both; }
+  #journal .jhead { padding: 12px 14px 9px; border-bottom: 1px solid #e2e8e5; }
+  #journal .jhead .t { font-size: 13px; font-weight: 800; color: #16332c; }
+  #journal .jhead .s { font-size: 11px; color: #74837c; margin-top: 2px; }
+  #jlist { overflow-y: auto; padding: 8px 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .jempty { font-size: 12px; color: #8b988f; padding: 14px 8px; text-align: center; }
+  .jentry { border: 1px solid #dfe6e2; border-radius: 10px; padding: 9px 11px; background: #fff; font-size: 12px; }
+  .jentry .jtop { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 3px; }
+  .jentry .kind { font-size: 10px; font-weight: 800; letter-spacing: .07em; border-radius: 5px; padding: 2px 6px; }
+  .kind.dictate { background: #e3f0ec; color: #0b6a5d; } .kind.edit { background: #efe6f5; color: #6a3d8f; } .kind.command { background: #f3e6de; color: #a1512a; }
+  .jentry .time { color: #93a09a; font-size: 11px; font-variant-numeric: tabular-nums; }
+  .jentry .sum { color: #2b3a34; line-height: 1.45; }
+  .jentry .app { color: #74837c; }
+  .jentry details { margin-top: 6px; }
+  .jentry summary { font-size: 11px; color: #0b6a5d; font-weight: 700; cursor: pointer; }
+  .jentry .ba { font-size: 11px; line-height: 1.5; margin-top: 5px; border-left: 2px solid #dfe6e2; padding-left: 8px; color: #5a6862; max-height: 110px; overflow-y: auto; white-space: pre-wrap; }
+  .jentry .ba b { color: #2b3a34; }
+  .jentry .undo { margin-top: 7px; border: 1px solid #cdd8d3; background: #f5f8f6; color: #1f4d44; border-radius: 7px; padding: 3px 10px; font-size: 11.5px; font-weight: 700; }
+  .jentry .undo:hover:not(:disabled) { background: #e9f4f0; }
+  .jentry.undone { opacity: .55; } .jentry.undone .sum { text-decoration: line-through; }
+  .jentry .undo:disabled { opacity: .5; cursor: default; }
+
+  /* Memory popover */
+  #mempop {
+    position: absolute; z-index: 90; width: 330px; left: 50%; bottom: 250px; transform: translateX(-50%);
+    background: #fffdf3; border: 1px solid #ecd9a4; border-radius: 12px; box-shadow: 0 18px 50px rgba(60,40,0,0.3);
+    padding: 13px 15px; display: none; font-size: 12.5px; color: #4d4530;
+  }
+  #mempop.show { display: block; animation: chipin .25s ease both; }
+  #mempop .mt { font-size: 11px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: #a07714; margin-bottom: 7px; display: flex; justify-content: space-between; align-items: center; }
+  #mempop .mclose { border: 0; background: transparent; color: #a07714; font-size: 14px; padding: 0 2px; }
+  #mempop .msrc { background: #fff; border: 1px solid #eadfbe; border-radius: 9px; padding: 8px 10px; margin-bottom: 7px; }
+  #mempop .msrc .from { font-weight: 700; color: #33302a; font-size: 12px; }
+  #mempop .msrc .quote { color: #5c564a; margin-top: 2px; line-height: 1.45; }
+  #mempop .mnote { color: #857a5e; font-size: 11.5px; line-height: 1.5; }
+
+  /* Intro */
+  #intro { position: absolute; inset: 0; z-index: 100; display: flex; align-items: center; justify-content: center; background: rgba(16,22,20,0.45); backdrop-filter: blur(3px); }
+  #intro.gone { display: none; }
+  #introcard { width: 520px; max-width: 92%; background: #fbfdfc; border-radius: 16px; padding: 26px 30px; box-shadow: 0 30px 80px rgba(0,0,0,0.5); }
+  #introcard .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  #introcard .brand .o { width: 26px; height: 26px; border-radius: 50%; background: radial-gradient(circle at 35% 30%, #7fe0cb, #0e8f7e 70%); }
+  #introcard .brand b { font-size: 17px; letter-spacing: -0.01em; color: #10231e; }
+  #introcard h2 { margin: 0 0 8px; font-size: 21px; letter-spacing: -0.02em; color: #10231e; line-height: 1.25; }
+  #introcard p { margin: 0 0 10px; font-size: 13.5px; line-height: 1.55; color: #45544d; }
+  #introcard ol { margin: 0 0 14px; padding-left: 20px; font-size: 13px; color: #45544d; line-height: 1.6; }
+  #introcard .ff { background: #eef6f3; border: 1px solid #cfe4dd; border-radius: 9px; padding: 8px 11px; font-size: 12.5px; color: #1f4d44; margin-bottom: 16px; }
+  #startbtn { width: 100%; border: 0; background: #0e8f7e; color: #fff; font-weight: 800; font-size: 14px; padding: 11px; border-radius: 10px; }
+  #startbtn:hover { background: #0fa38f; }
+</style>
+
+<div id="frame"><div id="stagewrap"><div id="stage">
+
+  <div id="menubar">
+    <span></span><span class="app">Notes</span><span class="m">File</span><span class="m">Edit</span><span class="m">Format</span><span class="m">View</span><span class="m">Window</span><span class="m">Help</span>
+    <div class="spacer"></div>
+    <div id="micdot"></div>
+    <button id="journalbtn" aria-label="Open Mull journal">🌀 Mull <span class="badge" id="jcount">0</span></button>
+    <span>🔋</span><span>📶</span><span id="clock">Sat 13 Sep 14:36</span>
+  </div>
+
+  <div id="caption"></div>
+
+  <!-- Slack -->
+  <div class="window" id="win-slack">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Slack — Meridian HQ</div></div>
+    <div class="slack-body">
+      <div class="slack-side">
+        <div class="slack-ws">Meridian ▾</div>
+        <div class="sh">Channels</div>
+        <div class="ch"># general</div>
+        <div class="ch sel"># launch-planning</div>
+        <div class="ch"># design</div>
+        <div class="ch"># dev</div>
+        <div class="ch"># random</div>
+        <div class="sh">Direct messages</div>
+        <div class="ch dm"><i></i>Sarah Kim</div>
+        <div class="ch dm"><i></i>Priya</div>
+      </div>
+      <div class="slack-main">
+        <div class="slack-chhead"><div class="chn"># launch-planning</div><div class="topic">Everything for the Oct 6 launch · 8 members</div></div>
+        <div class="slack-msgs" id="slackmsgs">
+          <div class="sday">Today</div>
+          <div class="smsg"><div class="av" style="background:#7c5cbf">P</div><div><span class="who">Priya <span class="t">9:02 AM</span></span><p>Team — pricing page copy is still unowned. Anyone able to take it by Friday?</p><div class="react"><span>👀 2</span></div></div></div>
+          <div class="smsg" id="sarahmsg"><div class="av" style="background:#2f8f5b">S</div><div><span class="who">Sarah Kim <span class="t">9:14 AM</span></span><p>Btw — let's lock <b>70/30</b> on the revenue split. Works for us if it works for you.</p><div class="react"><span>👍 3</span><span>🎉 1</span></div></div></div>
+          <div class="smsg"><div class="av" style="background:#c2703d">D</div><div><span class="who">Dev <span class="t">9:31 AM</span></span><p>Parakeet benchmark run finishes Wed, will post numbers here.</p></div></div>
+        </div>
+        <div class="slack-composer">
+          <div class="slack-tools"><b>B</b><i>I</i><span>🔗</span><span>@</span><span>😊</span><span style="margin-left:auto">🎙️</span></div>
+          <div class="slack-input" id="slackinput"><span class="ph">Message #launch-planning</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mail -->
+  <div class="window" id="win-mail">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Re: Q4 partnership terms — Mail</div></div>
+    <div class="mail-toolbar"><button id="sendbtn">📤 Send</button><button>📎 Attach</button><button>Aa</button><span style="margin-left:auto;font-size:11px;color:#93a09a">Draft — autosaved</span></div>
+    <div class="mail-body-wrap">
+      <div class="mail-list">
+        <div class="mrow sel"><div class="mf">Sarah Kim <span class="mt2">9:26</span></div><div class="ms">Re: Q4 partnership terms</div>Attached the current terms doc — one open item…</div>
+        <div class="mrow"><div class="mf">Legal <span class="mt2">Thu</span></div><div class="ms">MSA template v3</div>Updated indemnification language per…</div>
+        <div class="mrow"><div class="mf">Priya <span class="mt2">Wed</span></div><div class="ms">Launch checklist</div>Rolling doc for Oct 6 — please add your…</div>
+      </div>
+      <div class="mail-compose">
+        <div class="mail-fields">
+          <div class="row"><span class="k">To:</span><span class="v"><span class="pill">Sarah Kim</span></span></div>
+          <div class="row"><span class="k">From:</span><span class="v">maya@meridian.co</span></div>
+          <div class="row"><span class="k">Subject:</span><span class="v">Re: Q4 partnership terms</span></div>
+        </div>
+        <div class="mail-body" id="mailbody"><span class="ph">Draft your reply…</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notes -->
+  <div class="window" id="win-notes">
+    <div class="titlebar"><div class="lights"><i></i><i></i><i></i></div><div class="tname">Notes</div></div>
+    <div class="notes-toolbar"><span>☰</span><span>Aa</span><span>☑︎</span><span>⊞</span><span style="margin-left:auto">↑ Share</span></div>
+    <div class="notes-wrap">
+      <div class="notes-side">
+        <div class="nitem sel" id="ni-launch" role="button" tabindex="0"><div class="nt">Launch narrative</div><div class="nd">14:12 · draft</div></div>
+        <div class="nitem" id="ni-pricing" role="button" tabindex="0"><div class="nt">Pricing page — copy</div><div class="nd">Yesterday · outline</div></div>
+        <div class="nitem"><div class="nt">Interview notes — J.</div><div class="nd">Tuesday</div></div>
+      </div>
+      <div class="notes-body" id="notesbody">
+        <div id="note-launch">
+          <h4>Launch narrative — draft</h4>
+          <div class="ndate">13 September 2026 at 14:12</div>
+          <p id="np1">We're launching Mull because typing is a bottleneck for thinking, and we think there's something here.</p>
+          <p id="np2">Basically the idea is that when people talk they can get their ideas out way faster than typing, and the problem is that most tools just transcribe what you say without helping you shape it into anything, so you end up with a wall of text you still have to edit by hand anyway.</p>
+        </div>
+        <div id="note-pricing" style="display:none">
+          <h4>Pricing page — copy</h4>
+          <div class="ndate">12 September 2026 at 17:40</div>
+          <p><b>Free</b> — unlimited local dictation + journal. Your silicon, your words.</p>
+          <p><b>Pro — $10/mo</b> — Sculpt mode, working memory, cloud reasoning (zero-retention), commands.</p>
+          <p><b>Believer — $179 once</b> — everything, bring your own API key.</p>
+          <p style="color:#a3946f">TODO: hero line. Waiting on Parakeet benchmarks (Wed).</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Journal -->
+  <div id="journal" role="dialog" aria-label="Mull journal">
+    <div class="jhead"><div class="t">Journal — every action, undoable</div><div class="s">Stored locally · append-only · the intent-to-action trail</div></div>
+    <div id="jlist"><div class="jempty">Nothing yet. Run a scene — every insertion, edit, and command lands here with its before/after.</div></div>
+  </div>
+
+  <!-- Memory popover -->
+  <div id="mempop" role="dialog" aria-label="Working memory used">
+    <div class="mt">Working memory used <button class="mclose" id="memclose" aria-label="Close">✕</button></div>
+    <div class="msrc"><div class="from">Slack · #launch-planning · 9:14 AM</div><div class="quote">"Let's lock <b>70/30</b> on the revenue split. Works for us if it works for you." — Sarah Kim</div></div>
+    <div class="mnote">Mull briefed this draft with one item from today's working memory. Memory is local, inspectable, and prunable — every citation shows exactly what was used, and from where.</div>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div class="hud-top">
+      <div id="orb"></div>
+      <div id="wave"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div id="transcript"></div>
+      <div id="hudstate">idle</div>
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="hudcard" id="diffcard">
+      <div class="dtitle"><span>Proposed edit — preview before it touches your text</span><span id="difftargets"></span></div>
+      <div class="diffblock" id="diffblocks"></div>
+      <div class="diffbtns"><button class="okbtn" id="applybtn">Apply ⏎</button><button class="nobtn" id="cancelbtn">Cancel</button></div>
+    </div>
+    <div class="hudcard" id="plancard">
+      <div class="dtitle"><span>Action plan — nothing runs until you approve</span><span id="plantargets"></span></div>
+      <ol id="plansteps"></ol>
+      <div class="diffbtns"><button class="okbtn" id="planok">Approve ⏎</button><button class="nobtn" id="plancancel">Cancel</button></div>
+    </div>
+  </div>
+
+  <!-- Control bar -->
+  <div id="controlbar">
+    <span class="lbl">Scenes</span>
+    <button class="scenebtn" id="sb1"><span class="n">1</span>Dictate</button>
+    <button class="scenebtn" id="sb2"><span class="n">2</span>Memory</button>
+    <button class="scenebtn" id="sb3"><span class="n">3</span>Sculpt</button>
+    <button class="scenebtn" id="sb4"><span class="n">4</span>Command</button>
+    <button class="scenebtn" id="sb5"><span class="n">5</span>Warmer</button>
+    <button class="scenebtn" id="sb6"><span class="n">6</span>Bullets</button>
+    <div id="ffwrap">
+      <input id="ffinput" type="text" placeholder="Or type what you'd say… (e.g. “make this shorter”)" aria-label="Type what you would say to Mull">
+      <button id="ffgo">Say it</button>
+    </div>
+    <button id="resetbtn">Reset</button>
+  </div>
+
+  <!-- Intro -->
+  <div id="intro">
+    <div id="introcard">
+      <div class="brand"><div class="o"></div><b>Mull</b></div>
+      <h2>Hold a key. Think out loud. Watch what it does — literally.</h2>
+      <p>An interactive mock of Mull working across Slack, Mail, and Notes. Nothing is hidden: every utterance shows its parsed intent, edits preview as diffs, commands preview as action plans, and everything lands in an undoable journal (🌀 in the menu bar).</p>
+      <ol>
+        <li><b>Dictate</b> — filler stripped, casual Slack tone, dictionary fix.</li>
+        <li><b>Memory</b> — a Mail reply already briefed by this morning's Slack thread.</li>
+        <li><b>Sculpt</b> — reshape a rough Notes draft by voice, via diff preview.</li>
+        <li><b>Command</b> — "send that and open the pricing doc" → action plan → approve.</li>
+        <li><b>Warmer</b> — a generative tone edit on the email draft.</li>
+        <li><b>Bullets</b> — restructure a paragraph into a list.</li>
+      </ol>
+      <div class="ff">Then go off-script: <b>type what you'd say</b> in the bar below — the mock's local intent parser routes it to dictate / edit / command for real. Try "make this shorter" in Notes, or "send that and open the pricing doc". (Press Space to run the next scene.)</div>
+      <button id="startbtn">Enter the desktop</button>
+    </div>
+  </div>
+
+</div></div></div>
+
+<script>
+(function(){
+  "use strict";
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var SP = reduced ? 0.25 : 1;
+  function sleep(ms){ return new Promise(function(r){ setTimeout(r, ms*SP); }); }
+  function $(id){ return document.getElementById(id); }
+  function esc(s){ var d=document.createElement("div"); d.textContent=s; return d.innerHTML; }
+
+  var hud=$("hud"), transcript=$("transcript"), chips=$("chips"), hudstate=$("hudstate"),
+      diffcard=$("diffcard"), diffblocks=$("diffblocks"), difftargets=$("difftargets"),
+      plancard=$("plancard"), plansteps=$("plansteps"), plantargets=$("plantargets"),
+      micdot=$("micdot"), caption=$("caption"), jlist=$("jlist"), jcount=$("jcount"),
+      journal=$("journal"), mempop=$("mempop");
+
+  var wins = { slack: $("win-slack"), mail: $("win-mail"), notes: $("win-notes") };
+  var appNames = { slack: "Slack", mail: "Mail", notes: "Notes" };
+  var busy=false, entries=0, sceneDone={1:false,2:false,3:false,4:false,5:false,6:false};
+  var focused = "notes";
+
+  function tick(){ var d=new Date(); $("clock").textContent="Sat 13 Sep "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+  tick(); setInterval(tick, 20000);
+  function nowT(){ var d=new Date(); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+
+  $("startbtn").addEventListener("click", function(){ $("intro").classList.add("gone"); });
+  $("journalbtn").addEventListener("click", function(){ journal.classList.toggle("open"); });
+  $("memclose").addEventListener("click", function(){ mempop.classList.remove("show"); });
+
+  Object.keys(wins).forEach(function(k){
+    wins[k].addEventListener("mousedown", function(){ if(!busy) focusWin(k); });
+  });
+  function focusWin(k){
+    focused=k;
+    Object.keys(wins).forEach(function(w){
+      wins[w].classList.toggle("active", w===k);
+      wins[w].classList.toggle("dim", w!==k);
+    });
+    document.querySelector("#menubar .app").textContent = appNames[k];
+  }
+
+  /* Notes: two notes, switchable */
+  var currentNote="launch";
+  function showNote(which){
+    currentNote=which;
+    $("note-launch").style.display = which==="launch" ? "" : "none";
+    $("note-pricing").style.display = which==="pricing" ? "" : "none";
+    $("ni-launch").classList.toggle("sel", which==="launch");
+    $("ni-pricing").classList.toggle("sel", which==="pricing");
+  }
+  ["launch","pricing"].forEach(function(w){
+    var el=$( w==="launch" ? "ni-launch" : "ni-pricing");
+    function go(){ if(!busy){ showNote(w); focusWin("notes"); } }
+    el.addEventListener("click", go);
+    el.addEventListener("keydown", function(ev){ if(ev.key==="Enter"||ev.key===" "){ ev.preventDefault(); go(); } });
+  });
+
+  function say(t){ caption.textContent=t; caption.classList.add("show"); }
+  function unsay(){ caption.classList.remove("show"); }
+
+  function chip(html, cls){
+    var s=document.createElement("span"); s.className="chip"+(cls?" "+cls:""); s.innerHTML=html;
+    chips.appendChild(s); return s;
+  }
+  function clearHud(){
+    chips.innerHTML=""; transcript.innerHTML="";
+    diffcard.classList.remove("show"); diffblocks.innerHTML="";
+    plancard.classList.remove("show"); plansteps.innerHTML="";
+  }
+  function hudShow(){ hud.classList.remove("hidden"); }
+  async function hudDone(){
+    hudstate.textContent="done";
+    await sleep(1700);
+    hud.classList.add("hidden"); clearHud(); hudstate.textContent="idle"; unsay();
+  }
+
+  async function listen(words){
+    hudShow(); hud.classList.add("listening");
+    micdot.classList.add("on"); hudstate.textContent="listening";
+    transcript.innerHTML="";
+    for(var i=0;i<words.length;i++){
+      var w=words[i], fill = w.charAt(0)==="~";
+      var s=document.createElement("span");
+      if(fill) s.className="rawf";
+      s.textContent=(i?" ":"")+(fill?w.slice(1):w);
+      transcript.appendChild(s);
+      await sleep(115 + Math.random()*135);
+    }
+    await sleep(280);
+    hud.classList.remove("listening"); micdot.classList.remove("on");
+    hudstate.textContent="parsing";
+    transcript.querySelectorAll(".rawf").forEach(function(f){ f.className="fill"; });
+    await sleep(600);
+  }
+  function typed(text){
+    hudShow(); hud.classList.remove("listening"); micdot.classList.remove("on");
+    transcript.textContent=text; hudstate.textContent="typed → parsing";
+    return sleep(500);
+  }
+
+  async function typeInto(el, text, cps){
+    el.innerHTML="";
+    var txt=document.createElement("span"), c=document.createElement("span"); c.className="caret";
+    el.appendChild(txt); el.appendChild(c);
+    var per=1000/(cps||48);
+    for(var i=0;i<text.length;i++){
+      txt.textContent+=text.charAt(i);
+      el.scrollTop=el.scrollHeight;
+      await sleep(per*(0.6+Math.random()*0.8));
+    }
+    await sleep(350); c.remove();
+  }
+
+  /* ── Journal ─────────────────────────────── */
+  function addJournal(kind, app, sum, before, after, undoFn){
+    var e=document.createElement("div"); e.className="jentry";
+    var h='<div class="jtop"><span class="kind '+kind+'">'+kind.toUpperCase()+'</span><span class="time">'+nowT()+'</span></div>'+
+          '<div class="sum">'+esc(sum)+' <span class="app">· '+esc(app)+'</span></div>';
+    if(before!=null || after!=null){
+      h+='<details><summary>before / after</summary><div class="ba">'+
+         (before!=null?('<b>before</b>\n'+esc(before)+'\n\n'):'')+
+         (after!=null?('<b>after</b>\n'+esc(after)):'')+'</div></details>';
+    }
+    e.innerHTML=h;
+    if(undoFn){
+      var b=document.createElement("button"); b.className="undo"; b.textContent="Undo";
+      b.addEventListener("click", function(){
+        if(busy) return;
+        undoFn(); e.classList.add("undone"); b.disabled=true; b.textContent="Undone";
+      });
+      e.appendChild(b);
+    }
+    var empty=jlist.querySelector(".jempty"); if(empty) empty.remove();
+    jlist.prepend(e);
+    entries++; jcount.textContent=String(entries);
+  }
+
+  /* ── App accessors ───────────────────────── */
+  var slackInput=$("slackinput"), mailBody=$("mailbody");
+  function slackDraft(){ return slackInput.querySelector(".ph") ? "" : slackInput.textContent; }
+  function setSlack(t){ slackInput.innerHTML = t ? "" : '<span class="ph">Message #launch-planning</span>'; if(t) slackInput.textContent=t; }
+  function mailDraft(){ return mailBody.querySelector(".ph") ? "" : mailBody.textContent; }
+  function setMail(t){ mailBody.innerHTML = t ? "" : '<span class="ph">Draft your reply…</span>'; if(t) mailBody.textContent=t; }
+
+  /* ── Cards (diff & plan) ─────────────────── */
+  function awaitChoice(okBtn, noBtn){
+    return new Promise(function(resolve){
+      function onA(){ cleanup(); resolve(true); }
+      function onC(){ cleanup(); resolve(false); }
+      function onKey(ev){ if(ev.key==="Enter"){ ev.preventDefault(); onA(); } if(ev.key==="Escape"){ onC(); } }
+      function cleanup(){ okBtn.removeEventListener("click",onA); noBtn.removeEventListener("click",onC); document.removeEventListener("keydown",onKey); }
+      okBtn.addEventListener("click",onA); noBtn.addEventListener("click",onC); document.addEventListener("keydown",onKey);
+    });
+  }
+  function showDiff(html, targetsLabel){
+    diffblocks.innerHTML=html; difftargets.textContent=targetsLabel;
+    diffcard.classList.add("show"); hudstate.textContent="preview";
+    return awaitChoice($("applybtn"), $("cancelbtn")).then(function(ok){ diffcard.classList.remove("show"); return ok; });
+  }
+  function showPlan(steps, label){
+    plansteps.innerHTML="";
+    steps.forEach(function(st,i){
+      var li=document.createElement("li");
+      li.innerHTML='<span class="stepn">'+(i+1)+'</span><span class="stepapp '+st.app+'">'+appNames[st.app]+'</span><span>'+esc(st.text)+'</span><span class="stepstate"></span>';
+      plansteps.appendChild(li);
+    });
+    plantargets.textContent=label||"";
+    plancard.classList.add("show"); hudstate.textContent="plan";
+    return awaitChoice($("planok"), $("plancancel")).then(function(ok){ if(!ok) plancard.classList.remove("show"); return ok; });
+  }
+  async function runPlan(steps){
+    hudstate.textContent="executing";
+    var lis=plansteps.querySelectorAll("li");
+    for(var i=0;i<steps.length;i++){
+      lis[i].querySelector(".stepstate").textContent="…";
+      await steps[i].run();
+      lis[i].querySelector(".stepstate").textContent="✓";
+      await sleep(500);
+    }
+    await sleep(700);
+    plancard.classList.remove("show");
+  }
+
+  /* ── Executable actions ──────────────────── */
+  function postSlackMessage(text){
+    var m=document.createElement("div"); m.className="smsg sent-new";
+    m.innerHTML='<div class="av" style="background:#0e8f7e">M</div><div><span class="who">Maya <span class="t">'+nowT()+'</span></span><p></p></div>';
+    m.querySelector("p").textContent=text;
+    $("slackmsgs").appendChild(m);
+    $("slackmsgs").scrollTop=$("slackmsgs").scrollHeight;
+    return m;
+  }
+
+  /* ── Text transforms (the mock's offline "edit engine") ── */
+  var FILLERS=/\b(um+|uh+|erm|like,|you know,?|basically,?|i mean,?|sort of|kind of)\b/gi;
+  function sentences(t){ return (t.match(/[^.!?]+[.!?]*/g)||[t]).map(function(s){return s.trim();}).filter(Boolean); }
+  function cleanDictation(t){
+    var s=t.replace(FILLERS," ").replace(/\s{2,}/g," ").trim();
+    s=s.replace(/\bparakeet\b/gi,"Parakeet").replace(/\bok\b/gi,"OK");
+    if(s) s=s.charAt(0).toUpperCase()+s.slice(1);
+    if(s && !/[.!?…]$/.test(s)) s+=".";
+    return s;
+  }
+  function shorten(t){
+    var ss=sentences(t);
+    if(ss.length<=1){
+      var words=t.split(/\s+/);
+      var kept=words.slice(0, Math.max(6, Math.ceil(words.length*0.6))).join(" ").replace(/[,;:]$/,"");
+      if(!/[.!?]$/.test(kept)) kept+=".";
+      return { after: kept, keptIdx: null, ss: null };
+    }
+    var keep=Math.max(1, Math.ceil(ss.length*0.5));
+    var keptIdx={}; for(var i=0;i<keep;i++) keptIdx[i]=true; keptIdx[ss.length-1]=true;
+    var after=ss.filter(function(_,i){return keptIdx[i];}).join(" ");
+    return { after: after, keptIdx: keptIdx, ss: ss };
+  }
+  function bulletize(t){
+    var parts=t.split(/,?\s+(?:and|but|so)\s+|(?<=[.!?])\s+/g).map(function(p){return p.trim().replace(/[.,;]$/,"");}).filter(function(p){return p.length>3;});
+    if(parts.length<2) parts=sentences(t).map(function(s){return s.replace(/[.,;]$/,"");});
+    return parts.map(function(p){ return p.charAt(0).toUpperCase()+p.slice(1); });
+  }
+
+  /* ══ SCENES ═══════════════════════════════ */
+  var slackFinal="Yeah, I can take the pricing page 👍 Just need the final Parakeet benchmarks from dev before Thursday.";
+  var mailFinal="Hi Sarah,\n\nWe're aligned on the 70/30 revenue split we discussed this morning. Could you send over the redlines by Wednesday?\n\nBest,\nMaya";
+  var mailWarm="Hi Sarah,\n\nLove it — 70/30 works for us. Send the redlines over by Wednesday and we're set.\n\nThanks!\nMaya";
+  var n1_before="We're launching Mull because typing is a bottleneck for thinking, and we think there's something here.";
+  var n1_after="Typing is a bottleneck for thinking. Mull removes it.";
+  var n2_before="Basically the idea is that when people talk they can get their ideas out way faster than typing, and the problem is that most tools just transcribe what you say without helping you shape it into anything, so you end up with a wall of text you still have to edit by hand anyway.";
+  var n2_after="Speaking is the fastest way to get ideas out — but most tools stop at transcription, leaving a wall of text to edit by hand. Mull shapes thought into structure as you speak.";
+
+  async function scene1(){
+    focusWin("slack");
+    say("Scene 1 · Push-to-talk dictation — filler stripped, tone matched to Slack, dictionary applied.");
+    clearHud(); await sleep(500);
+    await listen(["~um","yeah","i","can","take","the","pricing","page","~uh","just","need","the","final","parakeet","benchmarks","from","dev","before","thursday"]);
+    chip('<span class="k">intent</span> DICTATE → Slack',"intent");
+    chip('<span class="k">tone</span> casual · #launch-planning');
+    chip('<span class="k">dictionary</span> parakeet → Parakeet ✓',"dict");
+    hudstate.textContent="inserting"; await sleep(600);
+    var before=slackDraft();
+    await typeInto(slackInput, slackFinal, 55);
+    addJournal("dictate","Slack — #launch-planning","Inserted 17 words at caret (2 fillers removed, 1 dictionary fix)", null, slackFinal, function(){ setSlack(before); });
+    sceneDone[1]=true; $("sb1").classList.add("done");
+    await hudDone();
+  }
+
+  async function scene2(){
+    focusWin("mail");
+    say("Scene 2 · Context continuity — the draft arrives already briefed by this morning's Slack thread.");
+    clearHud(); await sleep(500);
+    await listen(["reply","to","sarah","that","we're","aligned","on","the","revenue","split","we","discussed","this","morning","and","ask","for","the","redlines","by","wednesday"]);
+    chip('<span class="k">intent</span> DICTATE → Mail',"intent");
+    chip('<span class="k">tone</span> formal · email');
+    var mc=chip('<span class="k">memory</span> Slack · 9:14 AM · "70/30" ⓘ',"mem");
+    mc.setAttribute("role","button"); mc.setAttribute("tabindex","0");
+    var showMem=function(){
+      mempop.classList.add("show");
+      var sm=$("sarahmsg"); sm.classList.add("hl-src");
+      setTimeout(function(){ sm.classList.remove("hl-src"); },3000);
+    };
+    mc.addEventListener("click",showMem);
+    mc.addEventListener("keydown",function(ev){ if(ev.key==="Enter"||ev.key===" ") showMem(); });
+    hudstate.textContent="drafting"; await sleep(700);
+    var before=mailDraft();
+    await typeInto(mailBody, mailFinal, 50);
+    addJournal("dictate","Mail — Re: Q4 partnership terms","Drafted reply · 1 memory citation (Slack, 9:14 AM)", null, mailFinal, function(){ setMail(before); });
+    sceneDone[2]=true; $("sb2").classList.add("done");
+    say("Tap the amber memory chip to see exactly what Mull used — and where it came from.");
+    await sleep(2300);
+    await hudDone();
+  }
+
+  async function scene3(){
+    focusWin("notes"); showNote("launch");
+    say("Scene 3 · Transparent intent-to-action — the edit is a previewed diff, applied only when you say so.");
+    clearHud(); await sleep(500);
+    await listen(["make","the","opening","punchier","and","tighten","the","second","paragraph"]);
+    chip('<span class="k">intent</span> EDIT → Notes',"intent");
+    chip('<span class="k">targets</span> ¶1 · ¶2');
+    chip('<span class="k">mode</span> preview before apply');
+    await sleep(500);
+    var html='<span class="plabel">¶1</span>&nbsp; <del>We’re launching Mull because typing</del> <ins>Typing</ins> is a bottleneck for thinking<del>, and we think there’s something here</del>. <ins>Mull removes it.</ins><br><br>'+
+             '<span class="plabel">¶2</span>&nbsp; <del>Basically the idea is that when people talk they can get their ideas out way faster than typing, and the problem is that</del> <ins>Speaking is the fastest way to get ideas out — but</ins> most tools <del>just transcribe what you say without helping you shape it into anything, so you end up with</del> <ins>stop at transcription, leaving</ins> a wall of text <del>you still have</del> to edit by hand<del> anyway</del>. <ins>Mull shapes thought into structure as you speak.</ins>';
+    var ok=await showDiff(html,"2 ranges · Notes");
+    if(ok){
+      hudstate.textContent="applying";
+      var p1=$("np1"), p2=$("np2"), b1=p1.textContent, b2=p2.textContent;
+      wins.notes.classList.add("flash");
+      p1.textContent=n1_after; p1.classList.add("edited"); await sleep(300);
+      p2.textContent=n2_after; p2.classList.add("edited");
+      setTimeout(function(){ wins.notes.classList.remove("flash"); p1.classList.remove("edited"); p2.classList.remove("edited"); },1200);
+      addJournal("edit","Notes — Launch narrative","Rewrote 2 paragraphs (−58 words) · previewed, approved", b1+"\n\n"+b2, n1_after+"\n\n"+n2_after, function(){ p1.textContent=b1; p2.textContent=b2; });
+      sceneDone[3]=true; $("sb3").classList.add("done");
+    } else { hudstate.textContent="cancelled"; }
+    await hudDone();
+  }
+
+  async function scene4(){
+    focusWin("slack");
+    say("Scene 4 · A voice command — Mull shows its plan and does nothing until you approve.");
+    clearHud(); await sleep(500);
+    var autofilled=false;
+    if(!slackDraft()){ setSlack(slackFinal); autofilled=true; }
+    await listen(["send","that","and","open","the","pricing","doc"]);
+    chip('<span class="k">intent</span> COMMAND · 2 steps',"cmd");
+    chip('<span class="k">"that" →</span> your Slack draft'+(autofilled?" (auto-filled from Scene 1)":""));
+    chip('<span class="k">"pricing doc" →</span> Notes · "Pricing page — copy"');
+    await sleep(500);
+    var draft=slackDraft(), sentMsg=null, prevNote=currentNote;
+    var steps=[
+      { app:"slack", text:'Send draft to #launch-planning', run: async function(){ sentMsg=postSlackMessage(draft); setSlack(""); await sleep(400); } },
+      { app:"notes", text:'Open note "Pricing page — copy"', run: async function(){ focusWin("notes"); showNote("pricing"); wins.notes.classList.add("flash"); setTimeout(function(){wins.notes.classList.remove("flash");},1000); await sleep(300); } }
+    ];
+    var ok=await showPlan(steps,"2 steps · Slack + Notes");
+    if(ok){
+      await runPlan(steps);
+      addJournal("command","Slack + Notes",'Ran 2-step plan: sent message, opened "Pricing page — copy"', null, draft, function(){
+        if(sentMsg) sentMsg.remove();
+        setSlack(draft); showNote(prevNote);
+      });
+      sceneDone[4]=true; $("sb4").classList.add("done");
+    } else { hudstate.textContent="cancelled"; }
+    await hudDone();
+  }
+
+  async function scene5(){
+    focusWin("mail");
+    say("Scene 5 · Generative tone edit — 'warmer and shorter', previewed as a diff on your own draft.");
+    clearHud(); await sleep(500);
+    var autofilled=false;
+    if(!mailDraft()){ setMail(mailFinal); autofilled=true; }
+    await listen(["make","it","warmer","and","a","little","shorter"]);
+    chip('<span class="k">intent</span> EDIT → Mail',"intent");
+    chip('<span class="k">ops</span> tone: warmer · length: −20%');
+    if(autofilled) chip('<span class="k">target</span> draft auto-filled from Scene 2');
+    await sleep(500);
+    var html='<del>We’re aligned on the 70/30 revenue split we discussed this morning.</del> <ins>Love it — 70/30 works for us.</ins> '+
+             '<del>Could you send over the redlines by Wednesday?</del> <ins>Send the redlines over by Wednesday and we’re set.</ins><br>'+
+             '<del>Best,</del> <ins>Thanks!</ins> Maya';
+    var ok=await showDiff(html,"1 draft · Mail");
+    if(ok){
+      hudstate.textContent="applying";
+      var before=mailDraft();
+      setMail(mailWarm);
+      mailBody.classList.add("edited"); wins.mail.classList.add("flash");
+      setTimeout(function(){ mailBody.classList.remove("edited"); wins.mail.classList.remove("flash"); },1200);
+      addJournal("edit","Mail — Re: Q4 partnership terms","Tone edit: warmer, −12 words · previewed, approved", before, mailWarm, function(){ setMail(before); });
+      sceneDone[5]=true; $("sb5").classList.add("done");
+    } else { hudstate.textContent="cancelled"; }
+    await hudDone();
+  }
+
+  async function scene6(){
+    focusWin("notes"); showNote("launch");
+    say("Scene 6 · Structural edit — a paragraph becomes a list, same preview-first pipeline.");
+    clearHud(); await sleep(500);
+    await listen(["turn","the","second","paragraph","into","bullet","points"]);
+    chip('<span class="k">intent</span> EDIT → Notes',"intent");
+    chip('<span class="k">op</span> restructure ¶2 → list');
+    await sleep(500);
+    var p2=$("np2"), cur=p2.textContent;
+    var bullets = (cur===n2_after)
+      ? ["Speaking is the fastest way to get ideas out","Most tools stop at transcription — a wall of text to edit by hand","Mull shapes thought into structure as you speak"]
+      : bulletize(cur);
+    var html='<span class="plabel">¶2</span>&nbsp; <del>'+esc(cur)+'</del><br>'+bullets.map(function(b){ return '<ins>• '+esc(b)+'</ins>'; }).join("<br>");
+    var ok=await showDiff(html,"1 range · Notes");
+    if(ok){
+      hudstate.textContent="applying";
+      var ul=document.createElement("ul"); ul.id="np2"; ul.className="edited";
+      bullets.forEach(function(b){ var li=document.createElement("li"); li.textContent=b; ul.appendChild(li); });
+      p2.replaceWith(ul); wins.notes.classList.add("flash");
+      setTimeout(function(){ ul.classList.remove("edited"); wins.notes.classList.remove("flash"); },1200);
+      addJournal("edit","Notes — Launch narrative","Restructured ¶2 into "+bullets.length+" bullets · previewed, approved", cur, bullets.map(function(b){return "• "+b;}).join("\n"), function(){
+        var np=document.createElement("p"); np.id="np2"; np.textContent=cur; ul.replaceWith(np);
+      });
+      sceneDone[6]=true; $("sb6").classList.add("done");
+    } else { hudstate.textContent="cancelled"; }
+    await hudDone();
+  }
+
+  /* ══ FREE-FORM INTENT PARSER ══════════════ */
+  function parseIntent(text){
+    var t=text.toLowerCase().trim();
+    var cmdVerbs=/^(send|open|post|switch to|go to)\b/;
+    if(cmdVerbs.test(t) || / and (open|send|post)\b/.test(t)) return "command";
+    var editVerbs=/\b(make|tighten|shorten|rewrite|reword|redo|turn|convert|bulletize|expand|fix|change)\b/;
+    var editHints=/\b(shorter|punchier|warmer|colder|formal|casual|bullets?|list|tighter|longer|clearer)\b/;
+    var deixis=/\b(this|that|it|the (first |second |last )?(paragraph|sentence|line|draft|message|email|note))\b/;
+    if((editVerbs.test(t)||editHints.test(t)) && (deixis.test(t)||editHints.test(t))) return "edit";
+    return "dictate";
+  }
+
+  function focusedTarget(){
+    if(focused==="slack") return { get: slackDraft, set: setSlack, label: "Slack draft", el: slackInput };
+    if(focused==="mail")  return { get: mailDraft,  set: setMail,  label: "Mail draft",  el: mailBody };
+    var p2=$("np2");
+    if(p2 && p2.tagName==="P") return { get: function(){return p2.textContent;}, set: function(v){ $("np2").textContent=v; }, label: "Notes · ¶2", el: p2 };
+    var p1=$("np1");
+    return { get: function(){return p1.textContent;}, set: function(v){ p1.textContent=v; }, label: "Notes · ¶1", el: p1 };
+  }
+
+  async function freeform(text){
+    clearHud();
+    var intent=parseIntent(text);
+    await typed(text);
+    var t=text.toLowerCase();
+
+    if(intent==="dictate"){
+      chip('<span class="k">intent</span> DICTATE → '+appNames[focused],"intent");
+      var cleaned=cleanDictation(text);
+      if(cleaned!==text.trim()) chip('<span class="k">cleanup</span> fillers stripped · cased · punctuated',"dict");
+      hudstate.textContent="inserting"; await sleep(500);
+      if(focused==="notes"){
+        var host = currentNote==="launch" ? $("note-launch") : $("note-pricing");
+        var np=document.createElement("p"); host.appendChild(np);
+        await typeInto(np, cleaned, 55);
+        addJournal("dictate","Notes — "+(currentNote==="launch"?"Launch narrative":"Pricing page"),"Appended a paragraph ("+cleaned.split(/\s+/).length+" words)", null, cleaned, function(){ np.remove(); });
+      } else {
+        var tg=focusedTarget(), before=tg.get();
+        var merged=(before?before+(focused==="mail"?"\n\n":" "):"")+cleaned;
+        await typeInto(tg.el, merged, 55);
+        addJournal("dictate",appNames[focused],"Inserted "+cleaned.split(/\s+/).length+" words at caret", before||null, merged, function(){ tg.set(before); });
+      }
+      await hudDone(); return;
+    }
+
+    if(intent==="command"){
+      chip('<span class="k">intent</span> COMMAND',"cmd");
+      var steps=[], sentMsg=null, draft=slackDraft(), prevNote=currentNote, restoreDraft=null;
+      if(/\bsend\b/.test(t)){
+        if(draft){
+          restoreDraft=draft;
+          steps.push({ app:"slack", text:"Send draft to #launch-planning", run: async function(){ sentMsg=postSlackMessage(draft); setSlack(""); await sleep(350); } });
+        } else {
+          chip('<span class="k">send</span> nothing drafted — skipped',"warn");
+        }
+      }
+      var om=t.match(/open\s+(?:the\s+)?([\w\s-]+?)(?:\s+doc|\s+note)?$/);
+      if(/\bopen\b/.test(t)){
+        var what=om?om[1].trim():"";
+        if(/pric/.test(what)||/pric/.test(t)){
+          steps.push({ app:"notes", text:'Open note "Pricing page — copy"', run: async function(){ focusWin("notes"); showNote("pricing"); await sleep(300); } });
+        } else if(/launch|narrative/.test(t)){
+          steps.push({ app:"notes", text:'Open note "Launch narrative"', run: async function(){ focusWin("notes"); showNote("launch"); await sleep(300); } });
+        } else {
+          chip('<span class="k">open</span> "'+esc(what||"?")+'" not found — try "pricing doc" or "launch narrative"',"warn");
+        }
+      }
+      if(!steps.length){ hudstate.textContent="nothing to run"; await hudDone(); return; }
+      var ok=await showPlan(steps, steps.length+" step"+(steps.length>1?"s":""));
+      if(ok){
+        await runPlan(steps);
+        addJournal("command", steps.map(function(s){return appNames[s.app];}).join(" + "), "Ran "+steps.length+"-step plan: "+steps.map(function(s){return s.text;}).join(" · "), null, null, function(){
+          if(sentMsg){ sentMsg.remove(); if(restoreDraft) setSlack(restoreDraft); }
+          showNote(prevNote);
+        });
+      } else { hudstate.textContent="cancelled"; }
+      await hudDone(); return;
+    }
+
+    /* EDIT */
+    var tg=focusedTarget(), cur=tg.get();
+    chip('<span class="k">intent</span> EDIT → '+appNames[focused],"intent");
+    if(!cur){
+      chip('<span class="k">target</span> nothing to edit here — draft something first',"warn");
+      hudstate.textContent="no target"; await hudDone(); return;
+    }
+    chip('<span class="k">target</span> '+tg.label);
+    var op = /bullet|list/.test(t) ? "bullets" : (/short|tight/.test(t) ? "shorten" : "other");
+    var html, applyFn, sum, afterTxt;
+    if(op==="bullets" && focused==="notes"){
+      var bl=bulletize(cur);
+      html='<del>'+esc(cur)+'</del><br>'+bl.map(function(b){return '<ins>• '+esc(b)+'</ins>';}).join("<br>");
+      afterTxt=bl.map(function(b){return "• "+b;}).join("\n");
+      sum="Restructured into "+bl.length+" bullets";
+      applyFn=function(){
+        var old=tg.el, ul=document.createElement("ul"); ul.id=old.id; ul.className="edited";
+        bl.forEach(function(b){ var li=document.createElement("li"); li.textContent=b; ul.appendChild(li); });
+        old.replaceWith(ul);
+        setTimeout(function(){ ul.classList.remove("edited"); },1200);
+        return function(){ var np=document.createElement("p"); np.id=ul.id; np.textContent=cur; ul.replaceWith(np); };
+      };
+    } else if(op==="shorten" || op==="bullets"){
+      var r=shorten(cur);
+      if(r.ss){
+        html=r.ss.map(function(s,i){ return r.keptIdx[i] ? esc(s) : "<del>"+esc(s)+"</del>"; }).join(" ");
+      } else {
+        html="<del>"+esc(cur)+"</del> <ins>"+esc(r.after)+"</ins>";
+      }
+      afterTxt=r.after;
+      sum="Shortened ("+cur.split(/\s+/).length+" → "+r.after.split(/\s+/).length+" words)";
+      applyFn=function(){
+        tg.set(r.after);
+        if(tg.el.classList){ tg.el.classList.add("edited"); setTimeout(function(){tg.el.classList.remove("edited");},1200); }
+        return function(){ tg.set(cur); };
+      };
+      chip('<span class="k">engine</span> offline mock — real Mull streams this through the LLM',"dict");
+    } else {
+      chip('<span class="k">engine</span> this offline mock handles "shorter" and "bullets" — tone edits run in scenes 3 & 5',"warn");
+      hudstate.textContent="unsupported offline"; await hudDone(); return;
+    }
+    var ok=await showDiff(html, tg.label);
+    if(ok){
+      hudstate.textContent="applying";
+      wins[focused].classList.add("flash"); setTimeout(function(){wins[focused].classList.remove("flash");},1000);
+      var undoFn=applyFn();
+      addJournal("edit",appNames[focused],sum+" · previewed, approved",cur,afterTxt,undoFn);
+    } else { hudstate.textContent="cancelled"; }
+    await hudDone();
+  }
+
+  /* ── Reset & wiring ──────────────────────── */
+  function resetAll(){
+    if(busy) return;
+    setSlack(""); setMail("");
+    $("slackmsgs").querySelectorAll(".sent-new").forEach(function(m){ m.remove(); });
+    var l=$("note-launch");
+    l.innerHTML='<h4>Launch narrative — draft</h4><div class="ndate">13 September 2026 at 14:12</div>'+
+      '<p id="np1"></p><p id="np2"></p>';
+    l.querySelector("#np1").textContent=n1_before;
+    l.querySelector("#np2").textContent=n2_before;
+    showNote("launch");
+    jlist.innerHTML='<div class="jempty">Nothing yet. Run a scene — every insertion, edit, and command lands here with its before/after.</div>';
+    entries=0; jcount.textContent="0";
+    sceneDone={1:false,2:false,3:false,4:false,5:false,6:false};
+    for(var i=1;i<=6;i++) $("sb"+i).classList.remove("done");
+    clearHud(); hud.classList.add("hidden"); mempop.classList.remove("show"); unsay();
+  }
+
+  var sceneFns={1:scene1,2:scene2,3:scene3,4:scene4,5:scene5,6:scene6};
+  function run(fn){
+    if(busy) return;
+    busy=true;
+    for(var i=1;i<=6;i++) $("sb"+i).disabled=true;
+    $("ffgo").disabled=true;
+    Promise.resolve(fn()).catch(function(e){ console.error(e); }).then(function(){
+      busy=false;
+      for(var i=1;i<=6;i++) $("sb"+i).disabled=false;
+      $("ffgo").disabled=false;
+    });
+  }
+  for(var i=1;i<=6;i++)(function(n){ $("sb"+n).addEventListener("click",function(){ run(sceneFns[n]); }); })(i);
+  $("resetbtn").addEventListener("click",resetAll);
+
+  function goFF(){
+    var v=$("ffinput").value.trim();
+    if(!v||busy) return;
+    $("ffinput").value="";
+    run(function(){ return freeform(v); });
+  }
+  $("ffgo").addEventListener("click",goFF);
+  $("ffinput").addEventListener("keydown",function(ev){ if(ev.key==="Enter") goFF(); });
+
+  document.addEventListener("keydown",function(ev){
+    if(ev.code==="Space" && !busy && $("intro").classList.contains("gone") && !ev.repeat){
+      var a=document.activeElement;
+      if(a && (a.tagName==="INPUT"||a.tagName==="BUTTON"||a.tagName==="SUMMARY")) return;
+      ev.preventDefault();
+      for(var n=1;n<=6;n++){ if(!sceneDone[n]){ run(sceneFns[n]); return; } }
+    }
+  });
+
+  focusWin("notes");
+})();
+</script>
