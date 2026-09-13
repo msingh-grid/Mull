@@ -1,32 +1,20 @@
 import { useEffect, useState, type JSX } from 'react'
-import { IDLE_HUD_STATE, type HudState } from '@shared/ipc'
+import { IDLE_HUD_STATE, type HudAction, type HudState } from '@shared/ipc'
+import { Hud } from './components/Hud'
 
 /**
- * HUD placeholder (M1).
+ * The HUD renderer.
  *
- * Wired to real pipeline state, deliberately unstyled: the Studio Paper panel
- * lands in M3 against the frozen tokens in `tokens.css` (docs/DESIGN.md §6.1).
- * Until then this is a state read-out, so the pipeline can be watched while the
- * design is still on the drawing board.
+ * Its whole job: mirror the state main pushes, and report the two chords the
+ * user can answer a card with. It never derives state and never asks for any —
+ * a HUD that computed its own view of what happened could disagree with the
+ * journal, and the journal is the record.
  */
-
-const PHASE_LABEL: Record<HudState['phase'], string> = {
-  idle: 'IDLE',
-  listening: 'LISTENING',
-  thinking: 'THINKING',
-  inserting: 'INSERTING',
-  applied: 'APPLIED',
-  blocked: 'PAUSED',
-  error: 'ERROR'
-}
-
 export default function App(): JSX.Element {
   const [state, setState] = useState<HudState>(IDLE_HUD_STATE)
+  const bridge = window.mull as typeof window.mull | undefined
 
   useEffect(() => {
-    // No bridge means this page is being viewed outside the app — most often
-    // the dev server URL opened in a browser tab. Say so rather than throwing.
-    const bridge = window.mull as typeof window.mull | undefined
     if (!bridge) return
 
     let cancelled = false
@@ -38,37 +26,32 @@ export default function App(): JSX.Element {
       cancelled = true
       off()
     }
-  }, [])
+  }, [bridge])
 
-  if (!(window.mull as typeof window.mull | undefined)) {
+  // Opened without the preload — almost always the dev-server URL in a browser
+  // tab. Say so plainly rather than rendering a HUD that will never update.
+  if (!bridge) {
     return (
-      <main style={{ padding: '10px 14px', fontSize: 12, lineHeight: 1.5 }}>
-        <div>
-          <strong>NO BRIDGE</strong>
+      <div className="hud-stage">
+        <div className="hud is-error">
+          <div className="hud-top">
+            <div className="transcript">
+              This page has no bridge to Mull — use the window <code>npm run dev</code> opens.
+            </div>
+            <div className="state-label">No bridge</div>
+          </div>
         </div>
-        <div>
-          This is the HUD renderer opened without Mull’s preload — usually the dev-server URL in a
-          browser. Use the app window that <code>npm run dev</code> opens.
-        </div>
-      </main>
+      </div>
     )
   }
 
+  const onAction = (action: HudAction): void => {
+    void bridge.hud.action(action)
+  }
+
   return (
-    <main
-      role="status"
-      aria-live="polite"
-      style={{ padding: '10px 14px', fontSize: 12, lineHeight: 1.5 }}
-    >
-      <div>
-        <strong>{PHASE_LABEL[state.phase]}</strong>
-        {state.app ? ` · ${state.app.name}` : ''}
-      </div>
-      <div style={{ minHeight: '2.6em' }}>
-        {state.transcript || (state.phase === 'idle' ? 'Hold ⌥Space and speak' : '…')}
-      </div>
-      {state.notice ? <div>⚠ {state.notice}</div> : null}
-      {state.lastAction ? <div>{state.lastAction.summary}</div> : null}
-    </main>
+    <div className="hud-stage">
+      <Hud state={state} onAction={onAction} />
+    </div>
   )
 }

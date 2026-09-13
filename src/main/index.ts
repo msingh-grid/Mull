@@ -1,18 +1,32 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, screen, systemPreferences } from 'electron'
 import { join } from 'node:path'
 import log from 'electron-log/main'
-import { CAPTURE_SAMPLE_RATE, IPC, type CaptureReadyPayload, type HudState } from '@shared/ipc'
+import {
+  CAPTURE_SAMPLE_RATE,
+  IPC,
+  type CaptureReadyPayload,
+  type HudAction,
+  type HudState,
+  type MullWindow
+} from '@shared/ipc'
+import type { PlanStep } from '@shared/hud'
 import type { SidecarApi } from '@shared/sidecar-api'
 import { benchPath, journalPath, resolveSidecarPath } from './locations'
 import { Bench } from './bench'
 import { selectAsrProvider } from './asr'
 import { FakeSidecar, SidecarClient } from './services/sidecar'
 import { HotkeyService } from './services/hotkey'
-import { InsertionService } from './services/insertion'
+import { describeInsertionReason, InsertionService } from './services/insertion'
 import { UndoService } from './services/undo'
+import { ChordScope } from './services/chords'
+import { HudController } from './services/hud'
+import { TrayPresence } from './services/tray'
 import { JournalStore } from './store/journal'
 import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
+import { appliedText, diffText } from './pipeline/diff'
+import { FakeEngine } from './engine/fake'
+import type { Engine } from './engine/types'
 import type { AsrProvider } from './asr/types'
 
 log.initialize()
@@ -24,8 +38,21 @@ let hotkey: HotkeyService | null = null
 let journal: JournalStore | null = null
 let undo: UndoService | null = null
 let insertion: InsertionService | null = null
+let hud: HudController | null = null
+let chords: ChordScope | null = null
+let tray: TrayPresence | null = null
+let engine: Engine | null = null
 let sidecar: SidecarApi & { dispose?: () => Promise<void> }
 let asr: AsrProvider
+
+/** Windows whose renderer exists. Each M3 stage adds one. */
+const BUILT_WINDOWS: MullWindow[] = []
+
+const WINDOW_SIZES: Record<MullWindow, { width: number; height: number; minWidth: number }> = {
+  journal: { width: 760, height: 620, minWidth: 560 },
+  settings: { width: 640, height: 560, minWidth: 520 },
+  onboarding: { width: 720, height: 640, minWidth: 640 }
+}
 
 const logFn = (level: 'info' | 'warn' | 'error', message: string, meta?: unknown): void => {
   if (meta === undefined) log[level](message)
@@ -49,26 +76,38 @@ function load(win: BrowserWindow, page: string): void {
 }
 
 /**
- * The HUD.
+ * The HUD (docs/DESIGN.md §6.1).
  *
- * M1 shape only: bottom-centre, always on top, non-focusable so it never steals
- * the caret from the app you are dictating into. It is deliberately unstyled —
- * M3 replaces the contents with the Studio Paper panel (docs/DESIGN.md §6.1)
- * and switches this to `type: 'panel'` with a transparent background.
+ * A non-activating panel: `type: 'panel'` plus `focusable: false` means it can
+ * show, and even be clicked, without ever taking the caret from the app you
+ * are dictating into — the first interaction rule (§7.1), and the reason the
+ * Apply/Cancel chords are global shortcuts rather than keydown handlers.
+ *
+ * The window is a fixed, transparent stage sized to the tallest the panel ever
+ * gets; the panel itself is bottom-anchored inside it and grows upward. Sizing
+ * the window to the content instead would mean a `setBounds` on every state
+ * change, and the whole panel would visibly jitter as chips and cards arrive.
+ *
+ * Because the stage is mostly empty transparent pixels, it starts fully
+ * click-through. HudController turns that off for exactly as long as a card is
+ * open (see services/hud.ts).
  */
 function createHudWindow(): BrowserWindow {
   const { workArea } = screen.getPrimaryDisplay()
-  const width = 480
-  const height = 132
+  const width = 520
+  const height = 420
 
   const hud = new BrowserWindow({
     width,
     height,
     x: Math.round(workArea.x + (workArea.width - width) / 2),
-    y: Math.round(workArea.y + workArea.height - height - 24),
+    y: Math.round(workArea.y + workArea.height - height),
     show: false,
     frame: false,
-    transparent: false,
+    type: 'panel',
+    transparent: true,
+    backgroundColor: '#00000000',
+    hasShadow: false, // the panel casts its own (--shadow-hud)
     focusable: false,
     resizable: false,
     movable: false,
@@ -83,12 +122,48 @@ function createHudWindow(): BrowserWindow {
 
   hud.setAlwaysOnTop(true, 'screen-saver')
   hud.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  hud.setIgnoreMouseEvents(true, { forward: true })
   load(hud, 'index.html')
   hud.once('ready-to-show', () => hud.showInactive())
   hud.on('closed', () => {
     hudWindow = null
   })
   return hud
+}
+
+/**
+ * Mull's ordinary windows: journal, settings, onboarding (§6.8).
+ *
+ * One per name, reused rather than duplicated — clicking "Journal…" twice
+ * should raise the journal, not open a second one.
+ */
+const appWindows = new Map<MullWindow, BrowserWindow>()
+
+function openAppWindow(name: MullWindow): BrowserWindow {
+  const existing = appWindows.get(name)
+  if (existing && !existing.isDestroyed()) {
+    existing.show()
+    existing.focus()
+    return existing
+  }
+
+  const win = new BrowserWindow({
+    ...WINDOW_SIZES[name],
+    show: false,
+    titleBarStyle: 'hiddenInset',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  })
+
+  load(win, `${name}.html`)
+  win.once('ready-to-show', () => win.show())
+  win.on('closed', () => appWindows.delete(name))
+  appWindows.set(name, win)
+  return win
 }
 
 /** Invisible renderer that owns the microphone (see src/renderer/capture.ts). */
@@ -120,7 +195,103 @@ function pushHudState(state: HudState): void {
   if (hudWindow && !hudWindow.isDestroyed()) {
     hudWindow.webContents.send(IPC.hudState, state)
   }
+  tray?.setPhase(state.phase)
 }
+
+/** Tell any open journal window that the record changed under it. */
+function notifyJournalChanged(): void {
+  const win = appWindows.get('journal')
+  if (win && !win.isDestroyed()) win.webContents.send(IPC.journalChanged)
+}
+
+/**
+ * Open a FakeEngine card (tray → Preview demo).
+ *
+ * This is the M3 substitute for M4's engine, and it is deliberately not a
+ * mime: applying an edit card runs the **real** insertion path, so the demo
+ * exercises exactly what the engine will exercise later — including the
+ * journal entry and ⌥Z. The plan card is the exception and says so in its own
+ * title, because executing commands is M5's and nothing here can run one.
+ */
+async function showDemoCard(kind: 'diff' | 'plan'): Promise<void> {
+  if (!hud || !engine) return
+
+  const { app: target } = await sidecar.frontmostApp({}).catch(() => ({ app: null }))
+  const appInfo = target ? { bundleId: target.bundleId, name: target.name } : null
+
+  if (kind === 'plan') {
+    const plan = await engine.plan({ instruction: 'demo', app: appInfo })
+    const steps: PlanStep[] = plan.steps.map((step, index) => ({
+      id: `demo-${index}`,
+      verb: step.verb,
+      object: step.object,
+      state: 'pending'
+    }))
+    hud.openCard({ kind: 'plan', steps, context: 'demo — nothing runs' }, (action) => {
+      log.info(`demo plan card: ${action}`)
+    })
+    return
+  }
+
+  const before = CANONICAL_DEMO_TEXT
+  hud.openCard({ kind: 'diff', app: appInfo?.name ?? null, segments: [], changes: 0 }, () => {})
+
+  // Stream it in, exactly as the real engine will.
+  const result = await engine.transform({ instruction: 'make this crisp', text: before, app: appInfo }, (partial) => {
+    const { segments, changes } = diffText(before, partial)
+    hud?.updateCard({ kind: 'diff', app: appInfo?.name ?? null, segments, changes })
+  })
+
+  const final = diffText(before, result.text)
+  hud.openCard(
+    { kind: 'diff', app: appInfo?.name ?? null, segments: final.segments, changes: final.changes },
+    (action) => {
+      if (action !== 'apply') return
+      void applyEdit(appliedText(final.segments), appInfo)
+    }
+  )
+}
+
+/** What Apply on an edit card does: insert, verify, journal, offer ⌥Z. */
+async function applyEdit(
+  text: string,
+  target: { bundleId: string; name: string } | null
+): Promise<void> {
+  if (!insertion) return
+  const outcome = await insertion.insert(text, target)
+
+  if (!outcome.inserted) {
+    pipeline?.announce('error', describeInsertionReason(outcome.reason))
+    return
+  }
+
+  const summary = `Edit · ${target?.name ?? 'this app'}`
+  const entry = journal?.append({
+    intent: { kind: 'edit', instruction: 'make this crisp', target: 'selection', transcript: '' },
+    app: target,
+    before: null,
+    after: text,
+    strategyUsed: outcome.strategyUsed,
+    status: 'applied',
+    summary,
+    verified: outcome.verified,
+    caret: outcome.caret,
+    // Same bar as dictation: undo only where the write was read back.
+    undoable: outcome.verified === true && outcome.caret !== null
+  })
+  if (entry) notifyJournalChanged()
+
+  pipeline?.announce('applied', 'Edit applied.', {
+    summary,
+    at: Date.now(),
+    chars: text.length,
+    entryId: entry?.id ?? null,
+    undoable: entry?.undoable ?? false
+  })
+}
+
+const CANONICAL_DEMO_TEXT =
+  'I’m so sorry to bother you again, but I was just wondering if maybe we still need your sign-off on the terms doc whenever you get a chance, no rush at all.'
 
 async function createSidecar(): Promise<SidecarApi & { dispose?: () => Promise<void> }> {
   const binaryPath = resolveSidecarPath({
@@ -172,6 +343,30 @@ async function bootstrap(): Promise<void> {
 
   insertion = new InsertionService({ sidecar, log: logFn })
   undo = journal ? new UndoService({ sidecar, journal, log: logFn }) : null
+  engine = new FakeEngine()
+
+  chords = new ChordScope({ globalShortcut, log: logFn })
+  hud = new HudController({
+    chords,
+    log: logFn,
+    port: {
+      send: pushHudState,
+      setInteractive: (interactive) => {
+        // Click-through unless there is something to click. `forward: true`
+        // keeps hover state alive in the panel while it is transparent.
+        hudWindow?.setIgnoreMouseEvents(!interactive, { forward: true })
+      }
+    }
+  })
+
+  tray = new TrayPresence({
+    available: BUILT_WINDOWS,
+    openWindow: (name) => void openAppWindow(name),
+    undoLast: () => void runUndo(),
+    demoCard: (kind) => void showDemoCard(kind),
+    quit: () => app.quit()
+  })
+  tray.start()
 
   pipeline = new DictationPipeline(
     {
@@ -180,7 +375,7 @@ async function bootstrap(): Promise<void> {
       bench,
       insertion,
       journal: journal ?? undefined,
-      onState: pushHudState,
+      onState: (state) => hud?.setPipelineState(state),
       log: logFn,
       capture: {
         start: () => captureWindow?.webContents.send(IPC.captureStart),
@@ -200,6 +395,9 @@ async function bootstrap(): Promise<void> {
     log: logFn
   })
   const mode = hotkey.start(globalShortcut)
+  tray?.setStatus(
+    mode === 'unavailable' ? 'Hotkey unavailable' : mode === 'toggle' ? '⌥Space to start/stop' : 'Hold ⌥Space to dictate'
+  )
   if (mode === 'unavailable') {
     pushHudState({
       ...pipeline.getState(),
@@ -240,6 +438,7 @@ async function runUndo(): Promise<{ ok: boolean; message: string }> {
   }
   try {
     const outcome = await undo.undoLast()
+    if (outcome.ok) notifyJournalChanged()
     pipeline?.announce(
       outcome.ok ? 'applied' : 'error',
       outcome.message,
@@ -262,7 +461,24 @@ async function runUndo(): Promise<{ ok: boolean; message: string }> {
 ipcMain.handle(IPC.ping, () => 'pong')
 ipcMain.handle(IPC.journalRecent, (_event, limit?: number) => journal?.recent(limit ?? 50) ?? [])
 ipcMain.handle(IPC.journalUndo, () => runUndo())
-ipcMain.handle(IPC.hudStateGet, () => pipeline?.getState() ?? null)
+
+// The controller's state, not the pipeline's: first paint must include an open
+// card, or a HUD that reloads mid-preview would come back showing nothing.
+ipcMain.handle(IPC.hudStateGet, () => hud?.getState() ?? pipeline?.getState() ?? null)
+
+ipcMain.handle(IPC.hudAction, (_event, action: HudAction) => {
+  hud?.act(action)
+})
+
+ipcMain.handle(IPC.windowOpen, (_event, name: MullWindow) => {
+  if (!BUILT_WINDOWS.includes(name)) {
+    log.warn(`window "${name}" has not been built yet`)
+    return
+  }
+  openAppWindow(name)
+})
+
+ipcMain.handle(IPC.devCard, (_event, kind: 'diff' | 'plan') => showDemoCard(kind))
 
 ipcMain.on(IPC.captureChunk, (_event, data: Float32Array | ArrayBufferView) => {
   const pcm =
@@ -318,6 +534,9 @@ app.on('will-quit', () => {
 
 app.on('before-quit', () => {
   hotkey?.stop(globalShortcut)
+  // Give ⏎ and esc back to the rest of the Mac before we go.
+  chords?.release()
+  tray?.stop()
   pipeline?.dispose()
   // What this session learned about each app's insertion behaviour — the raw
   // material for docs/INSERTION-MATRIX.md.

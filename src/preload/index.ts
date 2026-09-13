@@ -1,5 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { IPC, type CaptureReadyPayload, type HudState } from '@shared/ipc'
+import {
+  IPC,
+  type CaptureReadyPayload,
+  type HudAction,
+  type HudState,
+  type MullWindow
+} from '@shared/ipc'
 import type { JournalEntry } from '@shared/types'
 
 /**
@@ -15,14 +21,26 @@ export interface MullApi {
     onState: (handler: (state: HudState) => void) => () => void
     /** Pull the current state (for first paint). */
     getState: () => Promise<HudState>
+    /** Answer the open card. Same path as the ⏎ / esc global chords. */
+    action: (action: HudAction) => Promise<void>
     /** Dev-only: run one utterance without touching the keyboard. */
     devTrigger: (ms?: number) => Promise<void>
+    /** Dev-only: open a FakeEngine card so the surfaces can be exercised. */
+    devCard: (kind: 'diff' | 'plan') => Promise<void>
+  }
+  /** Mull has no Dock icon; windows are opened by name. */
+  windows: {
+    open: (window: MullWindow) => Promise<void>
   }
   journal: {
     /** Newest entries first. */
     recent: (limit?: number) => Promise<JournalEntry[]>
     /** Same path as ⌥Z; the result message is also shown on the HUD. */
     undoLast: () => Promise<{ ok: boolean; message: string }>
+    /** Undo one specific entry, with the same refusal gates as ⌥Z. */
+    undoEntry: (id: string) => Promise<{ ok: boolean; message: string }>
+    /** Main pushes this whenever an entry is written or undone. */
+    onChanged: (handler: () => void) => () => void
   }
   capture: {
     onStart: (handler: () => void) => void
@@ -48,13 +66,26 @@ const api: MullApi = {
       return () => ipcRenderer.removeListener(IPC.hudState, listener)
     },
     getState: () => ipcRenderer.invoke(IPC.hudStateGet) as Promise<HudState>,
-    devTrigger: (ms) => ipcRenderer.invoke(IPC.devTrigger, ms) as Promise<void>
+    action: (action) => ipcRenderer.invoke(IPC.hudAction, action) as Promise<void>,
+    devTrigger: (ms) => ipcRenderer.invoke(IPC.devTrigger, ms) as Promise<void>,
+    devCard: (kind) => ipcRenderer.invoke(IPC.devCard, kind) as Promise<void>
+  },
+
+  windows: {
+    open: (window) => ipcRenderer.invoke(IPC.windowOpen, window) as Promise<void>
   },
 
   journal: {
     recent: (limit) => ipcRenderer.invoke(IPC.journalRecent, limit) as Promise<JournalEntry[]>,
     undoLast: () =>
-      ipcRenderer.invoke(IPC.journalUndo) as Promise<{ ok: boolean; message: string }>
+      ipcRenderer.invoke(IPC.journalUndo) as Promise<{ ok: boolean; message: string }>,
+    undoEntry: (id) =>
+      ipcRenderer.invoke(IPC.journalUndoEntry, id) as Promise<{ ok: boolean; message: string }>,
+    onChanged: (handler) => {
+      const listener = (): void => handler()
+      ipcRenderer.on(IPC.journalChanged, listener)
+      return () => ipcRenderer.removeListener(IPC.journalChanged, listener)
+    }
   },
 
   capture: {

@@ -39,6 +39,11 @@
   --mem:       #4f6b33;                    /* reading green: memory cites   */
   --mem-wash:  rgba(79, 107, 51, 0.10);
   --mem-edge:  rgba(79, 107, 51, 0.42);
+  --mem-wash-strong: rgba(79, 107, 51, 0.16);  /* mem chip hover            */
+
+  /* Decoration, not text: the listening orb's expanding ring. Exempt from §9
+     contrast verification because nothing is ever read against it.          */
+  --orb-ping:  rgba(43, 36, 24, 0.32);
 
   /* -- on-color (text over ink / ins fills) ------------------------------ */
   --on-ink: #fffdf6;
@@ -116,6 +121,8 @@
     --mem:       #a3bf7d;
     --mem-wash:  rgba(163, 191, 125, 0.12);
     --mem-edge:  rgba(163, 191, 125, 0.45);
+    --mem-wash-strong: rgba(163, 191, 125, 0.20);
+    --orb-ping:  rgba(236, 229, 211, 0.34);
 
     --on-ink: #211c13;      /* intent stamp inverts: cream fill, dark text  */
     --on-ins: #211c13;
@@ -154,6 +161,8 @@
   --mem:       #a3bf7d;
   --mem-wash:  rgba(163, 191, 125, 0.12);
   --mem-edge:  rgba(163, 191, 125, 0.45);
+  --mem-wash-strong: rgba(163, 191, 125, 0.20);
+  --orb-ping:  rgba(236, 229, 211, 0.34);
 
   --on-ink: #211c13;
   --on-ins: #211c13;

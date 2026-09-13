@@ -1,0 +1,63 @@
+/**
+ * The Engine seam.
+ *
+ * M3 builds the surfaces that show an engine's work — the diff card, the plan
+ * card, the intent chip — before there is an engine. That is deliberate: a
+ * preview you cannot see is a preview you cannot judge, and the whole design
+ * rests on the user judging before anything changes.
+ *
+ * So this interface exists now with a fake behind it (`fake.ts`), and M4
+ * replaces the implementation without touching a line of the UI. Anything the
+ * fake cannot honestly produce is absent from the interface rather than
+ * stubbed: `ready()` reports a real state because the HUD must degrade
+ * visibly when the engine is unavailable (docs/PLAN.md — "rate-limit →
+ * local-only chip").
+ *
+ * Invariant this seam protects: plain dictation NEVER waits on any of this.
+ * Nothing in src/main/pipeline/dictation.ts calls an Engine.
+ */
+import type { PlanStep } from '@shared/hud'
+
+export type EngineState =
+  | { kind: 'ready' }
+  /** Reachable but refusing right now — quota, rate limit, offline. */
+  | { kind: 'local-only'; reason: string }
+  /** No credentials yet; M4's sign-in flow has not been completed. */
+  | { kind: 'signed-out' }
+
+export interface TransformRequest {
+  /** What the user asked for, e.g. 'make this crisp'. */
+  instruction: string
+  /** The text being edited — a selection, or a whole field. */
+  text: string
+  /** Frontmost app, for the card title and the journal entry. */
+  app: { bundleId: string; name: string } | null
+}
+
+export interface TransformResult {
+  /** The proposed replacement. The diff against `text` is computed in main. */
+  text: string
+}
+
+export interface PlanRequest {
+  instruction: string
+  app: { bundleId: string; name: string } | null
+}
+
+export interface PlanResult {
+  /** Never executed on arrival — a plan is a proposal until Run (§6.4). */
+  steps: Array<Pick<PlanStep, 'verb' | 'object'>>
+  context: string | null
+}
+
+export interface Engine {
+  ready(): Promise<EngineState>
+  /**
+   * Edit text. `onPartial` receives progressively longer prefixes of the
+   * result so the card can fill in as it arrives rather than appearing whole —
+   * the difference between an instrument that is working and one that is hung.
+   */
+  transform(request: TransformRequest, onPartial?: (text: string) => void): Promise<TransformResult>
+  plan(request: PlanRequest): Promise<PlanResult>
+  dispose?(): Promise<void>
+}

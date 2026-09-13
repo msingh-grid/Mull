@@ -11,6 +11,10 @@
 
 /** Mic capture format. The AudioContext is opened at this rate so Chromium
  *  does the resampling for us and main only ever sees 16 kHz mono. */
+import type { HudCard, HudChip } from './hud'
+
+export type { HudAction } from './hud'
+
 export const CAPTURE_SAMPLE_RATE = 16_000
 
 /** Utterances shorter than this are treated as an accidental key tap. */
@@ -27,6 +31,8 @@ export type HudPhase =
   | 'applied'
   | 'blocked'
   | 'error'
+  /** A diff or plan card is open, waiting on ⏎ / esc (docs/DESIGN.md §6.1). */
+  | 'preview'
 
 export interface HudLastAction {
   /** Short human summary, e.g. 'Dictation · Mail'. */
@@ -51,6 +57,10 @@ export interface HudState {
   /** Warning line (secure input, missing permission, ASR failure). */
   notice: string | null
   lastAction: HudLastAction | null
+  /** Classification chips, in display order. Empty in idle. */
+  chips: HudChip[]
+  /** The open proposal, if any. Nothing applies until the user says so. */
+  card: HudCard | null
 }
 
 export const IDLE_HUD_STATE: HudState = {
@@ -59,7 +69,9 @@ export const IDLE_HUD_STATE: HudState = {
   partial: false,
   app: null,
   notice: null,
-  lastAction: null
+  lastAction: null,
+  chips: [],
+  card: null
 }
 
 export const IPC = {
@@ -78,16 +90,31 @@ export const IPC = {
   /** capture renderer -> main: getUserMedia / worklet failure. */
   captureError: 'mull:capture:error',
 
+  /** HUD renderer -> main: the user pressed Apply or Cancel on the open card. */
+  hudAction: 'mull:hud:action',
+
   /** journal window -> main: most recent entries (newest first). */
   journalRecent: 'mull:journal:recent',
   /** any renderer -> main: undo the last undoable entry (same path as ⌥Z). */
   journalUndo: 'mull:journal:undo',
+  /** journal window -> main: undo one specific entry. */
+  journalUndoEntry: 'mull:journal:undo-entry',
+  /** main -> journal window: the journal changed; re-read it. */
+  journalChanged: 'mull:journal:changed',
+
+  /** any renderer -> main: bring one of Mull's own windows up. */
+  windowOpen: 'mull:window:open',
 
   /** Dev affordance: trigger an utterance without the hotkey. */
   devTrigger: 'mull:dev:trigger',
+  /** Dev affordance: open a FakeEngine card so the surfaces can be exercised. */
+  devCard: 'mull:dev:card',
 
   ping: 'mull:ping'
 } as const
+
+/** Mull's own windows, addressable by name (there is no Dock icon to click). */
+export type MullWindow = 'journal' | 'settings' | 'onboarding'
 
 export interface CaptureReadyPayload {
   ok: boolean
