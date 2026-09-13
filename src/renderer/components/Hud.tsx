@@ -19,10 +19,13 @@ import { CardView } from './Cards'
 export function Hud({
   state,
   onAction,
+  onThinking,
   now
 }: {
   state: HudState
   onAction?: (action: HudAction) => void
+  /** Arm or disarm thinking for the writing lanes. Absent in the demo HUD. */
+  onThinking?: (on: boolean) => void
   /** Injected so a statically-mounted HUD renders deterministically. */
   now?: number
 }): JSX.Element {
@@ -64,6 +67,18 @@ export function Hud({
       {view.card ? <CardView card={view.card} onAction={onAction} /> : null}
 
       {view.notice ? <div className="notice">{view.notice}</div> : null}
+
+      {view.thinking && onThinking ? (
+        <button
+          type="button"
+          className={`think ${view.thinking.on ? 'is-on' : ''}`}
+          aria-pressed={view.thinking.on}
+          onClick={() => onThinking(!view.thinking?.on)}
+        >
+          <span className="dot" aria-hidden="true" />
+          {view.thinking.on ? 'thinking on — slower, for hard writing' : 'thinking'}
+        </button>
+      ) : null}
 
       {view.lastAction ? (
         <div className="last-action">

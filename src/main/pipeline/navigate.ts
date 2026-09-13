@@ -71,6 +71,15 @@ export interface NavigateDeps {
     closeCard(): void
     /** Optional: the working line under the label, while a step runs. */
     update?(patch: { stage: string | null; stageAt: number | null }): void
+    /**
+     * Terminal state, with the linger back to idle the pipeline owns.
+     *
+     * Not optional in spirit: without it the HUD never leaves the phase it was
+     * in when the plan started. The lane had no `announce` at all at first, and
+     * the panel sat on THINKING after the plan had finished and the window had
+     * been put back — work with no end, as far as anyone looking could tell.
+     */
+    announce?(phase: 'applied' | 'error' | 'blocked', notice: string): void
   }
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   sleep?: (ms: number) => Promise<void>
@@ -131,6 +140,8 @@ export class NavigateLane {
       if (action === 'cancel') {
         this.stopped = true
         parent.step('plan.cancelled', { beforeRunning: true })
+        this.deps.hud.closeCard()
+        this.deps.hud.announce?.('applied', 'Cancelled — nothing was pressed.')
         return
       }
       if (action !== 'apply') return
@@ -140,6 +151,10 @@ export class NavigateLane {
       void this.walk(request, origin, card, trace).catch((err) => {
         trace.fail('plan.threw', {}, err)
         this.deps.hud.closeCard()
+        this.deps.hud.announce?.(
+          'error',
+          `The plan stopped: ${err instanceof Error ? err.message : String(err)}`
+        )
       })
     })
   }
@@ -257,6 +272,10 @@ export class NavigateLane {
     this.deps.hud.updateCard(
       card({ steps: [...steps], running: false, note: `${note} · ${back.detail}` })
     )
+    // The plan is over. Say so, or the panel keeps the phase it started in
+    // forever — there is nothing else in the pipeline still running that would
+    // ever move it on.
+    this.deps.hud.announce?.('applied', `${note} · ${back.detail}`)
   }
 
   /** Where the user was when they spoke, so `restore` has somewhere to aim. */

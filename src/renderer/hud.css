@@ -200,6 +200,49 @@
   .stage-pulse { animation: none; opacity: 0.7; }
 }
 
+/* ── Thinking toggle ─────────────────────────────────────────────────────── */
+/* Deliberately the quietest control on the panel while it is off: it is an
+   escape hatch for the occasional hard piece of writing, not a mode anyone
+   should feel invited into. Armed, it is the loudest thing here — because the
+   cost is twenty seconds a turn and forgetting it is on is the failure. */
+.think {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding: 3px 9px;
+  border-radius: var(--r-chip);
+  border: 1px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-chip);
+  color: var(--ink-3);
+  cursor: pointer;
+  transition:
+    color var(--t-fast) var(--ease-out),
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out);
+}
+.think:hover { color: var(--ink-2); border-color: var(--hairline-soft); }
+.think .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ink-3);
+}
+.think.is-on {
+  color: var(--warn);
+  background: var(--warn-wash);
+  border-color: var(--warn-edge);
+  font-weight: 600;
+}
+.think.is-on .dot { background: var(--warn); box-shadow: none; }
+.think:focus-visible {
+  outline: 2px solid var(--ins);
+  outline-offset: 2px;
+}
+
 /* ── Last action ghost (idle only) ───────────────────────────────────────── */
 .last-action {
   margin-top: 9px;

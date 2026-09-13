@@ -77,6 +77,15 @@ export interface HudState {
    * couple of seconds, so a long wait is visibly a wait rather than a freeze.
    */
   stageAt: number | null
+  /**
+   * Whether the writing lanes may think before answering — armed from the HUD.
+   *
+   * On the panel rather than only in Settings because it is a decision made in
+   * the moment, about the sentence you are on the point of saying. "Turn this
+   * thread into a project plan" is worth the seconds; "make this less
+   * apologetic" is not, and nobody opens a preferences window between the two.
+   */
+  thinking: boolean
   /** The open proposal, if any. Nothing applies until the user says so. */
   card: HudCard | null
 }
@@ -91,6 +100,7 @@ export const IDLE_HUD_STATE: HudState = {
   chips: [],
   stage: null,
   stageAt: null,
+  thinking: false,
   card: null
 }
 
@@ -128,6 +138,8 @@ export const IPC = {
   hudDragEnd: 'mull:hud:drag-end',
   /** any renderer -> main: put the HUD back where it started. */
   hudResetPosition: 'mull:hud:reset-position',
+  /** HUD -> main: arm or disarm thinking for the writing lanes. */
+  hudSetThinking: 'mull:hud:set-thinking',
 
   /** journal window -> main: most recent entries (newest first). */
   journalRecent: 'mull:journal:recent',

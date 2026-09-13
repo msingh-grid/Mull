@@ -57,6 +57,18 @@ describe('hudView', () => {
     expect(hudView(state({ phase: 'preview', card: diffCard })).label).toBe('PREVIEW')
   })
 
+  /**
+   * The card is the fact; the phase is a claim about it. Reading the label off
+   * `phase` alone meant every lane had to remember to announce one — and the
+   * navigator did not, so a plan card sat under the word THINKING and stayed
+   * there after the plan had finished and the window had been put back.
+   */
+  it('says PREVIEW whenever a card is open, whatever the phase claims', () => {
+    for (const phase of ['thinking', 'listening', 'inserting'] as const) {
+      expect(hudView(state({ phase, card: diffCard })).label).toBe('PREVIEW')
+    }
+  })
+
   it('treats inserting as thinking visually, but says INSERTING', () => {
     const view = hudView(state({ phase: 'inserting' }))
     expect(view.stateClass).toBe('is-thinking')
@@ -158,5 +170,38 @@ describe('the working line', () => {
       text: 'asking the model',
       seconds: null
     })
+  })
+})
+
+/**
+ * The thinking toggle (M5a).
+ *
+ * Off by default, and the default is the important half: the Agent SDK runs
+ * extended reasoning unless told not to, measured at p50 20086ms against 954ms
+ * with it off. This is the escape hatch for the occasional piece of writing
+ * where those seconds buy something.
+ */
+describe('the thinking toggle', () => {
+  it('is offered when idle, where the decision is actually made', () => {
+    expect(hudView(state({ phase: 'idle', thinking: false })).thinking).toEqual({ on: false })
+  })
+
+  /**
+   * Mid-utterance it is either too late to matter or describing the turn
+   * already in flight — both worse than not being there.
+   */
+  it('gets out of the way while Mull is working', () => {
+    expect(hudView(state({ phase: 'thinking', thinking: false })).thinking).toBeNull()
+    expect(hudView(state({ phase: 'listening', thinking: false })).thinking).toBeNull()
+  })
+
+  /**
+   * Armed is the exception: it stays visible throughout, because the cost is
+   * seconds on every turn and leaving it on by accident is the failure mode.
+   */
+  it('stays visible while it is armed, whatever Mull is doing', () => {
+    for (const phase of ['listening', 'thinking', 'preview'] as const) {
+      expect(hudView(state({ phase, thinking: true })).thinking).toEqual({ on: true })
+    }
   })
 })

@@ -73,6 +73,31 @@ export const SettingsSchema = z.object({
   /** Bundle ids the user never wants read, on top of the built-in refusals. */
   contextExcluded: z.array(z.string()).default([]),
   /**
+   * Let the writing model think before it answers.
+   *
+   * **Off, and that default is worth a paragraph**, because it was accidentally
+   * on for the whole of M4 and M5 and nobody could see it. The Agent SDK runs
+   * extended reasoning unless told not to, and measured on the classifier —
+   * same prompt, same model, same warm session — it cost:
+   *
+   *   thinking on    p50 20086ms   max 33438ms
+   *   thinking off   p50   954ms   max  1219ms
+   *
+   * Twenty-two times, to deliberate over a choice between four words. Almost
+   * everything Mull does is a single-shot transformation with the whole problem
+   * already on the page, and all of it is something a person is waiting for.
+   *
+   * But *almost* is not *all*: "turn this thread into a project plan" is a
+   * genuinely hard piece of writing and the seconds would be worth paying. So
+   * this is armable from the HUD, where the decision is made in the moment,
+   * beside the utterance it applies to.
+   *
+   * **Only the writing lanes.** The classifier picks one of four words and the
+   * navigator picks an index out of a list; there is nothing there to think
+   * about, and both sit on the critical path. They stay off at every setting.
+   */
+  thinking: z.boolean().default(false),
+  /**
    * Where the user dragged the HUD, in screen coordinates. Null means the
    * default bottom-centre. Clamped back onto a real display at launch, because
    * a position saved on a monitor that has since been unplugged would leave the

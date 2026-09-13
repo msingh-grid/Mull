@@ -32,6 +32,15 @@ export interface HudView {
    * stopwatch, which reads as less confident rather than more.
    */
   stage: { text: string; seconds: number | null } | null
+  /**
+   * The thinking toggle: armed, and whether it is worth showing at all.
+   *
+   * Idle only. It is a decision about the sentence you are about to say, made
+   * before you press the key — and once Mull is working, the toggle is either
+   * too late to matter or describing the turn already in flight, both of which
+   * are worse than not being there.
+   */
+  thinking: { on: boolean } | null
   chips: HudChip[]
   card: HudCard | null
   lastAction: { summary: string; when: string; undoable: boolean } | null
@@ -60,6 +69,9 @@ export function hudView(state: HudState, now = Date.now()): HudView {
     label,
     transcript: transcriptFor(state),
     stage: stageFor(state, now),
+    // Kept visible while armed even outside idle, so nobody leaves it on by
+    // accident and wonders why everything got slow.
+    thinking: state.phase === 'idle' || state.thinking ? { on: state.thinking } : null,
     chips: state.chips,
     card,
     // The ghost row is an idle-only affordance: while Mull is working, the
@@ -115,6 +127,12 @@ function stateClassFor(state: HudState): string {
 }
 
 function labelFor(state: HudState): string {
+  // A card on screen is a proposal waiting to be judged, whatever the phase
+  // says. Deciding this from `phase` alone meant every lane had to remember to
+  // announce one — and the navigator did not, so a plan card sat under the word
+  // THINKING and stayed there after the plan had finished. The card is the
+  // fact; the phase is a claim about it.
+  if (state.card) return 'PREVIEW'
   switch (state.phase) {
     case 'idle':
       return 'IDLE'

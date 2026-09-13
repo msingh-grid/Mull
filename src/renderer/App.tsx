@@ -121,7 +121,17 @@ export default function App(): JSX.Element {
         onPointerUp={endDrag}
         onPointerCancel={endDrag}
       >
-        <Hud state={state} now={tick} onAction={onAction} />
+        <Hud
+          state={state}
+          now={tick}
+          onAction={onAction}
+          onThinking={(on) => {
+            // Optimistic, because main echoes the whole state back a moment
+            // later: the toggle must feel like a switch, not like a request.
+            setState((previous) => ({ ...previous, thinking: on }))
+            void window.mull?.hudThinking(on)
+          }}
+        />
       </div>
     </div>
   )

@@ -13,6 +13,7 @@ import { readFileSync } from 'node:fs'
 import log from 'electron-log/main'
 import {
   CAPTURE_SAMPLE_RATE,
+  IDLE_HUD_STATE,
   IPC,
   type CaptureReadyPayload,
   type HudAction,
@@ -458,6 +459,9 @@ async function bootstrap(): Promise<void> {
       credentials: credentials.get(),
       settings: settings.get(),
       detectedLogin,
+      // A function, not a value: armed on the HUD a second before the user
+      // speaks, and it must apply to that utterance rather than the next launch.
+      thinking: () => settings?.get().thinking === true,
       log: logFn
     })
   )
@@ -528,7 +532,8 @@ async function bootstrap(): Promise<void> {
       openCard: (card, onAction) => hud?.openCard(card, onAction),
       updateCard: (card) => hud?.updateCard(card),
       closeCard: () => hud?.closeCard(),
-      update: (patch) => void pipeline?.patchState(patch)
+      update: (patch) => void pipeline?.patchState(patch),
+      announce: (phase, notice) => void pipeline?.announce(phase, notice)
     },
     trace: () => pipeline?.currentTrace() ?? new Trace(),
     log: logFn
@@ -572,6 +577,11 @@ async function bootstrap(): Promise<void> {
     },
     CAPTURE_SAMPLE_RATE
   )
+
+  // The toggle is persisted, so the panel has to open showing what is actually
+  // armed. Without this it reads `false` on every launch while the engine reads
+  // the saved value — a switch that disagrees with the thing it switches.
+  pipeline.patchState({ thinking: settings.get().thinking === true })
 
   if (selection.degradedReason) {
     pushHudState({ ...pipeline.getState(), notice: selection.degradedReason })
@@ -790,6 +800,20 @@ ipcMain.on(IPC.hudDragEnd, () => {
   settings?.set({ hudPosition: { x, y } })
 })
 
+/**
+ * Arm or disarm thinking for the writing lanes.
+ *
+ * Persisted, because someone who turned it on for a hard piece of writing
+ * usually has a second one — and because a toggle that silently forgets itself
+ * on relaunch is worse than no toggle. The engine reads it per turn and
+ * restarts its session when the answer changes (`engine/agent.ts`).
+ */
+ipcMain.handle(IPC.hudSetThinking, (_event, on: boolean) => {
+  settings?.set({ thinking: on === true })
+  pushHudState({ ...(pipeline?.getState() ?? IDLE_HUD_STATE), thinking: on === true })
+  log.info(`thinking ${on ? 'armed' : 'off'} for the writing lanes`)
+})
+
 ipcMain.handle(IPC.hudResetPosition, () => resetHudPosition())
 
 /** Back to bottom centre — the way out of "I dragged it somewhere silly". */
@@ -858,6 +882,9 @@ function reloadEngine(): void {
       credentials: credentials.get(),
       settings: settings.get(),
       detectedLogin,
+      // A function, not a value: armed on the HUD a second before the user
+      // speaks, and it must apply to that utterance rather than the next launch.
+      thinking: () => settings?.get().thinking === true,
       log: logFn
     })
   )

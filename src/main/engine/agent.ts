@@ -73,6 +73,15 @@ export interface AgentEngineOptions {
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   /** Injected in tests, so none of this needs a subprocess. */
   start?: StartQuery
+  /**
+   * May the writing lanes think? Read per turn, so arming it on the HUD takes
+   * effect on the next thing the user says rather than the next launch.
+   *
+   * The classifier and the navigator are never given this. They choose between
+   * four words and an index in a list respectively, both on the critical path,
+   * and there is nothing there worth deliberating over.
+   */
+  thinking?: () => boolean
 }
 
 export class AgentEngine implements Engine {
@@ -97,7 +106,8 @@ export class AgentEngine implements Engine {
       ...shared,
       label: 'edit',
       model: options.model,
-      systemPrompt: EDIT_SYSTEM_PROMPT
+      systemPrompt: EDIT_SYSTEM_PROMPT,
+      thinking: options.thinking
     })
     this.classifier = new AgentSession({
       ...shared,
@@ -109,7 +119,8 @@ export class AgentEngine implements Engine {
       ...shared,
       label: 'compose',
       model: options.model,
-      systemPrompt: COMPOSE_SYSTEM_PROMPT
+      systemPrompt: COMPOSE_SYSTEM_PROMPT,
+      thinking: options.thinking
     })
     this.navigator = new AgentSession({
       ...shared,
@@ -263,6 +274,15 @@ interface AgentSessionOptions {
   oauthToken: string | null
   log: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   start?: StartQuery
+  /**
+   * Whether this lane may think before answering, asked fresh each turn.
+   *
+   * Absent means never — which is the right default for everything, and the
+   * only setting the classifier and the navigator ever have. See `ensure`: a
+   * change in the answer costs a new session, because `thinking` is fixed when
+   * the session is created.
+   */
+  thinking?: () => boolean
 }
 
 /** A warm, single-purpose Claude Code session with streaming input. */
@@ -270,6 +290,8 @@ class AgentSession {
   private session: Query | null = null
   private prompts: Pushable<SDKUserMessage> | null = null
   private turn: Turn | null = null
+  /** What the live session was built with, so a change can be noticed. */
+  private thinking = false
 
   constructor(private readonly options: AgentSessionOptions) {}
 
@@ -346,7 +368,18 @@ class AgentSession {
   }
 
   private ensure(): Pushable<SDKUserMessage> {
+    const wanted = this.options.thinking?.() ?? false
+    // A session carries its thinking mode from birth, so switching it means a
+    // new one. Deliberately not smoothed over with a queued option change: the
+    // user armed this on the HUD a second ago and expects *this* utterance to
+    // get it, and a subprocess start is a fraction of what thinking itself
+    // costs.
+    if (this.session && this.thinking !== wanted) {
+      this.options.log('info', `engine: ${this.options.label} restarting with thinking ${wanted ? 'on' : 'off'}`)
+      this.reset()
+    }
     if (this.session && this.prompts) return this.prompts
+    this.thinking = wanted
 
     const prompts = new Pushable<SDKUserMessage>()
     const options: Options = {
@@ -359,20 +392,16 @@ class AgentSession {
       includePartialMessages: true,
       permissionMode: 'default',
       /**
-       * No extended thinking, on any of these lanes.
+       * Off unless this lane was handed a `thinking` predicate that says
+       * otherwise — which only the writing lanes are, and only when the user
+       * has armed it on the HUD.
        *
-       * Every turn Mull makes is a single-shot transformation with the whole
-       * problem already on the page: rewrite this passage, draft this reply,
-       * pick an index out of a numbered list. None of them is the kind of
-       * multi-step reasoning the budget exists for — and all of them are things
-       * a person is sitting and waiting for.
-       *
-       * Left at the harness default it is pure latency. The classifier is the
-       * clearest case: a hundred output tokens of deliberation in front of
-       * `{"intent":"compose"}` is most of the measured p50 of 5.4s, spent on a
-       * choice between four words.
+       * The default matters more than the switch. Left at the harness default
+       * it is pure latency: a hundred output tokens of deliberation in front of
+       * `{"intent":"compose"}`, measured at p50 20086ms against 954ms with it
+       * off, for a choice between four words.
        */
-      thinking: { type: 'disabled' },
+      thinking: wanted ? { type: 'adaptive' } : { type: 'disabled' },
       env: this.options.oauthToken
         ? { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: this.options.oauthToken }
         : { ...process.env }

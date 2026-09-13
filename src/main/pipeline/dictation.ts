@@ -177,8 +177,34 @@ export class DictationPipeline {
     return this.trace
   }
 
+  /**
+   * Update the panel — and never let a working phase arrive without a line.
+   *
+   * The working line is set explicitly at each step, which means any path that
+   * forgets one puts the HUD back where it started: the word THINKING, alone,
+   * unchanging, for as long as the work takes. That is indistinguishable from a
+   * hang, and it is the exact complaint this was built to answer — so "did
+   * somebody remember" is the wrong thing for it to depend on.
+   *
+   * Entering a working phase therefore stamps a default line and a clock unless
+   * the same patch supplies one. The lines every real step sets are better than
+   * "working"; this only guarantees there is always *something*, and always a
+   * second count once the wait is long enough to notice.
+   */
   private setState(patch: Partial<HudState>): void {
-    this.state = { ...this.state, ...patch }
+    const entering = patch.phase !== undefined && patch.phase !== this.state.phase
+    const working = patch.phase === 'thinking' || patch.phase === 'inserting'
+    const next = { ...this.state, ...patch }
+    if (entering && working && patch.stage === undefined && next.stage === null) {
+      next.stage = 'working'
+      next.stageAt = this.now()
+    }
+    // Leaving one clears it, so a stale line cannot outlive the work.
+    if (entering && !working && patch.stage === undefined) {
+      next.stage = null
+      next.stageAt = null
+    }
+    this.state = next
     this.deps.onState(this.state)
   }
 
@@ -595,7 +621,10 @@ export class DictationPipeline {
         return
       }
 
-      this.stage(null)
+      // Not cleared here: the phase is still `inserting` at this point, and
+      // blanking the line before the phase leaves would emit exactly the state
+      // this whole mechanism exists to prevent — a working phase with nothing
+      // to say. Leaving `inserting` clears it (see `setState`).
       this.trace.step('insert.done', {
         strategy: inserted.strategyUsed,
         verified: inserted.verified,

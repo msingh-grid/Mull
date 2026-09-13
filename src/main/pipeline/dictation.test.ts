@@ -980,4 +980,42 @@ describe('DictationPipeline — the two keys', () => {
     expect(asking.sidecar.calls.some((call) => call.method === 'windowContext')).toBe(true)
     asking.pipe.dispose()
   })
+
+  /**
+   * The working line is set explicitly at each step, so any path that forgets
+   * one would put the panel back to a bare, unchanging THINKING — which is
+   * indistinguishable from a hang and is the exact complaint it was built to
+   * answer. Entering a working phase guarantees a line whether or not anybody
+   * remembered.
+   */
+  it('never shows a working phase without saying what it is working on', async () => {
+    const h = harness({ transcript: 'make this shorter' })
+    h.pipe.begin('instruct')
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    const working = h.states.filter((s) => s.phase === 'thinking' || s.phase === 'inserting')
+    expect(working.length).toBeGreaterThan(0)
+    for (const state of working) {
+      expect(state.stage).toBeTruthy()
+      expect(state.stageAt).not.toBeNull()
+    }
+  })
+
+  it('clears the line on the way out, so it cannot outlive the work', async () => {
+    const h = harness({ transcript: 'hello there' })
+    h.pipe.begin('dictate')
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+    h.clock.advance(50)
+    await settle()
+
+    const last = h.states[h.states.length - 1]
+    expect(last?.phase).not.toBe('thinking')
+    expect(last?.stage).toBeNull()
+  })
 })

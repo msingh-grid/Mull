@@ -40,16 +40,22 @@ export interface ResolveEngineOptions {
   settings: Pick<Settings, 'engine' | 'editModel'>
   /** Result of `detectClaudeCodeLogin()`, passed in so this stays pure. */
   detectedLogin: boolean
+  /**
+   * May the writing lanes think? Read per turn rather than captured, so arming
+   * it on the HUD takes effect on the next utterance instead of the next
+   * relaunch. Only the subscription lane has a knob for it.
+   */
+  thinking?: () => boolean
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
 }
 
 export function resolveEngine(options: ResolveEngineOptions): Engine {
-  const { credentials, settings, detectedLogin, log } = options
+  const { credentials, settings, detectedLogin, log, thinking } = options
   const model = MODELS[settings.editModel]
   const subscription = credentials.oauthToken !== null || detectedLogin
 
   const agent = (): Engine =>
-    new AgentEngine({ oauthToken: credentials.oauthToken, model, log })
+    new AgentEngine({ oauthToken: credentials.oauthToken, model, log, thinking })
   const apiKey = (): Engine =>
     new ApiKeyEngine({ apiKey: credentials.apiKey as string, model })
 
