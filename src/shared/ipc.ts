@@ -128,6 +128,15 @@ export const IPC = {
   /** settings/onboarding -> main: versions, paths, hotkey mode. */
   about: 'mull:about',
 
+  /**
+   * onboarding -> main: the canonical edit, as a real diff card.
+   * Computed by the same engine + differ the HUD uses, so page 2 shows the
+   * app's actual marks rather than a picture of them.
+   */
+  sampleEdit: 'mull:sample:edit',
+  /** onboarding -> main: the user finished (or skipped to the end). */
+  onboardingDone: 'mull:onboarding:done',
+
   /** Dev affordance: trigger an utterance without the hotkey. */
   devTrigger: 'mull:dev:trigger',
   /** Dev affordance: open a FakeEngine card so the surfaces can be exercised. */

@@ -85,8 +85,8 @@ Budgets from `docs/PLAN.md`: `asrMs` < 400 (key-up → transcript), `insertMs` <
 |---|---|---|
 | `asrMs` misses the 400 ms budget | `smart-whisper` (the in-process binding the plan named) does not compile against this Node/toolchain — node-gyp fails in `binding.cc`. The CLI provider costs a process spawn per utterance and can't stream partials. The `AsrProvider` seam exists precisely so this swaps out. | M3/M4 |
 | No live partial transcript | same cause — the CLI only returns a final result | with the above |
-| ⌥Space handled by two listeners | `globalShortcut` consumes key-down (so no stray U+00A0), `uiohook-napi` reports key-up. A single `CGEventTap` in the sidecar does both. | M3 |
-| HUD is an unstyled read-out | tokens and specs are frozen (`docs/DESIGN.md`), the panel itself is M3's job | M3 |
+| ~~⌥Space handled by two listeners~~ | closed in M3 — a sidecar `CGEventTap` both observes and swallows; the old pair remains as a fallback | done |
+| ~~HUD is an unstyled read-out~~ | closed in M3 — the Studio Paper panel, see `docs/M3-VERIFY.md` | done |
 | ~~Insertion is paste-only~~ | closed in M2 — per-app `ax → paste → type` chain, see `docs/M2-VERIFY.md` | done |
 | ~~Nothing is journalled or undoable~~ | closed in M2 — SQLite journal + ⌥Z | done |
 | Swift `XCTest` suite does not run here | requires full Xcode; only Command Line Tools are installed. `npm run smoke` drives the built binary over real ndjson instead, which covers the same framing. | when Xcode is present |

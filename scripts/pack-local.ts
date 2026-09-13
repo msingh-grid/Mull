@@ -25,6 +25,7 @@ import { closeSync, existsSync, openSync, readdirSync, readSync, statSync } from
 import { join, basename } from 'node:path'
 import { build, Arch, Platform, type AfterPackContext, type Configuration } from 'electron-builder'
 import { resolveSidecarPath } from '../src/main/locations'
+import { SIDECAR_PROTOCOL_VERSION } from '../src/shared/sidecar-api'
 
 const ENTITLEMENTS = 'build/entitlements.mac.plist'
 const HARDENED = process.env['MULL_LOCAL_HARDENED'] !== '0'
@@ -259,10 +260,18 @@ function smokeApp(appPath: string): void {
   // The sidecar is a separate signed executable with its own entitlements; if
   // the signature were wrong it would die on exec rather than answer.
   const sidecar = join(appPath, 'Contents', 'Resources', 'mull-mac')
-  const init = run(sidecar, [], {
-    input: `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'init', params: { protocolVersion: 2 } })}\n`
+  const handshake = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'init',
+    params: { protocolVersion: SIDECAR_PROTOCOL_VERSION }
   })
-  check('the bundled sidecar answers init', init.out.includes('"protocolVersion":2'), init.out.trim().split('\n').pop() ?? '')
+  const init = run(sidecar, [], { input: `${handshake}\n` })
+  check(
+    'the bundled sidecar answers init',
+    init.out.includes(`"protocolVersion":${SIDECAR_PROTOCOL_VERSION}`),
+    init.out.trim().split('\n').pop() ?? ''
+  )
 }
 
 // ---------------------------------------------------------------------------

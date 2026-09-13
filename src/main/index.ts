@@ -71,7 +71,7 @@ let sidecar: SidecarApi & { dispose?: () => Promise<void> }
 let asr: AsrProvider
 
 /** Windows whose renderer exists. Each M3 stage adds one. */
-const BUILT_WINDOWS: MullWindow[] = ['journal', 'settings']
+const BUILT_WINDOWS: MullWindow[] = ['journal', 'settings', 'onboarding']
 
 const WINDOW_SIZES: Record<MullWindow, { width: number; height: number; minWidth: number }> = {
   journal: { width: 760, height: 620, minWidth: 560 },
@@ -469,6 +469,13 @@ async function bootstrap(): Promise<void> {
   if (systemPreferences.getMediaAccessStatus('microphone') !== 'granted') {
     void systemPreferences.askForMediaAccess('microphone')
   }
+
+  // First run: meet the instrument before being asked for anything. Opened
+  // last so the HUD, tray and hotkey are already live behind it — page 5 is a
+  // rehearsal with the real key, and a rehearsal needs the app running.
+  if (settings.get().onboardingCompletedAt === null) {
+    openAppWindow('onboarding')
+  }
 }
 
 /** The menu-bar status line: what the hotkey actually is right now. */
@@ -661,6 +668,27 @@ ipcMain.handle(IPC.about, async (): Promise<AboutInfo> => {
       .filter((permission) => !permission.granted)
       .map((permission) => permission.key)
   }
+})
+
+/**
+ * The canonical edit, for onboarding page 2.
+ *
+ * Runs the real engine and the real differ, so what the page demonstrates is
+ * what the app does — a hand-written sample would drift the first time either
+ * changes.
+ */
+ipcMain.handle(IPC.sampleEdit, async () => {
+  if (!engine) return null
+  const result = await engine.transform(
+    { instruction: 'tighten this up and make it sound less apologetic', text: '', app: null },
+    undefined
+  )
+  const { segments, changes } = diffText(CANONICAL_DEMO_TEXT, result.text)
+  return { kind: 'diff' as const, app: 'Mail', segments, changes }
+})
+
+ipcMain.handle(IPC.onboardingDone, () => {
+  settings?.set({ onboardingCompletedAt: Date.now() })
 })
 
 /** macOS login items. Failing to set one is a warning, never fatal. */

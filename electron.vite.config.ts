@@ -24,7 +24,8 @@ export default defineConfig({
           index: resolve(__dirname, 'src/renderer/index.html'),
           capture: resolve(__dirname, 'src/renderer/capture.html'),
           journal: resolve(__dirname, 'src/renderer/journal.html'),
-          settings: resolve(__dirname, 'src/renderer/settings.html')
+          settings: resolve(__dirname, 'src/renderer/settings.html'),
+          onboarding: resolve(__dirname, 'src/renderer/onboarding.html')
         }
       }
     }

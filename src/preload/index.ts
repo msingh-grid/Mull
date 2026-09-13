@@ -6,7 +6,7 @@ import {
   type HudState,
   type MullWindow
 } from '@shared/ipc'
-import type { DiffSegment } from '@shared/hud'
+import type { DiffCard, DiffSegment } from '@shared/hud'
 import type { AboutInfo } from '@shared/about'
 import type { Settings } from '@shared/settings'
 import type { PermissionKey, PermissionsSnapshot } from '@shared/permissions'
@@ -68,6 +68,12 @@ export interface MullApi {
   }
   /** Versions and paths, for the about pane and bug reports. */
   about: () => Promise<AboutInfo>
+  onboarding: {
+    /** The canonical edit as a real card — page 2 shows the actual marks. */
+    sample: () => Promise<DiffCard | null>
+    /** Stamp completion so it stops opening on launch. */
+    done: () => Promise<void>
+  }
   capture: {
     onStart: (handler: () => void) => void
     onStop: (handler: () => void) => void
@@ -143,6 +149,11 @@ const api: MullApi = {
   },
 
   about: () => ipcRenderer.invoke(IPC.about) as Promise<AboutInfo>,
+
+  onboarding: {
+    sample: () => ipcRenderer.invoke(IPC.sampleEdit) as Promise<DiffCard | null>,
+    done: () => ipcRenderer.invoke(IPC.onboardingDone) as Promise<void>
+  },
 
   capture: {
     onStart: (handler) => {
