@@ -185,9 +185,10 @@ function PagePermissions(): JSX.Element {
 
   return (
     <>
-      <Plate step={3} title="Three permissions, each with a reason">
+      <Plate step={3} title="Four permissions, each with a reason">
         macOS will ask you to grant these. Mull asks for nothing it can’t explain — and works with
-        whatever you grant.
+        whatever you grant. The last one is optional: without it Mull reads the text of the window
+        you’re in but never sees the picture.
       </Plate>
 
       {snapshot ? (

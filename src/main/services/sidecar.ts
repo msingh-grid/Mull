@@ -459,7 +459,12 @@ export class FakeSidecar implements SidecarApi {
     return { prompted: false, accessibility: this.overrides.accessibility ?? false }
   }
   async promptScreenRecording() {
-    return { prompted: false, screenRecording: this.overrides.screenRecording ?? false }
+    // Recorded, because the interesting question about this verb is not what it
+    // returns but *whether anyone called it*. An app that never requests screen
+    // capture does not appear in the Screen Recording list at all, so "was the
+    // request made" is the thing worth asserting.
+    this.calls.push({ method: 'promptScreenRecording' })
+    return { prompted: true, screenRecording: this.overrides.screenRecording ?? false }
   }
 
   /**

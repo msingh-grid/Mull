@@ -40,6 +40,9 @@ mac:
   extendInfo:
     # macOS kills the process instead of prompting when this string is missing.
     NSMicrophoneUsageDescription: Mull listens only while you hold ⌥Space, and transcribes on this Mac.
+    # Screen Recording needs no usage string — TCC handles that pane itself —
+    # but the app only appears in it once it has called
+    # CGRequestScreenCaptureAccess, which the Grant button now does.
     # Menu-bar resident: no Dock icon, no window on launch.
     LSUIElement: true
 

@@ -364,6 +364,17 @@ select:focus-visible {
   font-weight: 600;
   color: var(--ink);
 }
+/* Quiet, and beside the name rather than under it: this row is not a problem
+   to be fixed, it is a capability the user may or may not want. */
+.perm-optional {
+  margin-left: 7px;
+  font-size: var(--fs-chip);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  vertical-align: 1px;
+}
 .perm-reason {
   margin: 2px 0 0;
   font-size: 12.5px;

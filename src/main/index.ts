@@ -930,7 +930,16 @@ ipcMain.handle(IPC.engineTest, async (): Promise<EngineTestResult> => {
 })
 
 ipcMain.handle(IPC.permissionsGet, () => permissions?.snapshot() ?? null)
-ipcMain.handle(IPC.permissionsOpen, (_event, key: PermissionKey) => permissions?.open(key))
+/**
+ * Grant. Prompts where macOS has an API for it, and opens the pane either way.
+ *
+ * It used to only open the pane, which is fine for Microphone and Input
+ * Monitoring and is **not** fine for Screen Recording: an app that has never
+ * called `CGRequestScreenCaptureAccess` does not appear in that list at all, so
+ * opening it showed the user a pane with no Mull in it and no way to add one.
+ * The request is what registers the app; the pane is where they flip it.
+ */
+ipcMain.handle(IPC.permissionsOpen, (_event, key: PermissionKey) => permissions?.prompt(key))
 
 ipcMain.handle(IPC.modelStatus, () => modelStatus())
 
