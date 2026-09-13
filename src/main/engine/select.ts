@@ -3,14 +3,14 @@ import type { EngineCredentials, EngineKind, EngineStatus } from '@shared/engine
 import type { Settings } from '@shared/settings'
 import { AgentEngine } from './agent'
 import { ApiKeyEngine } from './api-key'
+import type { NavStep } from '@shared/nav'
 import type {
   ClassifiedIntent,
   ClassifyRequest,
   ComposeRequest,
   Engine,
   EngineState,
-  PlanRequest,
-  PlanResult,
+  NavigateRequest,
   TransformRequest,
   TransformResult
 } from './types'
@@ -114,7 +114,7 @@ export class SignedOutEngine implements Engine {
   }
 
 
-  async plan(): Promise<PlanResult> {
+  async navigate(): Promise<NavStep> {
     throw new Error(this.reason ?? 'No engine is connected.')
   }
 }
@@ -172,8 +172,8 @@ export class EngineHolder implements Engine {
     return this.inner.compose(request, onPartial)
   }
 
-  plan(request: PlanRequest): Promise<PlanResult> {
-    return this.inner.plan(request)
+  navigate(request: NavigateRequest): Promise<NavStep> {
+    return this.inner.navigate(request)
   }
 
   async dispose(): Promise<void> {

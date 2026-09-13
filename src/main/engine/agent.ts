@@ -1,12 +1,12 @@
 import { query, type Options, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { NavStep } from '@shared/nav'
 import type {
   ClassifiedIntent,
   ClassifyRequest,
   ComposeRequest,
   Engine,
   EngineState,
-  PlanRequest,
-  PlanResult,
+  NavigateRequest,
   TransformRequest,
   TransformResult
 } from './types'
@@ -20,10 +20,13 @@ import {
 import {
   COMPOSE_SYSTEM_PROMPT,
   EDIT_SYSTEM_PROMPT,
+  NAVIGATE_SYSTEM_PROMPT,
   cleanEditOutput,
   cleanEditPartial,
   composeContent,
   editContent,
+  navigateContent,
+  parseNavStep,
   type PromptBlock
 } from './prompts'
 
@@ -79,6 +82,7 @@ export class AgentEngine implements Engine {
   private readonly edit: AgentSession
   private readonly classifier: AgentSession
   private readonly composer: AgentSession
+  private readonly navigator: AgentSession
 
   constructor(options: AgentEngineOptions) {
     this.model = options.model
@@ -106,6 +110,12 @@ export class AgentEngine implements Engine {
       label: 'compose',
       model: options.model,
       systemPrompt: COMPOSE_SYSTEM_PROMPT
+    })
+    this.navigator = new AgentSession({
+      ...shared,
+      label: 'navigate',
+      model: options.model,
+      systemPrompt: NAVIGATE_SYSTEM_PROMPT
     })
   }
 
@@ -178,14 +188,35 @@ export class AgentEngine implements Engine {
     }
   }
 
-  async plan(_request: PlanRequest): Promise<PlanResult> {
-    throw new Error('Mull can’t plan commands yet.')
+  /**
+   * One navigation step.
+   *
+   * Its own session rather than a turn on the composer's, because the system
+   * prompts could not be more different — one writes prose in the user's voice,
+   * the other emits a line of JSON and is told at length what it may not press.
+   * Sharing a session would mean sending whichever prompt was not wanted.
+   *
+   * Not warmed. Navigation is the rarest thing Mull does and the user is
+   * looking at a card while it happens, so the cold start is paid where there
+   * is somewhere to show it.
+   */
+  async navigate(request: NavigateRequest): Promise<NavStep> {
+    try {
+      const reply = await this.navigator.ask(navigateContent(request))
+      this.health.recover()
+      return parseNavStep(reply)
+    } catch (err) {
+      this.health.degrade(err)
+      this.navigator.reset()
+      throw err
+    }
   }
 
   async dispose(): Promise<void> {
     this.edit.reset()
     this.classifier.reset()
     this.composer.reset()
+    this.navigator.reset()
   }
 }
 

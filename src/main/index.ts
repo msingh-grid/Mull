@@ -287,7 +287,13 @@ function notifyJournalChanged(): void {
  * mime: applying an edit card runs the **real** insertion path, so the demo
  * exercises exactly what the engine will exercise later — including the
  * journal entry and ⌥Z. The plan card is the exception and says so in its own
- * title, because executing commands is M5's and nothing here can run one.
+ * title, because the real one navigates a live window and a tray menu is not
+ * the place to start that.
+ *
+ * Its steps are a fixed list rather than an engine call. They used to come from
+ * `FakeEngine.plan()`, which existed only to feed this menu item — and when
+ * Stage 5 replaced `plan()` with `navigate()`, keeping a canned plan alive on
+ * the seam would have meant a method no product code calls.
  */
 async function showDemoCard(kind: 'diff' | 'plan'): Promise<void> {
   if (!hud || !demoEngine) return
@@ -297,13 +303,11 @@ async function showDemoCard(kind: 'diff' | 'plan'): Promise<void> {
   const appInfo = target ? { bundleId: target.bundleId, name: target.name } : null
 
   if (kind === 'plan') {
-    const plan = await engine.plan({ instruction: 'demo', app: appInfo })
-    const steps: PlanStep[] = plan.steps.map((step, index) => ({
-      id: `demo-${index}`,
-      verb: step.verb,
-      object: step.object,
-      state: 'pending'
-    }))
+    const steps: PlanStep[] = [
+      { verb: 'press', object: '“Search”' },
+      { verb: 'type', object: '“Priya”' },
+      { verb: 'read', object: 'that conversation' }
+    ].map((step, index) => ({ ...step, id: `demo-${index}`, state: 'pending' as const }))
     hud.openCard({ kind: 'plan', steps, context: 'demo — nothing runs' }, (action) => {
       log.info(`demo plan card: ${action}`)
     })

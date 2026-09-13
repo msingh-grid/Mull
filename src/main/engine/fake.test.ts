@@ -1,8 +1,23 @@
 import { describe, expect, it } from 'vitest'
+import type { UiTarget } from '@shared/sidecar-api'
 import { CANONICAL_SAMPLE, FakeEngine, tighten } from './fake'
 import { diffText } from '../pipeline/diff'
 
 const engine = (): FakeEngine => new FakeEngine({ chunkMs: 0 })
+
+const uiTarget = (index: number, title: string): UiTarget => ({
+  index,
+  role: 'AXRow',
+  subrole: null,
+  title,
+  help: null,
+  value: null,
+  frame: null,
+  actions: ['AXPress'],
+  enabled: true,
+  focused: false,
+  kind: 'press'
+})
 
 describe('FakeEngine', () => {
   it('does not claim to be an engine', async () => {
@@ -49,10 +64,45 @@ describe('FakeEngine', () => {
     }
   })
 
-  it('proposes a plan without running anything', async () => {
-    const plan = await engine().plan({ instruction: 'save this to notes', app: null })
-    expect(plan.steps).toHaveLength(3)
-    expect(plan.steps.every((step) => step.verb && step.object)).toBe(true)
+  /**
+   * The fake navigator is word matching, not intelligence, and that is what it
+   * is for: the loop, the card and the executor can be exercised end to end
+   * without a subprocess, and nobody can mistake it for the real thing.
+   */
+  it('navigates by matching a word from the goal, then reads, then stops', async () => {
+    const fake = engine()
+    const targets = [
+      uiTarget(0, 'Search'),
+      uiTarget(1, 'Anil Turaga (away, notifications snoozed)')
+    ]
+    const first = await fake.navigate({
+      goal: 'what did Anil say about the terms doc',
+      app: null,
+      targets,
+      history: [],
+      stepsLeft: 6
+    })
+    expect(first).toMatchObject({ verb: 'press', index: 1 })
+
+    const second = await fake.navigate({
+      goal: 'what did Anil say about the terms doc',
+      app: null,
+      targets,
+      history: [{ step: first, ok: true, detail: 'Anil Turaga' }],
+      stepsLeft: 5
+    })
+    expect(second).toEqual({ verb: 'read' })
+  })
+
+  it('stops rather than pressing on when the budget runs out', async () => {
+    const step = await engine().navigate({
+      goal: 'find Anil',
+      app: null,
+      targets: [uiTarget(0, 'Anil Turaga')],
+      history: [],
+      stepsLeft: 0
+    })
+    expect(step).toMatchObject({ verb: 'done' })
   })
 })
 

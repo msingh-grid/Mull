@@ -1,5 +1,5 @@
-import { z } from 'zod'
-import { NavKeySchema, type SidecarApi, type UiTarget } from '@shared/sidecar-api'
+import type { SidecarApi, UiTarget } from '@shared/sidecar-api'
+import type { NavStep } from '@shared/nav'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 import { insertionProfile } from '../services/insertion-table'
 
@@ -10,11 +10,10 @@ import { insertionProfile } from '../services/insertion-table'
  * say-so, so almost all of it is guards. The shape of the guards matters more
  * than their contents:
  *
- * **The step union is the safety argument.** There is no `send` verb, no
- * `keyChord`, no free-text `insertText`. A model that wanted to send a message
- * could not describe the act, which is a stronger statement than a model that
- * is asked not to. That is the same seam as `ClassifiedIntent` having no `send`
- * field and `navKey` not being `keyChord` — three layers, one line.
+ * **The step union is the safety argument**, and it lives in `@shared/nav` so
+ * that the engine validating the model's answer and this file performing it
+ * cannot drift apart. There is no `send` verb, no `keyChord`, no free-text
+ * `insertText`.
  *
  * **Targets are integers into a list Mull made.** The model never names an
  * element; it picks an index out of a scan (`AXTargets`), and the press quotes
@@ -26,40 +25,6 @@ import { insertionProfile } from '../services/insertion-table'
  * to run at all is the card's.
  */
 
-// ---------------------------------------------------------------------------
-// The vocabulary
-// ---------------------------------------------------------------------------
-
-/**
- * Everything the navigator may ask for. Validated with zod on arrival from the
- * model, and a step that does not parse ends the plan rather than being
- * repaired — improvising in someone else's window is not a recovery strategy.
- */
-export const NavStepSchema = z.discriminatedUnion('verb', [
-  z.object({
-    verb: z.literal('press'),
-    /** Index into the scan the model was shown. */
-    index: z.number().int().nonnegative(),
-    /** The title as shown. Quoted back to the sidecar, and printed on the card. */
-    label: z.string()
-  }),
-  z.object({
-    verb: z.literal('type'),
-    index: z.number().int().nonnegative(),
-    /**
-     * Short on purpose. This is a search query, and the only text the
-     * navigator can put anywhere; a paragraph arriving here would mean
-     * something has gone wrong upstream.
-     */
-    text: z.string().min(1).max(120)
-  }),
-  z.object({ verb: z.literal('navKey'), key: NavKeySchema }),
-  /** Look at wherever we have arrived. Writes nothing. */
-  z.object({ verb: z.literal('read') }),
-  /** Finished — with or without an answer. `because` goes on the card. */
-  z.object({ verb: z.literal('done'), because: z.string() })
-])
-export type NavStep = z.infer<typeof NavStepSchema>
 
 /**
  * Controls this will not press, whatever the model says.

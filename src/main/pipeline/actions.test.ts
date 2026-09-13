@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { UiTarget } from '@shared/sidecar-api'
 import { FakeSidecar } from '../services/sidecar'
-import { ActionExecutor, NavStepSchema, type NavStep, type Scan } from './actions'
+import { NavStepSchema, type NavStep } from '@shared/nav'
+import { ActionExecutor, type Scan } from './actions'
 
 /**
  * What these tests are actually protecting.

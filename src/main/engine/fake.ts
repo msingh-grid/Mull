@@ -1,10 +1,10 @@
+import type { NavStep } from '@shared/nav'
 import type {
   ClassifiedIntent,
   ComposeRequest,
   Engine,
   EngineState,
-  PlanRequest,
-  PlanResult,
+  NavigateRequest,
   TransformRequest,
   TransformResult
 } from './types'
@@ -133,15 +133,37 @@ export class FakeEngine implements Engine {
     return { text }
   }
 
-  async plan(request: PlanRequest): Promise<PlanResult> {
-    return {
-      context: request.app?.name ?? null,
-      steps: [
-        { verb: 'open', object: 'Notes' },
-        { verb: 'create', object: 'a note titled “Q3 sign-off”' },
-        { verb: 'insert', object: 'the last thing you dictated' }
-      ]
+  /**
+   * A navigator with no model behind it, and no pretending otherwise.
+   *
+   * It presses the first target whose title contains a word from the goal, then
+   * reads, then stops — which is enough to exercise the loop, the card and the
+   * executor end to end without a subprocess, and is transparently not
+   * intelligence. Anything cleverer here would be a fake that passes tests the
+   * real engine would fail.
+   */
+  async navigate(request: NavigateRequest): Promise<NavStep> {
+    if (request.stepsLeft <= 0) return { verb: 'done', because: 'out of steps' }
+    const tried = new Set(
+      request.history.map((attempt) =>
+        attempt.step.verb === 'press' ? attempt.step.index : -1
+      )
+    )
+    const words = request.goal
+      .toLowerCase()
+      .split(/\W+/u)
+      .filter((word) => word.length > 3)
+    const hit = request.targets.find(
+      (target) =>
+        target.kind === 'press' &&
+        !tried.has(target.index) &&
+        words.some((word) => target.title.toLowerCase().includes(word))
+    )
+    if (hit) return { verb: 'press', index: hit.index, label: hit.title }
+    if (!request.history.some((attempt) => attempt.step.verb === 'read')) {
+      return { verb: 'read' }
     }
+    return { verb: 'done', because: 'nothing here matches that' }
   }
 }
 

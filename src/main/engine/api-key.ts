@@ -1,12 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk'
+import type { NavStep } from '@shared/nav'
 import type {
   ClassifiedIntent,
   ClassifyRequest,
   ComposeRequest,
   Engine,
   EngineState,
-  PlanRequest,
-  PlanResult,
+  NavigateRequest,
   TransformRequest,
   TransformResult
 } from './types'
@@ -21,11 +21,14 @@ import {
 import {
   COMPOSE_SYSTEM_PROMPT,
   EDIT_SYSTEM_PROMPT,
+  NAVIGATE_SYSTEM_PROMPT,
   cleanEditOutput,
   cleanEditPartial,
   composeContent,
   editContent,
-  maxOutputTokens
+  maxOutputTokens,
+  navigateContent,
+  parseNavStep
 } from './prompts'
 
 /**
@@ -170,9 +173,34 @@ export class ApiKeyEngine implements Engine {
     }
   }
 
-  async plan(_request: PlanRequest): Promise<PlanResult> {
-    // Commands are M5. An empty plan would render as a card proposing nothing,
-    // which is worse than an error nobody currently triggers.
-    throw new Error('Mull can’t plan commands yet.')
+  /**
+   * One navigation step.
+   *
+   * Not streamed, unlike every other lane here: the answer is a single line of
+   * JSON and there is nothing to fill in progressively. The card shows the step
+   * once it is decided, and a half-parsed action is not a thing to show anyone.
+   */
+  async navigate(request: NavigateRequest): Promise<NavStep> {
+    try {
+      const message = await this.messages.create({
+        model: this.model,
+        max_tokens: 256,
+        system: [
+          { type: 'text', text: NAVIGATE_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
+        ],
+        messages: [
+          { role: 'user', content: navigateContent(request) as Anthropic.MessageParam['content'] }
+        ]
+      })
+      this.health.recover()
+      const reply = message.content
+        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+        .map((block) => block.text)
+        .join('')
+      return parseNavStep(reply)
+    } catch (err) {
+      this.health.degrade(err)
+      throw err
+    }
   }
 }

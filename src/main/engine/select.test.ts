@@ -83,7 +83,7 @@ describe('EngineHolder', () => {
       classify: async () => ({ kind: 'dictate' as const }),
       transform: async () => ({ text: '' }),
       compose: async () => ({ text: '' }),
-      plan: async () => ({ steps: [], context: null }),
+      navigate: async () => ({ verb: 'done' as const, because: 'not this test' }),
       dispose: async () => {
         disposed += 1
       }

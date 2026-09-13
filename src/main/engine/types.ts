@@ -17,7 +17,8 @@
  * Nothing in src/main/pipeline/dictation.ts calls an Engine.
  */
 import type { ScreenContext } from '@shared/context'
-import type { PlanStep } from '@shared/hud'
+import type { NavAttempt, NavStep } from '@shared/nav'
+import type { UiTarget } from '@shared/sidecar-api'
 
 export type EngineState =
   | { kind: 'ready' }
@@ -113,15 +114,34 @@ export type ClassifiedIntent =
    */
   | { kind: 'compose'; instruction: string }
 
-export interface PlanRequest {
-  instruction: string
+/**
+ * One turn of navigation: here is where we are, what do we do next?
+ *
+ * **One step per call, and that is the design.** A plan of three steps decided
+ * up front is a plan written against a window that no longer exists by step
+ * two — press Slack's Search and the entire target list is replaced. So the
+ * model looks, acts once, and looks again, and the card fills in as it goes.
+ *
+ * What the user approves is therefore the *goal and the budget*, not each
+ * press. A confirmation per click would be a dialog box nobody reads by the
+ * fourth one, and it would not be more informative: the steps are on the card
+ * as they happen, and Escape stops it between any two.
+ */
+export interface NavigateRequest {
+  /** The user's own words. Never rewritten, and journalled with every step. */
+  goal: string
   app: { bundleId: string; name: string } | null
-}
-
-export interface PlanResult {
-  /** Never executed on arrival — a plan is a proposal until Run (§6.4). */
-  steps: Array<Pick<PlanStep, 'verb' | 'object'>>
-  context: string | null
+  /** What the window says right now — text, and the picture when allowed. */
+  context?: ScreenContext | null
+  /**
+   * What can be pressed right now, numbered. The model answers with an index
+   * into this, never with a name. See `@shared/nav`.
+   */
+  targets: UiTarget[]
+  /** Every step so far and how it went, so the model can stop repeating one. */
+  history: NavAttempt[]
+  /** How many more steps are allowed. Zero means: answer `done`. */
+  stepsLeft: number
 }
 
 export interface Engine {
@@ -151,6 +171,14 @@ export interface Engine {
    * sees is all insertion.
    */
   compose(request: ComposeRequest, onPartial?: (text: string) => void): Promise<TransformResult>
-  plan(request: PlanRequest): Promise<PlanResult>
+  /**
+   * Where next? One step, chosen from an enumerated list of what can be
+   * pressed — see `NavigateRequest`.
+   *
+   * Implementations MUST validate against `NavStepSchema` and throw on
+   * anything else. A malformed step ends the plan; it is never repaired,
+   * because improvising in someone else's window is not a recovery strategy.
+   */
+  navigate(request: NavigateRequest): Promise<NavStep>
   dispose?(): Promise<void>
 }
