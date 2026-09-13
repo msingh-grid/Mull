@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; media-src 'self' mediastream:"
+    />
+    <title>Mull capture</title>
+  </head>
+  <body>
+    <!-- Never shown. This window exists only because getUserMedia and
+         AudioWorklet live in a renderer, not in the main process. -->
+    <script type="module" src="./capture.ts"></script>
+  </body>
+</html>

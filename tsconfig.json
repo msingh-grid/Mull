@@ -3,5 +3,14 @@
   "references": [
     { "path": "./tsconfig.node.json" },
     { "path": "./tsconfig.web.json" }
-  ]
+  ],
+  // Solution-style configs carry no compilerOptions of their own, but tsx (used
+  // by scripts/) reads path mappings from the root config only. Keep this in
+  // step with the `paths` in both project configs.
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["./src/shared/*"]
+    }
+  }
 }
