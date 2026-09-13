@@ -1,3 +1,4 @@
+import type { HudChip } from '@shared/hud'
 import {
   IDLE_HUD_STATE,
   MAX_UTTERANCE_MS,
@@ -10,8 +11,16 @@ import type { Bench } from '../bench'
 import { concatFloat32, peakAmplitude } from '../audio/wav'
 import { cleanTranscript, summarise } from './cleanup'
 import { describeInsertionReason, type InsertionService } from '../services/insertion'
-import { captureSelection, countWords, type SelectionSnapshot } from './selection'
-import { looksLikeInstruction, route } from './router'
+import {
+  captureFocus,
+  classifierContext,
+  countWords,
+  editTarget,
+  hasEditableText,
+  type EditTarget,
+  type FocusSnapshot
+} from './selection'
+import type { IntentRouter } from './intent'
 import type { JournalStore } from '../store/journal'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 
@@ -20,11 +29,13 @@ import type { JournalDraft, JournalEntry } from '@shared/types'
  *
  * Two invariants from docs/PLAN.md are enforced here, not by convention:
  *
- *  1. Dictation never waits on an engine. The routing step added in M4 is a
- *     pure rules table (`router.ts`), and it answers the common case — nothing
- *     selected — without looking at the transcript at all. The ONLY await this
- *     path adds is for a selection snapshot that is already in flight, and only
- *     once the transcript has already been judged instruction-shaped.
+ *  1. Dictation never waits when there is nothing to edit. M4 promised this
+ *     absolutely and M4.1 narrowed it on purpose: a rules table cannot tell
+ *     "make my last message less apologetic" from prose, so the model decides
+ *     (`intent.ts`). It is only ever asked when the focused field holds text or
+ *     something is selected — an empty box still inserts with no engine in the
+ *     loop, and that is most dictation. The snapshot that answers "is there
+ *     anything to edit?" is read during the hold, so the question itself is free.
  *  2. Insertion is hard-blocked while macOS secure input is active. It is
  *     checked twice — when capture starts (so we can tell the user early) and
  *     again immediately before inserting, because focus can move to a password
@@ -44,8 +55,10 @@ export interface SculptLaneLike {
   run(request: {
     instruction: string
     transcript: string
-    snapshot: SelectionSnapshot
+    target: EditTarget
     app: { bundleId: string; name: string } | null
+    routedBy?: string
+    classifyMs?: number | null
   }): Promise<void>
 }
 
@@ -58,6 +71,8 @@ export interface DictationDeps {
   insertion: InsertionService
   /** Where instructions go. Absent = every utterance is dictation. */
   sculpt?: SculptLaneLike
+  /** Decides dictate-vs-edit. Absent = every utterance is dictation. */
+  intent?: IntentRouter
   /** Where applied and failed actions are written down. Optional in tests. */
   journal?: JournalStore
   onState: (state: HudState) => void
@@ -81,7 +96,7 @@ export class DictationPipeline {
   private maxTimer: NodeJS.Timeout | null = null
   private lingerTimer: NodeJS.Timeout | null = null
   /** Read during the hold; resolved by the time a normal utterance ends. */
-  private selectionPromise: Promise<SelectionSnapshot | null> | null = null
+  private focusPromise: Promise<FocusSnapshot> | null = null
   private readonly now: () => number
   private readonly log: NonNullable<DictationDeps['log']>
 
@@ -152,23 +167,16 @@ export class DictationPipeline {
     this.deps.capture.start()
     this.setState({ phase: 'listening', transcript: '', partial: true, notice: null, chips: [] })
 
-    // What is selected right now, read while the user is still speaking. This
-    // is the only input the router needs beyond the transcript, and taking it
-    // here means the decision itself costs nothing.
-    this.selectionPromise = captureSelection(this.deps.sidecar, this.log)
-    void this.selectionPromise.then((snapshot) => {
-      if (this.phase !== 'capturing' || !snapshot) return
-      // Announced before the user finishes speaking, so they can see Mull has
-      // the selection in time to change their mind (docs/DESIGN.md §7.5).
-      this.setState({
-        chips: [
-          {
-            kind: 'dict',
-            id: 'selection',
-            label: `${snapshot.app?.name ?? 'Selected'} — ${countWords(snapshot.text)} words`
-          }
-        ]
-      })
+    // What is in front of the caret, read while the user is still speaking.
+    // Taking it here is what lets the routing decision cost nothing extra, and
+    // what lets the fast path know there is nothing to edit without asking.
+    this.focusPromise = captureFocus(this.deps.sidecar, this.log)
+    void this.focusPromise.then((snapshot) => {
+      if (this.phase !== 'capturing') return
+      // Announced before the user finishes speaking, so they can see what Mull
+      // is looking at in time to change their mind (docs/DESIGN.md §7.5).
+      const chip = focusChip(snapshot)
+      if (chip) this.setState({ chips: [chip] })
     })
 
     this.maxTimer = setTimeout(() => {
@@ -304,36 +312,35 @@ export class DictationPipeline {
         return
       }
 
-      // ---- Routing (M4) ----------------------------------------------------
+      // ---- Routing ---------------------------------------------------------
       // Read the invariant at the top of this file before changing anything
-      // here. `looksLikeInstruction` is pure string work; the await beneath it
-      // is reached only by a transcript that has already passed that test, so
-      // ordinary dictation never waits for the selection — or for anything
-      // else.
-      const instructionShaped = this.deps.sculpt ? looksLikeInstruction(text) : false
-      const snapshot = instructionShaped ? await this.selectionSnapshot() : null
-      const routed = route(text, { hasSelection: snapshot !== null })
+      // here. `IntentRouter` answers synchronously when there is nothing an
+      // edit could act on, which is the case this loop must never slow down;
+      // only an utterance with text in front of it can reach the model.
+      const routed = await this.decide(text)
+      let hint: string | null = null
 
-      if (routed.kind === 'edit' && snapshot && this.deps.sculpt) {
-        // Idle before handing off: the lane owns the panel from here, and a
-        // new utterance must be able to interrupt it.
-        this.phase = 'idle'
-        await this.deps.sculpt.run({
-          instruction: routed.instruction,
-          transcript: text,
-          snapshot,
-          app: this.state.app ?? snapshot.app
-        })
-        return
+      if (routed?.route.kind === 'edit' && this.deps.sculpt) {
+        const target = editTarget(routed.snapshot, routed.route.target)
+        if (target.ok) {
+          // Idle before handing off: the lane owns the panel from here, and a
+          // new utterance must be able to interrupt it.
+          this.phase = 'idle'
+          await this.deps.sculpt.run({
+            instruction: routed.route.instruction,
+            transcript: text,
+            target: target.target,
+            app: this.state.app ?? routed.snapshot.app,
+            routedBy: routed.by,
+            classifyMs: routed.classifyMs
+          })
+          return
+        }
+        // Understood, but unable — the field is too long to rewrite whole, or
+        // the app will not accept the write. Type the words (so nothing the
+        // user said is lost) and say what stopped the edit.
+        hint = target.message
       }
-
-      // Heard an instruction with nothing selected. The words get typed —
-      // which is correct, there was nothing to edit — and the HUD says why,
-      // because "it just types what I say" is exactly the confusion this
-      // feature exists to resolve.
-      const hint = instructionShaped
-        ? 'Select the text first, then say that — Mull will edit it instead of typing it.'
-        : null
 
       this.setState({ phase: 'inserting' })
       const insertStart = this.now()
@@ -427,6 +434,8 @@ export class DictationPipeline {
         chars: text.length,
         app: this.state.app?.bundleId ?? null,
         outcome: 'applied',
+        routedBy: routed?.by,
+        classifyMs: routed?.classifyMs ?? null,
         strategy: inserted.strategyUsed,
         attempts: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(','),
         captureMs,
@@ -465,12 +474,42 @@ export class DictationPipeline {
   }
 
   /**
-   * The snapshot taken at key-down. Awaited, never re-read: an edit is a
-   * promise about the text the user was looking at when they spoke, not about
-   * whatever happens to be selected by the time transcription finishes.
+   * Ask what the user meant.
+   *
+   * The snapshot is the one taken at key-down, awaited but never re-read: an
+   * edit is a promise about the text the user was looking at when they spoke,
+   * not about whatever happens to be on screen once transcription finishes.
+   *
+   * Returns null when there is no edit lane at all, which is the pre-M4
+   * behaviour and what every test of the plain loop runs against.
    */
-  private async selectionSnapshot(): Promise<SelectionSnapshot | null> {
-    return this.selectionPromise ? this.selectionPromise : null
+  private async decide(text: string): Promise<
+    | (Awaited<ReturnType<IntentRouter['decide']>> & { snapshot: FocusSnapshot })
+    | null
+  > {
+    if (!this.deps.sculpt || !this.deps.intent || !this.focusPromise) return null
+    const snapshot = await this.focusPromise
+    const decision = await this.deps.intent.decide({
+      transcript: text,
+      app: this.state.app ?? snapshot.app,
+      ...classifierContext(snapshot)
+    })
+    if (decision.by !== 'fast-path') {
+      this.log('info', 'intent routed', {
+        by: decision.by,
+        kind: decision.route.kind,
+        classifyMs: decision.classifyMs,
+        fallbackReason: decision.fallbackReason
+      })
+    }
+    // A fallback is shown, not swallowed: a misroute while the engine is down
+    // should be explainable rather than mysterious.
+    if (decision.fallbackReason && decision.fallbackReason !== 'rules-only') {
+      this.setState({
+        chips: [{ kind: 'warn', id: 'routing', label: 'routing offline' }]
+      })
+    }
+    return { ...decision, snapshot }
   }
 
   private async resolveApp(): Promise<HudState['app']> {
@@ -535,3 +574,27 @@ export class DictationPipeline {
   }
 }
 
+
+/**
+ * The chip that says what Mull is looking at, shown while the user speaks.
+ *
+ * A selection is named by size because that is the thing you want to check
+ * before you commit ("did it get the whole paragraph?"). A field with text in
+ * it is named by the app, because what matters there is only that Mull can see
+ * something to work on. An empty field gets no chip: there is nothing to say.
+ */
+function focusChip(snapshot: FocusSnapshot): HudChip | null {
+  const { hasSelection, hasFieldText } = hasEditableText(snapshot)
+  const app = snapshot.app?.name
+  if (hasSelection && snapshot.selection) {
+    return {
+      kind: 'dict',
+      id: 'focus',
+      label: `${app ?? 'Selected'} — ${countWords(snapshot.selection.text)} words`
+    }
+  }
+  if (hasFieldText) {
+    return { kind: 'dict', id: 'focus', label: app ? `${app} — this field` : 'this field' }
+  }
+  return null
+}

@@ -92,6 +92,22 @@ export const IPC = {
 
   /** HUD renderer -> main: the user pressed Apply or Cancel on the open card. */
   hudAction: 'mull:hud:action',
+  /**
+   * HUD renderer -> main: the pointer entered or left the panel.
+   *
+   * The window is click-through over its transparent stage, and `forward: true`
+   * still delivers mouse moves — so the renderer is the only thing that knows
+   * when the pointer is actually over the 480px of paper. Main mirrors this
+   * into `setIgnoreMouseEvents`, which is what makes the panel grabbable
+   * without the rest of the window eating clicks meant for the app beneath.
+   */
+  hudHover: 'mull:hud:hover',
+  /** HUD renderer -> main: drag the panel. Screen coordinates. */
+  hudDragStart: 'mull:hud:drag-start',
+  hudDragMove: 'mull:hud:drag-move',
+  hudDragEnd: 'mull:hud:drag-end',
+  /** any renderer -> main: put the HUD back where it started. */
+  hudResetPosition: 'mull:hud:reset-position',
 
   /** journal window -> main: most recent entries (newest first). */
   journalRecent: 'mull:journal:recent',

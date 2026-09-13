@@ -1,4 +1,5 @@
 import type {
+  ClassifiedIntent,
   Engine,
   EngineState,
   PlanRequest,
@@ -73,6 +74,15 @@ export class FakeEngine implements Engine {
 
   async ready(): Promise<EngineState> {
     return this.state
+  }
+
+  /**
+   * The fake does not guess at meaning. `dictate` is the safe answer, and it
+   * is what `IntentRouter` does with a refusal anyway — it falls back to the
+   * local rules, which is the behaviour a machine with no engine should have.
+   */
+  async classify(): Promise<ClassifiedIntent> {
+    return { kind: 'dictate' }
   }
 
   async transform(

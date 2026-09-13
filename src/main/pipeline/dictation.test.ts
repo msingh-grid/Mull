@@ -8,6 +8,8 @@ import { JournalStore } from '../store/journal'
 import { memoryDatabase } from '../store/journal.test-helpers'
 import { DictationPipeline } from './dictation'
 import type { SculptRequest } from './sculpt'
+import { IntentRouter } from './intent'
+import type { ClassifiedIntent, Engine } from '../engine/types'
 
 function speech(seconds: number, amplitude = 0.25): Float32Array {
   const samples = new Float32Array(Math.round(CAPTURE_SAMPLE_RATE * seconds))
@@ -34,6 +36,8 @@ function harness(options: {
   transcript?: string
   /** Absent = no edit lane at all, which is the M1–M3 behaviour. */
   sculpt?: boolean | 'throws'
+  /** What the classifier answers. Absent = the local rules decide. */
+  classifies?: ClassifiedIntent | 'offline'
 } = {}): Harness {
   const sidecar = options.sidecar ?? new FakeSidecar({ accessibility: true })
   const journal = new JournalStore(memoryDatabase())
@@ -49,6 +53,18 @@ function harness(options: {
   })
 
   const sculpted: SculptRequest[] = []
+  // A classifier that answers whatever the test says, or an engine that is
+  // down so the local rules have to decide.
+  const engine: Engine = {
+    name: 'test',
+    model: null,
+    ready: async () =>
+      options.classifies === 'offline' ? { kind: 'signed-out' } : { kind: 'ready' },
+    classify: async () => options.classifies as ClassifiedIntent,
+    transform: async () => ({ text: '' }),
+    plan: async () => ({ steps: [], context: null })
+  }
+
   const pipe = new DictationPipeline(
     {
       sidecar,
@@ -64,6 +80,7 @@ function harness(options: {
             }
           }
         : undefined,
+        intent: options.sculpt ? new IntentRouter({ engine, now: () => clockMs }) : undefined,
       onState: (s) => states.push({ ...s }),
       now: () => clockMs,
       appliedLingerMs: 5,
@@ -312,10 +329,10 @@ describe('describeInsertionReason', () => {
 })
 
 /**
- * Routing (M4). The invariant under test is the one at the top of
- * dictation.ts: an utterance only reaches the edit lane when there was a live
- * selection AND the words read as an instruction. Everything else is typed,
- * exactly as it was before this milestone existed.
+ * Routing. The invariant under test is the one at the top of dictation.ts: an
+ * utterance only reaches the edit lane when there was text to edit AND the
+ * decision came back `edit`. These cases run the classifier `offline`, so the
+ * local rules answer — which also proves the fallback works end to end.
  */
 describe('DictationPipeline — routing', () => {
   const SELECTED = 'some selected words here'
@@ -340,13 +357,14 @@ describe('DictationPipeline — routing', () => {
     const h = harness({
       sidecar: withSelection(),
       transcript: 'make this crisp',
-      sculpt: true
+      sculpt: true,
+      classifies: 'offline'
     })
     await utterance(h)
 
     expect(h.sculpted.length).toBe(1)
     expect(h.sculpted[0]?.instruction).toBe('Make this crisp')
-    expect(h.sculpted[0]?.snapshot.text).toBe(SELECTED)
+    expect(h.sculpted[0]?.target).toMatchObject({ kind: 'selection', text: SELECTED })
     // Nothing typed, and no dictation row — the lane owns this one now.
     expect(h.sidecar.insertions).toEqual([])
     expect(h.journal.recent(10)).toEqual([])
@@ -357,7 +375,8 @@ describe('DictationPipeline — routing', () => {
     const h = harness({
       sidecar: withSelection(),
       transcript: 'make sure Priya signs off before Friday',
-      sculpt: true
+      sculpt: true,
+      classifies: 'offline'
     })
     await utterance(h)
 
@@ -367,26 +386,26 @@ describe('DictationPipeline — routing', () => {
   })
 
   it('shows what is selected while you are still speaking', async () => {
-    const h = harness({ sidecar: withSelection(), sculpt: true })
+    const h = harness({ sidecar: withSelection(), sculpt: true, classifies: 'offline' })
     h.pipe.begin()
     await settle()
     const listening = h.states.filter((s) => s.phase === 'listening').at(-1)
     expect(listening?.chips).toEqual([
-      { kind: 'dict', id: 'selection', label: 'TextEdit — 4 words' }
+      { kind: 'dict', id: 'focus', label: 'TextEdit — 4 words' }
     ])
     h.pipe.end()
     await settle()
     h.pipe.dispose()
   })
 
-  it('types an instruction when nothing is selected, and explains why', async () => {
+  it('types an instruction into an empty box without asking anyone', async () => {
+    // The fast path: nothing selected, nothing in the field, so there is
+    // nothing an edit could act on and no classifier is consulted.
     const h = harness({ transcript: 'make this crisp', sculpt: true })
     await utterance(h)
 
     expect(h.sculpted).toEqual([])
     expect(h.sidecar.insertions).toEqual(['Make this crisp'])
-    const applied = h.states.filter((s) => s.phase === 'applied').at(-1)
-    expect(applied?.notice).toMatch(/Select the text first/)
     h.pipe.dispose()
   })
 
@@ -420,7 +439,12 @@ describe('DictationPipeline — dictation does not depend on the engine', () => 
       caret: 0,
       selectionLength: SELECTED.length
     })
-    const h = harness({ sidecar, transcript: 'make this crisp', sculpt: 'throws' })
+    const h = harness({
+      sidecar,
+      transcript: 'make this crisp',
+      sculpt: 'throws',
+      classifies: 'offline'
+    })
 
     h.pipe.begin()
     h.pipe.pushChunk(speech(1.2))
@@ -443,6 +467,104 @@ describe('DictationPipeline — dictation does not depend on the engine', () => 
     await settle()
 
     expect(h.sidecar.insertions).toEqual(['Make this crisp'])
+    h.pipe.dispose()
+  })
+})
+
+/**
+ * The whole-field case (M4.1) — the Slack composer that started this.
+ *
+ * Nothing is highlighted, but the field in front of the caret holds the text
+ * the user is talking about. M4 typed the question into the box; this is the
+ * test that says it must not.
+ */
+describe('DictationPipeline — an instruction about the field in front of you', () => {
+  const COMPOSER = 'I will get back to you today, sorry I was slow.'
+
+  const withComposer = (): FakeSidecar =>
+    new FakeSidecar({
+      accessibility: true,
+      text: COMPOSER,
+      caret: COMPOSER.length,
+      selectionLength: 0
+    })
+
+  async function utterance(h: Harness): Promise<void> {
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+  }
+
+  it('edits the whole field instead of typing the question', async () => {
+    const h = harness({
+      sidecar: withComposer(),
+      transcript: 'Can you make my last message less apologetic?',
+      sculpt: true,
+      classifies: {
+        kind: 'edit',
+        target: 'document',
+        instruction: 'make it less apologetic'
+      }
+    })
+    await utterance(h)
+
+    expect(h.sculpted.length).toBe(1)
+    expect(h.sculpted[0]?.instruction).toBe('make it less apologetic')
+    expect(h.sculpted[0]?.target).toMatchObject({ kind: 'document', text: COMPOSER })
+    // The words themselves never reach the composer.
+    expect(h.sidecar.insertions).toEqual([])
+    h.pipe.dispose()
+  })
+
+  it('still types when the model says these are just words', async () => {
+    const h = harness({
+      sidecar: withComposer(),
+      transcript: 'and I will send the deck tonight',
+      sculpt: true,
+      classifies: { kind: 'dictate' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted).toEqual([])
+    expect(h.sidecar.insertions).toEqual(['And I will send the deck tonight'])
+    h.pipe.dispose()
+  })
+
+  it('names the field in the chip while you are still speaking', async () => {
+    const h = harness({ sidecar: withComposer(), sculpt: true, classifies: { kind: 'dictate' } })
+    h.pipe.begin()
+    await settle()
+
+    expect(h.states.filter((s) => s.phase === 'listening').at(-1)?.chips).toEqual([
+      { kind: 'dict', id: 'focus', label: 'TextEdit — this field' }
+    ])
+    h.pipe.end()
+    await settle()
+    h.pipe.dispose()
+  })
+
+  it('types the words and says why when the field is too long to rewrite whole', async () => {
+    // A truncated read is a window onto something longer; rewriting it would
+    // silently discard everything outside the window.
+    const long = 'x'.repeat(40_000)
+    const h = harness({
+      sidecar: new FakeSidecar({
+        accessibility: true,
+        text: long,
+        caret: long.length,
+        selectionLength: 0
+      }),
+      transcript: 'tighten this up',
+      sculpt: true,
+      classifies: { kind: 'edit', target: 'document', instruction: 'tighten this up' }
+    })
+    await utterance(h)
+
+    expect(h.sculpted).toEqual([])
+    expect(h.sidecar.insertions).toEqual(['Tighten this up'])
+    expect(h.states.filter((s) => s.phase === 'applied').at(-1)?.notice).toMatch(/too long/i)
     h.pipe.dispose()
   })
 })

@@ -1,14 +1,20 @@
 # M4 — verify by hand
 
-M4 is **the edit lane**: select some text, say what you want done to it, and
+M4 is **the edit lane**: say what you want done to the text in front of you, and
 Mull shows every mark before anything changes. It is the milestone that answers
 *"if I say something it gets typed, but if I have to summarize or make it
 crisp, that's not working."*
 
+M4.1 is the correction it needed. The first sentence the rules table met in the
+wild — *"Can you make my last message less apologetic?"*, said into a Slack
+composer holding the very text it referred to — got typed as a question. So the
+model decides now, edits can act on a whole field rather than only a selection,
+and the panel can be dragged out of the way.
+
 Automated first — all of this passes now:
 
 ```bash
-npm run typecheck && npm test && npm run build   # 322 unit tests
+npm run typecheck && npm test && npm run build   # 375 unit tests
 npm run bench:engine                             # the 1.2s first-token budget
 npm run smoke && npm run check:native
 npm run pack:local                               # the DMG you actually install
@@ -25,16 +31,24 @@ stale-binary trap this time.
 | | M3 | M4 |
 |---|---|---|
 | Cards | a `FakeEngine` demo from the tray | a real model, from your own speech |
-| Routing | every utterance was dictation | selection + instruction → edit |
-| Chips | none on real dictation | live selection chip, Edit stamp, local-only warning |
+| Routing | every utterance was dictation | a model decides; rules gate and answer offline |
+| Edit target | — | a selection, or the whole focused field |
+| Chips | none on real dictation | live focus chip, Edit stamp, local-only warning |
+| HUD | nailed to the bottom centre | draggable, and it remembers |
 | Engine | none | Claude subscription, or an API key |
 | Credentials | none | `safeStorage`, never logged, never sent to a renderer |
 | Undo | caret-relative only | also where the write reported landing |
 
 ## 2. The rule, in one sentence
 
-**Select some text, then tell Mull what to do with it.** No selection means no
-edit — the words get typed, which is correct, and the HUD says why.
+**Say what you want done to the text in front of you.** Something selected, or
+just text in the box you're typing in — either works. An empty box has nothing
+to edit, so the words are simply typed.
+
+A model makes that call, not a list of phrasings; the list only decides whether
+the question is worth asking, and answers it offline. Which means the thing to
+check by hand is no longer a fixture table — it is whether the decisions feel
+right on your own sentences.
 
 ## 3. The loop
 
@@ -61,9 +75,9 @@ Then the same edit in **Slack** (or any Electron app):
 
 ## 4. Routing — the half that must not fire
 
-Each of these is said **with text selected**. All of them should be *typed*, not
-edited. This section is the point of the milestone's test suite and it is worth
-doing by hand once.
+Each of these is said **with text on screen** (selected, or just in the box).
+All of them should be *typed*, not edited. This is the failure that costs you
+something, so it is worth doing by hand once.
 
 - [ ] *"make sure Priya signs off"* → typed.
 - [ ] *"fix the meeting to 3pm and tell Dan"* → typed.
@@ -80,10 +94,22 @@ And the ones that should edit:
 - [ ] *"could you tighten this up"* and *"just make this shorter"* — the
       politeness is stripped before the rules run.
 
-With **nothing selected**:
+With **an empty box**:
 
-- [ ] *"make this crisp"* is typed, and the HUD adds *"Select the text first,
-      then say that…"*. Discoverability, not an error.
+- [ ] *"make this crisp"* is typed immediately, with no perceptible pause —
+      nothing was asked, because there was nothing to edit.
+
+Timing, which is the thing this milestone traded away:
+
+- [ ] **Ordinary speech into a half-written email lands at once.** "and I'll
+      send the deck tonight" has no instruction verb, so it never waits.
+- [ ] **An instruction-shaped sentence pauses first.** Two to four seconds on
+      the subscription lane while the model decides — that is the Claude Code
+      harness, not the model (`npm run bench:engine` shows first tokens at
+      ~880 ms). An API key is much faster; Settings → Engine can switch to
+      **Rules only**, which never waits and never sends anything.
+- [ ] *"make sure Priya signs off"* pauses, then types. Correct, and the pause
+      is the cost of it being correct.
 
 ## 5. Nothing is applied to text that moved
 
@@ -146,10 +172,29 @@ tail -3 "$HOME/Library/Application Support/mull/bench.jsonl" | python3 -m json.t
 
 | Gap | Why | Closes in |
 |---|---|---|
-| Edits only ever act on a selection | "the whole field" needs a bounded read and a way to show a diff longer than the card; the selection case is the one people asked for | M5 |
 | No command lane — `plan()` refuses on both real engines | whitelisted verbs are M5's; an empty plan card would propose nothing, which is worse than an honest error nobody can currently trigger | M5 |
 | Memory chips still cite nothing | the store is M5 | M5 |
 | Undo is still single-step | the journal window makes a stack legible; the stack itself is later | M5 |
-| The router is rules only | an engine-backed classifier would cost latency on the one path that must never wait, and the rules are measurably good enough — every real misroute belongs in `router.test.ts` first | if the fixtures stop being enough |
+| ~~The router is rules only~~ | closed in M4.1 — the model decides, the rules gate whether to ask and answer offline | done |
+| An instruction-shaped utterance waits 2–4 s on the subscription lane | measured: a warm Agent SDK turn is p50 4.2 s to *completion*, which is harness overhead rather than the model. Nothing in the SDK's options fixes it; the API-key lane does, and so does asking less often | when a faster classification path exists |
+| Whole-field edits are AX-only | `replaceRange` with `expect` is the only write exact enough for a whole field; a paste fallback would need ⌘A, and "select everything in whatever has focus, then overwrite it" is not a thing to do on a guess. Selections still degrade to paste and work everywhere | M5 |
 | Menu-bar and app icons are still glyphs | needs real monochrome assets | M6 |
 | The subscription lane can't be notarised as-is | the SDK ships its own `claude` executable, signed by Anthropic. `npm run pack:local` confirms it lands in `app.asar.unpacked` and that `codesign --verify --deep` accepts the whole bundle — so the local DMG is fine. A *notarised* build cannot nest code signed by another team, which is one more reason the API-key lane exists | M6 |
+
+## 9. Moving the HUD
+
+The panel used to be nailed to the bottom centre, which is fine until it is
+sitting on Slack's composer toolbar.
+
+- [ ] **Hover it and the cursor becomes a grab hand.** Drag from anywhere on the
+      paper — the transcript, the chips, the empty space.
+- [ ] **Clicks still pass through everywhere else.** With the pointer off the
+      panel, click where the window *is* but the paper is not; the click lands
+      on the app underneath.
+- [ ] **It cannot be lost.** Drag hard left, right and down: it stops at the
+      screen edge. Drag up: it goes almost to the top, panel still visible.
+- [ ] **It stays where you put it** across a quit and relaunch.
+- [ ] **Menu bar → Reset HUD position** brings it home, and so does
+      Settings → Appearance → HUD position.
+- [ ] **Buttons still work.** With a card open, Apply and Cancel respond to the
+      mouse, and dragging from a button does not move the window.

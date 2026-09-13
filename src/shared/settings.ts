@@ -34,7 +34,24 @@ export const SettingsSchema = z.object({
    * cheap to check. The bench (`npm run bench:engine`) is what tells you
    * whether fast is worth it on your machine.
    */
-  editModel: z.enum(['sonnet', 'haiku']).default('sonnet')
+  editModel: z.enum(['sonnet', 'haiku']).default('sonnet'),
+  /**
+   * How Mull decides dictate-vs-edit.
+   *
+   * `model` asks a fast model, but only when the focused field holds text or
+   * something is selected — which means that text is sent to the model on those
+   * utterances. `rules` keeps everything on this Mac and uses the local table,
+   * which is measurably worse at natural phrasing. Dictation into an empty
+   * field never leaves the machine either way.
+   */
+  routing: z.enum(['model', 'rules']).default('model'),
+  /**
+   * Where the user dragged the HUD, in screen coordinates. Null means the
+   * default bottom-centre. Clamped back onto a real display at launch, because
+   * a position saved on a monitor that has since been unplugged would leave the
+   * panel invisible — and an invisible HUD looks exactly like a broken one.
+   */
+  hudPosition: z.object({ x: z.number(), y: z.number() }).nullable().default(null)
 })
 
 export type Settings = z.infer<typeof SettingsSchema>

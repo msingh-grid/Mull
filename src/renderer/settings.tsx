@@ -141,6 +141,21 @@ function EnginePane({
         <span className="mono">{live}</span>
       </Row>
 
+      <Row label="Deciding what you meant" hint="dictate, or edit what’s on screen">
+        <select
+          value={settings.routing}
+          onChange={(event) => void update({ routing: event.target.value as Settings['routing'] })}
+        >
+          <option value="model">Ask the model</option>
+          <option value="rules">Rules only — nothing leaves this Mac</option>
+        </select>
+      </Row>
+      <p>
+        {settings.routing === 'model'
+          ? 'When something is selected, or the box you’re typing in already has text, Mull asks a fast model whether you meant to dictate or to edit — and sends it that text. Speaking into an empty box never asks anything and never leaves this Mac.'
+          : 'Mull decides with a local list of phrasings. Nothing about what’s on your screen is sent anywhere — but the list is noticeably worse at ordinary sentences, so expect instructions to get typed sometimes.'}
+      </p>
+
       <Row label="Claude subscription" hint={status?.hasSubscription ? 'token saved' : undefined}>
         {status?.hasSubscription ? (
           <button type="button" className="btn ghost" onClick={() => void signOut('subscription')}>
@@ -304,7 +319,10 @@ function SettingsWindow(): JSX.Element {
     <div className="win">
       <div className="win-head">
         <h1>Settings</h1>
-        <p className="sub">Mull runs in the menu bar. Nothing here leaves this Mac.</p>
+        <p className="sub">
+          Mull runs in the menu bar. Your voice is transcribed here and never uploaded; text goes to
+          a model only when you ask for an edit.
+        </p>
       </div>
 
       <div className="win-body">
@@ -377,6 +395,15 @@ function SettingsWindow(): JSX.Element {
               <option value="dark">Lamplit</option>
             </select>
           </Row>
+          <Row label="HUD position" hint="drag the panel anywhere to move it">
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => void bridge.hud.resetPosition()}
+            >
+              Reset to bottom centre
+            </button>
+          </Row>
           <Row label="HUD" hint="a page in the dark">
             <select
               value={settings.hudTheme}
@@ -408,8 +435,9 @@ function SettingsWindow(): JSX.Element {
                 </p>
               ) : null}
               <p>
-                Transcription runs here, on this Mac. The audio and the transcript never cross the
-                network.
+                Transcription runs here, on this Mac. Your audio never crosses the network, and
+                neither does dictation into an empty field. Asking Mull to change text is what
+                sends that text to a model — see Engine, above.
               </p>
             </>
           ) : (

@@ -108,7 +108,13 @@ function harness(
     request: {
       instruction: 'make this crisp',
       transcript: 'make this crisp',
-      snapshot: { app: APP, start: 0, length: selected.length, text: selected },
+      target: {
+        kind: 'selection' as const,
+        app: APP,
+        start: 0,
+        length: selected.length,
+        text: selected
+      },
       app: APP
     }
   }
@@ -130,7 +136,7 @@ describe('SculptLane — the preview', () => {
     expect(h.hud.cards.length).toBeGreaterThan(3)
     const final = h.hud.cards.at(-1) as DiffCard
     expect(final.kind).toBe('diff')
-    expect(final.app).toBe('Mail')
+    expect(final.app).toBe('Mail — selection')
     expect(final.changes).toBeGreaterThan(0)
   })
 
@@ -275,6 +281,7 @@ describe('SculptLane — the refusals', () => {
       name: 'broken',
       model: null,
       ready: async () => ({ kind: 'ready' }),
+      classify: async () => ({ kind: 'dictate' as const }),
       transform: async (_request, onPartial) => {
         onPartial?.('Following up:')
         throw new Error('rate limited')
@@ -295,6 +302,7 @@ describe('SculptLane — the refusals', () => {
       name: 'echo',
       model: null,
       ready: async () => ({ kind: 'ready' }),
+      classify: async () => ({ kind: 'dictate' as const }),
       transform: async (request) => ({ text: request.text }),
       plan: async () => ({ steps: [], context: null })
     }
@@ -317,6 +325,7 @@ describe('SculptLane — ⏎ while the engine is still writing', () => {
       name: 'slow',
       model: null,
       ready: async () => ({ kind: 'ready' }),
+      classify: async () => ({ kind: 'dictate' as const }),
       transform: async (_request, onPartial) => {
         onPartial?.('Following up:')
         await finished
@@ -339,5 +348,87 @@ describe('SculptLane — ⏎ while the engine is still writing', () => {
 
     // What landed is the complete rewrite, not the prefix that was on screen.
     expect(h.sidecar.insertions).toEqual([CANONICAL_SAMPLE.after])
+  })
+})
+
+/**
+ * The whole-field case (M4.1) — the Slack composer with nothing highlighted.
+ *
+ * Written through `replaceRange` with `expect` rather than the insertion chain:
+ * a whole-field rewrite has to be exact, and the paste fallback would need a
+ * ⌘A first. "Select everything in whatever has focus, then overwrite it" is not
+ * a thing to do on a guess.
+ */
+describe('SculptLane — a document target', () => {
+  function documentHarness(): ReturnType<typeof harness> {
+    const h = harness()
+    h.request.target = {
+      kind: 'document',
+      app: APP,
+      start: 0,
+      length: BEFORE.length,
+      text: BEFORE
+    }
+    // Nothing is highlighted; the caret is just sitting in the field.
+    h.sidecar.selectionLength = 0
+    h.sidecar.caret = BEFORE.length
+    return h
+  }
+
+  it('says in the card that ⏎ rewrites the whole field', async () => {
+    const h = documentHarness()
+    await h.lane.run(h.request)
+    expect((h.hud.cards.at(-1) as DiffCard).app).toBe('Mail — whole field')
+  })
+
+  it('rewrites the field and stays undoable', async () => {
+    const h = documentHarness()
+    await h.lane.run(h.request)
+    h.hud.respond('apply')
+    await settle()
+
+    const entry = lastEntry(h.journal)
+    expect(entry.status).toBe('applied')
+    expect(entry.intent).toMatchObject({ target: 'document' })
+    expect(entry.before).toBe(BEFORE)
+    expect(h.sidecar.text).toBe(entry.after)
+    // `replaceRange` reports no caret, so it is computed — and only because the
+    // write was read back, which is what makes ⌥Z safe to offer.
+    expect(entry.verified).toBe(true)
+    expect(entry.caret).toBe((entry.after ?? '').length)
+    expect(entry.undoable).toBe(true)
+  })
+
+  it('refuses when the field changed under the preview', async () => {
+    const h = documentHarness()
+    await h.lane.run(h.request)
+
+    h.sidecar.text = `${BEFORE} and one more thing`
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.sidecar.text).toBe(`${BEFORE} and one more thing`)
+    expect(lastEntry(h.journal).status).toBe('failed')
+    expect(h.hud.announcements.at(-1)?.notice).toMatch(/has changed since Mull read it/i)
+  })
+
+  it('refuses in an app that will not take an AX write', async () => {
+    const sidecar = new FakeSidecar({
+      accessibility: true,
+      app: { ...APP, pid: 1 },
+      text: BEFORE,
+      caret: BEFORE.length,
+      selectionLength: 0,
+      supports: { ax: false, paste: true, type: true }
+    })
+    const h = harness({ sidecar })
+    h.request.target = { kind: 'document', app: APP, start: 0, length: BEFORE.length, text: BEFORE }
+
+    await h.lane.run(h.request)
+    h.hud.respond('apply')
+    await settle()
+
+    expect(h.sidecar.text).toBe(BEFORE)
+    expect(lastEntry(h.journal).status).toBe('failed')
   })
 })

@@ -1,6 +1,21 @@
 import { query, type Options, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
-import type { Engine, EngineState, PlanRequest, PlanResult, TransformRequest, TransformResult } from './types'
+import type {
+  ClassifiedIntent,
+  ClassifyRequest,
+  Engine,
+  EngineState,
+  PlanRequest,
+  PlanResult,
+  TransformRequest,
+  TransformResult
+} from './types'
 import { EngineHealth } from './health'
+import {
+  CLASSIFIER_MODEL,
+  CLASSIFIER_SYSTEM_PROMPT,
+  classifyPrompt,
+  parseClassification
+} from './classify'
 import { EDIT_SYSTEM_PROMPT, cleanEditOutput, cleanEditPartial, editPrompt } from './prompts'
 
 /**
@@ -11,13 +26,21 @@ import { EDIT_SYSTEM_PROMPT, cleanEditOutput, cleanEditPartial, editPrompt } fro
  * signed in to Claude Code. The cost is a subprocess — the SDK runs the Claude
  * Code harness — and that subprocess is the whole latency problem.
  *
- * So the session is kept **warm**. Starting one costs hundreds of milliseconds
- * against a 1.2 s first-token budget, and paying that on the first edit after
- * every launch would be the difference the user notices. `warm()` is called at
- * sign-in and at boot; each edit is then a turn on a session that is already
- * up.
+ * So sessions are kept **warm**. Starting one costs hundreds of milliseconds
+ * against a 1.2 s budget, and paying that on the first utterance after every
+ * launch would be the difference the user notices.
  *
- * What the session is *not* allowed to be is an agent:
+ * There are **two** of them, because they are two different jobs:
+ *
+ *   edit      the chosen model, the editor's-pencil prompt, streamed
+ *   classify  always Haiku, a few tokens of JSON, on the critical path
+ *
+ * One session cannot be both: a system prompt that says "reply with the
+ * rewritten passage and nothing else" is exactly how you get a rewritten
+ * passage when you asked for JSON. Two subprocesses is the price, and the
+ * classifier is the one that runs on every utterance with text in front of it.
+ *
+ * What a session is *not* allowed to be is an agent:
  *
  *   tools: []            no Bash, no Read, no Edit, no web
  *   settingSources: []   no user settings, no CLAUDE.md, no MCP servers
@@ -28,6 +51,8 @@ import { EDIT_SYSTEM_PROMPT, cleanEditOutput, cleanEditPartial, editPrompt } fro
  * code, through the sidecar, with a preview in front of it.
  */
 
+export type StartQuery = (options: Options, prompt: AsyncIterable<SDKUserMessage>) => Query
+
 export interface AgentEngineOptions {
   /** From `claude setup-token`. Omit to inherit an existing Claude Code login. */
   oauthToken?: string | null
@@ -35,30 +60,37 @@ export interface AgentEngineOptions {
   now?: () => number
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   /** Injected in tests, so none of this needs a subprocess. */
-  start?: (options: Options, prompt: AsyncIterable<SDKUserMessage>) => Query
-}
-
-/** One turn in flight. The lane is serial, so there is never more than one. */
-interface Turn {
-  text: string
-  onPartial?: (text: string) => void
-  resolve: (text: string) => void
-  reject: (error: Error) => void
+  start?: StartQuery
 }
 
 export class AgentEngine implements Engine {
   readonly name = 'agent'
   readonly model: string
   private readonly health: EngineHealth
-  private readonly log: NonNullable<AgentEngineOptions['log']>
-  private session: Query | null = null
-  private prompts: Pushable<SDKUserMessage> | null = null
-  private turn: Turn | null = null
+  private readonly edit: AgentSession
+  private readonly classifier: AgentSession
 
-  constructor(private readonly options: AgentEngineOptions) {
+  constructor(options: AgentEngineOptions) {
     this.model = options.model
     this.health = new EngineHealth({ now: options.now })
-    this.log = options.log ?? ((): void => {})
+
+    const shared = {
+      oauthToken: options.oauthToken ?? null,
+      log: options.log ?? ((): void => {}),
+      start: options.start
+    }
+    this.edit = new AgentSession({
+      ...shared,
+      label: 'edit',
+      model: options.model,
+      systemPrompt: EDIT_SYSTEM_PROMPT
+    })
+    this.classifier = new AgentSession({
+      ...shared,
+      label: 'classify',
+      model: CLASSIFIER_MODEL,
+      systemPrompt: CLASSIFIER_SYSTEM_PROMPT
+    })
   }
 
   async ready(): Promise<EngineState> {
@@ -66,15 +98,24 @@ export class AgentEngine implements Engine {
   }
 
   /**
-   * Bring the subprocess up before anyone is waiting on it. Safe to call
+   * Bring both subprocesses up before anyone is waiting on them. Safe to call
    * repeatedly and safe to ignore — a cold session still works, it is just
    * slower once.
    */
   warm(): void {
+    this.edit.warm()
+    this.classifier.warm()
+  }
+
+  async classify(request: ClassifyRequest): Promise<ClassifiedIntent> {
     try {
-      this.ensureSession()
+      const reply = await this.classifier.ask(classifyPrompt(request))
+      this.health.recover()
+      return parseClassification(reply)
     } catch (err) {
-      this.log('warn', 'engine: could not warm the session', err)
+      this.health.degrade(err)
+      this.classifier.reset()
+      throw err
     }
   }
 
@@ -83,14 +124,17 @@ export class AgentEngine implements Engine {
     onPartial?: (text: string) => void
   ): Promise<TransformResult> {
     try {
-      const text = await this.ask(editPrompt(request.instruction, request.text), onPartial)
+      const text = await this.edit.ask(
+        editPrompt(request.instruction, request.text),
+        onPartial ? (partial) => onPartial(cleanEditPartial(partial)) : undefined
+      )
       this.health.recover()
       return { text: cleanEditOutput(text) }
     } catch (err) {
       this.health.degrade(err)
       // A failed turn may have taken the session with it. Drop it rather than
       // let the next edit inherit a dead subprocess.
-      this.reset()
+      this.edit.reset()
       throw err
     }
   }
@@ -100,14 +144,51 @@ export class AgentEngine implements Engine {
   }
 
   async dispose(): Promise<void> {
-    this.reset()
+    this.edit.reset()
+    this.classifier.reset()
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+/** One turn in flight. A session is serial, so there is never more than one. */
+interface Turn {
+  text: string
+  onPartial?: (text: string) => void
+  resolve: (text: string) => void
+  reject: (error: Error) => void
+}
+
+interface AgentSessionOptions {
+  label: string
+  model: string
+  systemPrompt: string
+  oauthToken: string | null
+  log: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
+  start?: StartQuery
+}
+
+/** A warm, single-purpose Claude Code session with streaming input. */
+class AgentSession {
+  private session: Query | null = null
+  private prompts: Pushable<SDKUserMessage> | null = null
+  private turn: Turn | null = null
+
+  constructor(private readonly options: AgentSessionOptions) {}
+
+  warm(): void {
+    try {
+      this.ensure()
+    } catch (err) {
+      this.options.log('warn', `engine: could not warm the ${this.options.label} session`, err)
+    }
   }
 
-  // -------------------------------------------------------------------------
-
-  private ask(prompt: string, onPartial?: (text: string) => void): Promise<string> {
-    if (this.turn) return Promise.reject(new Error('The engine is already working on an edit.'))
-    const prompts = this.ensureSession()
+  ask(prompt: string, onPartial?: (text: string) => void): Promise<string> {
+    if (this.turn) {
+      return Promise.reject(new Error(`The engine is already busy (${this.options.label}).`))
+    }
+    const prompts = this.ensure()
 
     return new Promise<string>((resolve, reject) => {
       this.turn = { text: '', onPartial, resolve, reject }
@@ -120,17 +201,23 @@ export class AgentEngine implements Engine {
     })
   }
 
-  private ensureSession(): Pushable<SDKUserMessage> {
+  reset(): void {
+    this.prompts?.close()
+    this.prompts = null
+    this.session = null
+  }
+
+  private ensure(): Pushable<SDKUserMessage> {
     if (this.session && this.prompts) return this.prompts
 
     const prompts = new Pushable<SDKUserMessage>()
     const options: Options = {
-      systemPrompt: EDIT_SYSTEM_PROMPT,
+      systemPrompt: this.options.systemPrompt,
       // The three lines that make this a model call rather than an agent.
       tools: [],
       settingSources: [],
       maxTurns: 1,
-      model: this.model,
+      model: this.options.model,
       includePartialMessages: true,
       permissionMode: 'default',
       env: this.options.oauthToken
@@ -161,7 +248,7 @@ export class AgentEngine implements Engine {
             const turn = this.turn
             if (!turn) continue
             turn.text += event.delta.text
-            turn.onPartial?.(cleanEditPartial(turn.text))
+            turn.onPartial?.(turn.text)
           }
           continue
         }
@@ -198,12 +285,6 @@ export class AgentEngine implements Engine {
     const turn = this.turn
     this.turn = null
     turn?.reject(error)
-  }
-
-  private reset(): void {
-    this.prompts?.close()
-    this.prompts = null
-    this.session = null
   }
 }
 

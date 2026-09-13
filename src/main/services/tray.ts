@@ -52,6 +52,8 @@ export interface TrayMenuHandlers {
   openWindow: (window: MullWindow) => void
   undoLast: () => void
   demoCard: (kind: 'diff' | 'plan') => void
+  /** Back to bottom centre, for a HUD dragged somewhere unhelpful. */
+  resetHudPosition: () => void
   quit: () => void
 }
 
@@ -93,7 +95,7 @@ export class TrayPresence {
   }
 
   private buildMenu(): Menu {
-    const { available, openWindow, undoLast, demoCard, quit } = this.handlers
+    const { available, openWindow, undoLast, demoCard, resetHudPosition, quit } = this.handlers
     const has = (name: MullWindow): boolean => available.includes(name)
     return Menu.buildFromTemplate([
       { label: this.status || 'Mull', enabled: false },
@@ -115,6 +117,9 @@ export class TrayPresence {
           { label: 'Plan', click: () => demoCard('plan') }
         ]
       },
+      // The way back from dragging the panel onto a display you unplugged, or
+      // just somewhere you regret. Cheap to offer, unrecoverable without it.
+      { label: 'Reset HUD position', click: () => resetHudPosition() },
       { type: 'separator' },
       { label: 'Quit Mull', accelerator: 'Command+Q', click: () => quit() }
     ])

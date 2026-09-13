@@ -1,6 +1,22 @@
 import Anthropic from '@anthropic-ai/sdk'
-import type { Engine, EngineState, PlanRequest, PlanResult, TransformRequest, TransformResult } from './types'
+import type {
+  ClassifiedIntent,
+  ClassifyRequest,
+  Engine,
+  EngineState,
+  PlanRequest,
+  PlanResult,
+  TransformRequest,
+  TransformResult
+} from './types'
 import { EngineHealth } from './health'
+import {
+  CLASSIFIER_MAX_TOKENS,
+  CLASSIFIER_MODEL,
+  CLASSIFIER_SYSTEM_PROMPT,
+  classifyPrompt,
+  parseClassification
+} from './classify'
 import { EDIT_SYSTEM_PROMPT, cleanEditOutput, cleanEditPartial, editPrompt, maxOutputTokens } from './prompts'
 
 /**
@@ -20,14 +36,14 @@ export interface ApiKeyEngineOptions {
   apiKey: string
   model: string
   /** Injected in tests; anything shaped like the SDK client will do. */
-  client?: Pick<Anthropic['messages'], 'stream'>
+  client?: Pick<Anthropic['messages'], 'stream' | 'create'>
   now?: () => number
 }
 
 export class ApiKeyEngine implements Engine {
   readonly name = 'api-key'
   readonly model: string
-  private readonly messages: Pick<Anthropic['messages'], 'stream'>
+  private readonly messages: Pick<Anthropic['messages'], 'stream' | 'create'>
   private readonly health: EngineHealth
 
   constructor(options: ApiKeyEngineOptions) {
@@ -45,6 +61,32 @@ export class ApiKeyEngine implements Engine {
 
   async ready(): Promise<EngineState> {
     return this.health.current()
+  }
+
+  /**
+   * Not streamed, and not on `this.model`: the answer is a few tokens of JSON
+   * and the only thing that matters is how fast the whole thing comes back.
+   */
+  async classify(request: ClassifyRequest): Promise<ClassifiedIntent> {
+    try {
+      const message = await this.messages.create({
+        model: CLASSIFIER_MODEL,
+        max_tokens: CLASSIFIER_MAX_TOKENS,
+        system: [
+          { type: 'text', text: CLASSIFIER_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
+        ],
+        messages: [{ role: 'user', content: classifyPrompt(request) }]
+      })
+      this.health.recover()
+      const text = message.content
+        .filter((block): block is Anthropic.TextBlock => block.type === 'text')
+        .map((block) => block.text)
+        .join('')
+      return parseClassification(text)
+    } catch (err) {
+      this.health.degrade(err)
+      throw err
+    }
   }
 
   async transform(

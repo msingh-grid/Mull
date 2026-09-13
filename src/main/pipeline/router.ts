@@ -1,15 +1,23 @@
 /**
- * The intent router — words to type, or an instruction to carry out?
+ * The local rules: words to type, or an instruction to carry out?
  *
- * This is the single decision that makes Mull more than a dictation app, and
- * it is made by rules, locally, in microseconds. Two constraints shape every
- * line below.
+ * These used to be the whole router. They are now two narrower jobs, because
+ * they were wrong about the first real sentence they met — *"Can you make my
+ * last message less apologetic?"*, typed into a Slack composer that was holding
+ * the very text it referred to. Language is what the model is for
+ * (`src/main/engine/classify.ts`), and `IntentRouter` asks it.
  *
- * **The invariant** (docs/PLAN.md): plain dictation NEVER waits on an engine.
- * So the router is pure string work with no I/O, and `route()` answers the
- * common case — no selection — before it looks at the transcript at all.
+ * What is left here is what the model must not be asked to do:
  *
- * **The asymmetry.** Misrouting is not symmetric in cost:
+ *  1. **The fast path.** Nothing selected and an empty field means there is
+ *     nothing an edit could act on, so the answer is `dictate` with no I/O at
+ *     all. This is the narrowed form of the docs/PLAN.md invariant, and it is
+ *     still the common case: a new message, an empty doc, a search box.
+ *  2. **The fallback.** Signed out, offline, rate limited, or a classifier that
+ *     did not answer in time — Mull still has to decide something, and it
+ *     decides here rather than refusing to type.
+ *
+ * **The asymmetry** that shapes every rule below is unchanged:
  *
  *   dictation sent to the edit lane -> the user's words vanish into a card
  *                                      instead of landing where they were
@@ -18,22 +26,65 @@
  *                                      obvious, and ⌥Z takes it back.
  *
  * The second is a shrug; the first is the app losing your writing. So every
- * ambiguity here resolves to `dictate`, and the fixture table in router.test.ts
- * is deliberately weighted toward sentences that must NOT be misread as
- * instructions — those are the cases that protect the invariant.
- *
- * The user-facing rule this adds up to is one sentence: **select some text,
- * then tell Mull what to do with it.** Everything else is typing.
+ * ambiguity resolves to `dictate` — here, and in the classifier's prompt.
  */
 
 export interface RouteContext {
   /** Was there a live, non-empty selection when the user started speaking? */
   hasSelection: boolean
+  /** Did the focused field hold any text? An empty one has nothing to edit. */
+  hasFieldText: boolean
 }
 
 export type Route =
   | { kind: 'dictate'; text: string }
-  | { kind: 'edit'; instruction: string }
+  | { kind: 'edit'; instruction: string; target: 'selection' | 'document' }
+
+/**
+ * The fast path, as its own predicate so `IntentRouter` can check it before
+ * anything asynchronous exists. True means: type it, ask nobody.
+ */
+export function nothingToEdit(context: RouteContext): boolean {
+  return !context.hasSelection && !context.hasFieldText
+}
+
+/**
+ * The second fast path: could this *possibly* be an instruction?
+ *
+ * Deliberately a much wider net than `looksLikeInstruction`, and used for the
+ * opposite purpose. That one decides; this one only decides whether the
+ * question is worth asking, and it exists because of a measurement:
+ *
+ *   warm Agent SDK classification — p50 4.2s, min 2.5s, max 9.4s
+ *
+ * That is harness overhead rather than the model (the edit lane's first token
+ * on the same warm session is 882ms; it is *completion* that costs seconds, and
+ * a classification is nothing but its completion). A subscription user cannot
+ * have a sub-second classifier, so the question has to be asked less often
+ * instead of answered faster.
+ *
+ * The net: an instruction verb somewhere near the front. Ordinary speech —
+ * "and I'll send the deck tonight", "thanks, that really helped" — has none, so
+ * it never waits. "Make sure Priya signs off" does, so it waits and is then
+ * correctly typed. Paying a few seconds on the utterances that genuinely look
+ * ambiguous is the trade; paying it on all of them is not.
+ */
+export function mightBeInstruction(transcript: string): boolean {
+  const raw = transcript.trim()
+  if (!raw) return false
+  if (countWords(raw) > MAX_INSTRUCTION_WORDS) return false
+
+  const body = raw.toLowerCase().replace(PREAMBLE, '').trimStart()
+  if (!body) return false
+
+  // Anywhere in the opening few words, not just at the head — "just quickly
+  // tighten this" and "could you please fix the grammar" both count.
+  const opening = body.split(/\s+/u).filter(Boolean).slice(0, 4)
+  return opening.some((word, index) => {
+    const rest = opening.slice(index).join(' ')
+    return TIER_A.test(rest) || TIER_B.test(rest)
+  })
+}
 
 /**
  * An instruction is short. A paragraph of speech is not an instruction, no
@@ -66,8 +117,21 @@ const TIER_B =
   /^(?:make|fix|shorten|expand|lengthen|summari[sz]e|simplify|clarify|translate|turn|convert|correct|clean|soften|sharpen|trim|cut|punch|bullet)\b/u
 
 /** What a Tier-B verb has to be pointing at. */
-const DEICTIC =
-  /\b(?:this|that|these|those|it|the selection|the text|the above|the whole thing|my (?:writing|wording|draft|note|email|message|reply)|the (?:paragraph|sentence|line|draft|note|email|message|reply|copy))\b/u
+const WRITING_NOUN =
+  '(?:writing|wording|draft|note|notes|email|message|reply|paragraph|sentence|line|copy|post|comment|answer|response)'
+
+/**
+ * What a Tier-B verb has to be pointing at.
+ *
+ * The determiner may carry an adjective — "my **last** message", "the
+ * **previous** email". Leaving that out is what made M4 type the sentence in
+ * docs/M4-VERIFY.md §4 instead of editing it.
+ */
+const DEICTIC = new RegExp(
+  '\\b(?:this|that|these|those|it|the selection|the text|the above|the whole thing|' +
+    `(?:my|the|that|this) (?:\\w+ ){0,2}${WRITING_NOUN})\\b`,
+  'u'
+)
 
 /**
  * Nouns that only ever describe writing, so they act as their own deictic:
@@ -142,9 +206,14 @@ export function looksLikeInstruction(transcript: string): boolean {
  */
 export function route(transcript: string, context: RouteContext): Route {
   const text = transcript.trim()
-  if (!context.hasSelection) return { kind: 'dictate', text }
+  if (nothingToEdit(context)) return { kind: 'dictate', text }
   if (!looksLikeInstruction(text)) return { kind: 'dictate', text }
-  return { kind: 'edit', instruction: text }
+  // With no selection the instruction is about the field in front of the caret.
+  return {
+    kind: 'edit',
+    instruction: text,
+    target: context.hasSelection ? 'selection' : 'document'
+  }
 }
 
 function countWords(text: string): number {

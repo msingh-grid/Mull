@@ -22,6 +22,37 @@
   pointer-events: none; /* only the panel takes clicks */
 }
 
+/**
+ * The panel's handle.
+ *
+ * A flex child of the stage, so it shrink-wraps the panel exactly — it must not
+ * be wider, or the window would hit-test a full-screen-wide strip and start
+ * eating clicks meant for the app underneath. Within those bounds it is the
+ * only thing that takes pointer events: hovering anywhere on the paper makes
+ * the window clickable, and dragging from anywhere on it moves the HUD.
+ *
+ * Buttons and the scrollable diff body opt out of *dragging* in the handler
+ * rather than here, because they still need their own hover and clicks.
+ */
+.hud-grip {
+  pointer-events: auto;
+  cursor: grab;
+  display: flex;
+}
+
+.hud-grip:active {
+  cursor: grabbing;
+}
+
+.hud-grip button,
+.hud-grip .diffbody {
+  cursor: auto;
+}
+
+.hud-grip button {
+  cursor: pointer;
+}
+
 .hud {
   width: var(--hud-w);
   max-width: 94vw;

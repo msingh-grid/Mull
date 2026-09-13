@@ -35,6 +35,14 @@ export interface DictationRow extends BenchStages {
   /** Strategy that finally worked, or null when nothing did. */
   strategy?: string | null
   /**
+   * How this was decided to be dictation. 'fast-path' means the field was
+   * empty and nothing was asked — the number to watch, because it is the share
+   * of utterances that still cost nothing.
+   */
+  routedBy?: string
+  /** Only set when the classifier ran and still said "type it". */
+  classifyMs?: number | null
+  /**
    * The whole chain walk, e.g. `ax:ax-unsupported,paste:ok` — this column is
    * what docs/INSERTION-MATRIX.md is filled in from.
    */
@@ -68,6 +76,10 @@ export interface EditRow {
   beforeChars: number
   afterChars: number
   changes: number
+  /** What decided this was an edit: 'model' | 'rules' | 'fast-path'. */
+  routedBy?: string
+  /** How long the classifier took, when it ran. Null on the rules path. */
+  classifyMs?: number | null
   /** Instruction to first streamed token. Budget: 1200 ms (docs/05 §6). */
   firstTokenMs: number | null
   /** Instruction to the complete proposal. */

@@ -8,7 +8,7 @@ import { describeInsertionReason, type InsertionService } from '../services/inse
 import type { JournalStore } from '../store/journal'
 import { summarise } from './cleanup'
 import { diffText } from './diff'
-import { describeSelectionCheck, stillMatches, type SelectionSnapshot } from './selection'
+import { describeTargetCheck, stillMatches, type EditTarget } from './selection'
 
 /**
  * Sculpt — the edit lane.
@@ -47,10 +47,14 @@ export interface SculptHud {
 
 export interface SculptRequest {
   instruction: string
-  /** The raw transcript, for the journal. Usually identical to `instruction`. */
+  /** The raw transcript, for the journal. Often the fuller, spoken form. */
   transcript: string
-  snapshot: SelectionSnapshot
+  /** What the edit will rewrite: a selection, or the whole field. */
+  target: EditTarget
   app: { bundleId: string; name: string } | null
+  /** How the routing decision was reached, for the ledger. */
+  routedBy?: string
+  classifyMs?: number | null
 }
 
 export interface SculptDeps {
@@ -95,17 +99,20 @@ export class SculptLane {
     const ready = await this.engineState()
     if (ready.kind !== 'ready') return this.unavailable(request, ready, session)
 
-    const before = request.snapshot.text
+    const before = request.target.text
+    // What ⏎ will rewrite, said out loud in both the chip and the card title.
+    // "the whole field" and "what I highlighted" are very different promises,
+    // and the user is about to approve one of them.
+    const scope = request.target.kind === 'selection' ? 'selection' : 'whole field'
     const appName = request.app?.name ?? null
+    const cardApp = appName ? `${appName} — ${scope}` : scope
 
     this.deps.hud.update({
       phase: 'thinking',
       transcript: request.instruction,
       partial: false,
       notice: null,
-      chips: appName
-        ? [INTENT_CHIP, { kind: 'dict', label: `${appName} — selection`, id: 'target' }]
-        : [INTENT_CHIP]
+      chips: [INTENT_CHIP, { kind: 'dict', label: cardApp, id: 'target' }]
     })
 
     // Started before the card is opened so the first token can land in it, but
@@ -115,7 +122,7 @@ export class SculptLane {
       .transform({ instruction: request.instruction, text: before, app: request.app }, (partial) => {
         if (session.firstTokenMs === null) session.firstTokenMs = this.now() - session.startedAt
         const { segments, changes } = diffText(before, partial)
-        this.deps.hud.updateCard({ kind: 'diff', app: appName, segments, changes })
+        this.deps.hud.updateCard({ kind: 'diff', app: cardApp, segments, changes })
       })
       .then((result) => result.text)
       .catch((err: unknown) => {
@@ -127,7 +134,7 @@ export class SculptLane {
         return before
       })
 
-    this.deps.hud.openCard({ kind: 'diff', app: appName, segments: [], changes: 0 }, (action) => {
+    this.deps.hud.openCard({ kind: 'diff', app: cardApp, segments: [], changes: 0 }, (action) => {
       session.answered = true
       void this.answer(action, request, stream, session)
     })
@@ -162,7 +169,7 @@ export class SculptLane {
 
     this.deps.hud.updateCard({
       kind: 'diff',
-      app: appName,
+      app: cardApp,
       segments: final.segments,
       changes: final.changes
     })
@@ -187,11 +194,11 @@ export class SculptLane {
         intent: {
           kind: 'edit',
           instruction: request.instruction,
-          target: 'selection',
+          target: request.target.kind,
           transcript: request.transcript
         },
         app: request.app,
-        before: request.snapshot.text,
+        before: request.target.text,
         after,
         strategyUsed: null,
         status: 'cancelled',
@@ -203,7 +210,7 @@ export class SculptLane {
       this.record(request, session, {
         outcome: 'cancelled',
         after,
-        changes: diffText(request.snapshot.text, after).changes,
+        changes: diffText(request.target.text, after).changes,
         insertMs: 0
       })
       this.deps.hud.announce('applied', 'Cancelled — nothing changed.')
@@ -211,18 +218,18 @@ export class SculptLane {
     }
 
     // Rule 2: the text has to still be the text we previewed.
-    const check = await stillMatches(this.deps.sidecar, request.snapshot)
+    const check = await stillMatches(this.deps.sidecar, request.target)
     if (!check.ok) {
-      const message = describeSelectionCheck(check.reason)
+      const message = describeTargetCheck(check.reason)
       this.journal({
         intent: {
           kind: 'edit',
           instruction: request.instruction,
-          target: 'selection',
+          target: request.target.kind,
           transcript: request.transcript
         },
         app: request.app,
-        before: request.snapshot.text,
+        before: request.target.text,
         after: null,
         strategyUsed: null,
         status: 'failed',
@@ -244,7 +251,7 @@ export class SculptLane {
 
     this.deps.hud.update({ phase: 'inserting' })
     const insertStart = this.now()
-    const outcome = await this.deps.insertion.replaceSelection(after, request.app)
+    const outcome = await this.write(request.target, after)
     const insertMs = this.now() - insertStart
 
     if (!outcome.inserted) {
@@ -253,11 +260,11 @@ export class SculptLane {
         intent: {
           kind: 'edit',
           instruction: request.instruction,
-          target: 'selection',
+          target: request.target.kind,
           transcript: request.transcript
         },
         app: request.app,
-        before: request.snapshot.text,
+        before: request.target.text,
         after: null,
         strategyUsed: null,
         status: 'failed',
@@ -282,14 +289,14 @@ export class SculptLane {
       intent: {
         kind: 'edit',
         instruction: request.instruction,
-        target: 'selection',
+        target: request.target.kind,
         transcript: request.transcript
       },
       app: request.app,
       // `replacedText` is what the sidecar actually overwrote; it and the
       // snapshot agree by rule 2, but the write's own account of itself is the
       // one worth keeping.
-      before: outcome.replacedText ?? request.snapshot.text,
+      before: outcome.replacedText ?? request.target.text,
       after,
       strategyUsed: outcome.strategyUsed,
       status: 'applied',
@@ -304,7 +311,7 @@ export class SculptLane {
     this.record(request, session, {
       outcome: 'applied',
       after,
-      changes: diffText(request.snapshot.text, after).changes,
+      changes: diffText(request.target.text, after).changes,
       insertMs,
       strategy: outcome.strategyUsed
     })
@@ -328,6 +335,57 @@ export class SculptLane {
   // -------------------------------------------------------------------------
 
   /**
+   * Put the proposal where the target is.
+   *
+   * The two kinds are written differently on purpose:
+   *
+   *   selection  the M2 insertion chain (`ax → paste → type`), so Sculpt works
+   *              in Electron apps that refuse AX writes — pasted, honest about
+   *              not being verified, and not offered an undo it cannot keep.
+   *   document   `replaceRange` with `expect`, which is AX-only and refuses
+   *              unless that exact range still holds exactly the text the
+   *              preview was built from. A whole-field rewrite has to be exact:
+   *              a paste fallback would need ⌘A first, and "select everything
+   *              in whatever has focus, then overwrite it" is not a thing to do
+   *              on a guess.
+   *
+   * `replaceRange` reports `verified` but no caret, so the caret is computed —
+   * and only when the write was read back, which is what makes it a fact rather
+   * than an assumption. Undo needs it to offer ⌥Z at all.
+   */
+  private async write(
+    target: EditTarget,
+    after: string
+  ): Promise<{
+    inserted: boolean
+    strategyUsed: 'ax' | 'paste' | 'type' | null
+    verified: boolean | null
+    caret: number | null
+    replacedText: string | null
+    reason: string | null
+  }> {
+    if (target.kind === 'selection') {
+      return this.deps.insertion.replaceSelection(after, target.app)
+    }
+
+    const result = await this.deps.sidecar.replaceRange({
+      start: target.start,
+      length: target.length,
+      text: after,
+      expect: target.text
+    })
+
+    return {
+      inserted: result.replaced,
+      strategyUsed: result.replaced ? 'ax' : null,
+      verified: result.verified,
+      caret: result.verified === true ? target.start + after.length : null,
+      replacedText: result.replaced ? target.text : null,
+      reason: result.reason
+    }
+  }
+
+  /**
    * No engine. The instruction was already typed nowhere and the selection is
    * untouched, so this is purely a matter of saying so clearly — and of not
    * pretending an `Edit` chip means anything right now.
@@ -349,11 +407,11 @@ export class SculptLane {
       intent: {
         kind: 'edit',
         instruction: request.instruction,
-        target: 'selection',
+        target: request.target.kind,
         transcript: request.transcript
       },
       app: request.app,
-      before: request.snapshot.text,
+      before: request.target.text,
       after: null,
       strategyUsed: null,
       status: 'cancelled',
@@ -365,7 +423,7 @@ export class SculptLane {
     this.record(request, session, {
       outcome: 'unavailable',
       reason: state.kind,
-      after: request.snapshot.text,
+      after: request.target.text,
       changes: 0,
       insertMs: 0
     })
@@ -377,11 +435,11 @@ export class SculptLane {
       intent: {
         kind: 'edit',
         instruction: request.instruction,
-        target: 'selection',
+        target: request.target.kind,
         transcript: request.transcript
       },
       app: request.app,
-      before: request.snapshot.text,
+      before: request.target.text,
       after: null,
       strategyUsed: null,
       status: 'failed',
@@ -393,7 +451,7 @@ export class SculptLane {
     this.record(request, session, {
       outcome: 'failed',
       reason: session.failure ?? 'unknown',
-      after: request.snapshot.text,
+      after: request.target.text,
       changes: 0,
       insertMs: 0
     })
@@ -442,8 +500,10 @@ export class SculptLane {
       outcome: outcome.outcome,
       reason: outcome.reason,
       strategy: outcome.strategy ?? null,
+      routedBy: request.routedBy,
+      classifyMs: request.classifyMs ?? null,
       instructionChars: request.instruction.length,
-      beforeChars: request.snapshot.text.length,
+      beforeChars: request.target.text.length,
       afterChars: outcome.after.length,
       changes: outcome.changes,
       firstTokenMs: session.firstTokenMs,

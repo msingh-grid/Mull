@@ -94,13 +94,19 @@ const DICTATIONS = [
   'I think we should turn this down and wait for the next round'
 ]
 
-const SELECTED = { hasSelection: true }
-const NOTHING_SELECTED = { hasSelection: false }
+const SELECTED = { hasSelection: true, hasFieldText: true }
+const NOTHING_TO_EDIT = { hasSelection: false, hasFieldText: false }
+/** The Slack case: a composer with text in it, nothing highlighted. */
+const FIELD_ONLY = { hasSelection: false, hasFieldText: true }
 
 describe('route — with a selection', () => {
   for (const transcript of INSTRUCTIONS) {
     it(`edits: “${transcript}”`, () => {
-      expect(route(transcript, SELECTED)).toEqual({ kind: 'edit', instruction: transcript })
+      expect(route(transcript, SELECTED)).toEqual({
+        kind: 'edit',
+        instruction: transcript,
+        target: 'selection'
+      })
     })
   }
 
@@ -121,13 +127,14 @@ describe('route — with a selection', () => {
   })
 })
 
-describe('route — with nothing selected', () => {
-  // The invariant, stated as a test: with no selection there is nothing to
-  // edit, so the transcript is typed no matter how much it sounds like an
-  // order. This branch returns before the rules table is consulted at all.
+describe('route — with nothing to edit', () => {
+  // The fast path, stated as a test: an empty field with nothing selected has
+  // nothing an edit could act on, so the transcript is typed no matter how much
+  // it sounds like an order. This branch returns before the rules are consulted
+  // at all — and before `IntentRouter` would reach for the model.
   for (const transcript of [...INSTRUCTIONS.slice(0, 8), ...DICTATIONS.slice(0, 8)]) {
     it(`types: “${transcript}”`, () => {
-      expect(route(transcript, NOTHING_SELECTED)).toEqual({
+      expect(route(transcript, NOTHING_TO_EDIT)).toEqual({
         kind: 'dictate',
         text: transcript
       })
@@ -149,5 +156,56 @@ describe('looksLikeInstruction', () => {
 
   it('does not fire on an empty transcript', () => {
     expect(looksLikeInstruction('')).toBe(false)
+  })
+})
+
+describe('route — a field with text but no selection', () => {
+  it('edits the whole field rather than requiring a selection', () => {
+    expect(route('tighten this up', FIELD_ONLY)).toEqual({
+      kind: 'edit',
+      instruction: 'tighten this up',
+      target: 'document'
+    })
+  })
+
+  it('still types ordinary speech', () => {
+    expect(route('make sure Priya signs off', FIELD_ONLY).kind).toBe('dictate')
+  })
+})
+
+/**
+ * The sentence that sent this whole design back to the drawing board.
+ *
+ * Said in Slack with an apologetic half-written line in the composer, M4 typed
+ * it as a question. The rules now recognise it — an adjective is allowed
+ * between the determiner and the noun — but the real fix is that `IntentRouter`
+ * asks a model first and only falls back to these rules offline. This test is
+ * here so the fallback is at least not wrong about the case we know about.
+ */
+describe('the sentence from docs/M4-VERIFY.md', () => {
+  const SAID = 'Can you make my last message less apologetic?'
+
+  it('is an instruction when there is something to edit', () => {
+    expect(looksLikeInstruction(SAID)).toBe(true)
+    expect(route(SAID, FIELD_ONLY)).toEqual({
+      kind: 'edit',
+      instruction: SAID,
+      target: 'document'
+    })
+  })
+
+  it('is still typed when the box is empty', () => {
+    expect(route(SAID, NOTHING_TO_EDIT).kind).toBe('dictate')
+  })
+
+  it('recognises its relatives', () => {
+    for (const said of [
+      'make my last message less apologetic',
+      'rewrite the previous email',
+      'shorten that last paragraph',
+      'fix up my note'
+    ]) {
+      expect(looksLikeInstruction(said), said).toBe(true)
+    }
   })
 })

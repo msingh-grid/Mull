@@ -31,6 +31,14 @@ export interface MullApi {
     action: (action: HudAction) => Promise<void>
     /** Dev-only: run one utterance without touching the keyboard. */
     devTrigger: (ms?: number) => Promise<void>
+    /** The pointer entered or left the panel; main mirrors it into clickability. */
+    hover: (over: boolean) => void
+    /** Drag the panel. Screen coordinates; main clamps and remembers. */
+    dragStart: (pointer: { x: number; y: number }) => void
+    dragMove: (pointer: { x: number; y: number }) => void
+    dragEnd: () => void
+    /** Put the panel back at the bottom centre. */
+    resetPosition: () => Promise<void>
     /** Dev-only: open a FakeEngine card so the surfaces can be exercised. */
     devCard: (kind: 'diff' | 'plan') => Promise<void>
   }
@@ -116,6 +124,11 @@ const api: MullApi = {
     getState: () => ipcRenderer.invoke(IPC.hudStateGet) as Promise<HudState>,
     action: (action) => ipcRenderer.invoke(IPC.hudAction, action) as Promise<void>,
     devTrigger: (ms) => ipcRenderer.invoke(IPC.devTrigger, ms) as Promise<void>,
+    hover: (over) => ipcRenderer.send(IPC.hudHover, over),
+    dragStart: (pointer) => ipcRenderer.send(IPC.hudDragStart, pointer),
+    dragMove: (pointer) => ipcRenderer.send(IPC.hudDragMove, pointer),
+    dragEnd: () => ipcRenderer.send(IPC.hudDragEnd),
+    resetPosition: () => ipcRenderer.invoke(IPC.hudResetPosition) as Promise<void>,
     devCard: (kind) => ipcRenderer.invoke(IPC.devCard, kind) as Promise<void>
   },
 

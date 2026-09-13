@@ -80,6 +80,7 @@ describe('EngineHolder', () => {
       name: 'first',
       model: null,
       ready: async () => ({ kind: 'ready' }),
+      classify: async () => ({ kind: 'dictate' as const }),
       transform: async () => ({ text: '' }),
       plan: async () => ({ steps: [], context: null }),
       dispose: async () => {

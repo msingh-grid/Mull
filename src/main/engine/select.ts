@@ -3,7 +3,16 @@ import type { EngineCredentials, EngineKind, EngineStatus } from '@shared/engine
 import type { Settings } from '@shared/settings'
 import { AgentEngine } from './agent'
 import { ApiKeyEngine } from './api-key'
-import type { Engine, EngineState, PlanRequest, PlanResult, TransformRequest, TransformResult } from './types'
+import type {
+  ClassifiedIntent,
+  ClassifyRequest,
+  Engine,
+  EngineState,
+  PlanRequest,
+  PlanResult,
+  TransformRequest,
+  TransformResult
+} from './types'
 
 /**
  * Which engine serves edits, and what to tell the user when none can.
@@ -91,6 +100,10 @@ export class SignedOutEngine implements Engine {
     return { kind: 'signed-out' }
   }
 
+  async classify(): Promise<ClassifiedIntent> {
+    throw new Error(this.reason ?? 'No engine is connected.')
+  }
+
   async transform(): Promise<TransformResult> {
     throw new Error(this.reason ?? 'No engine is connected.')
   }
@@ -136,6 +149,10 @@ export class EngineHolder implements Engine {
 
   ready(): Promise<EngineState> {
     return this.inner.ready()
+  }
+
+  classify(request: ClassifyRequest): Promise<ClassifiedIntent> {
+    return this.inner.classify(request)
   }
 
   transform(

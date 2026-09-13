@@ -30,6 +30,12 @@ import { describeInsertionReason, InsertionService } from './services/insertion'
 import { UndoService } from './services/undo'
 import { ChordScope } from './services/chords'
 import { HudController } from './services/hud'
+import {
+  clampPosition,
+  defaultPosition,
+  nextPosition,
+  type Point
+} from './services/hud-position'
 import { TrayPresence } from './services/tray'
 import { PermissionsService } from './services/permissions'
 import { downloadModel, modelStatus } from './services/model'
@@ -38,6 +44,7 @@ import { JournalStore } from './store/journal'
 import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
 import { SculptLane } from './pipeline/sculpt'
+import { IntentRouter } from './pipeline/intent'
 import { appliedText, diffText } from './pipeline/diff'
 import { FakeEngine } from './engine/fake'
 import { AgentEngine } from './engine/agent'
@@ -74,6 +81,7 @@ let demoEngine: Engine | null = null
 let credentials: CredentialsStore | null = null
 let detectedLogin = false
 let sculpt: SculptLane | null = null
+let intent: IntentRouter | null = null
 let settings: SettingsStore | null = null
 let permissions: PermissionsService | null = null
 /** Filled in at boot; the about pane reports what is actually running. */
@@ -116,6 +124,33 @@ function load(win: BrowserWindow, page: string): void {
   else if (entry.file) void win.loadFile(entry.file)
 }
 
+/** The HUD stage. Fixed, so the panel never jitters as a card arrives. */
+const HUD_SIZE = { width: 520, height: 420 }
+
+/**
+ * Why the panel takes mouse events, if it does.
+ *
+ * Two independent reasons, OR'd together. A card wants clicks for its buttons;
+ * a pointer resting on the panel wants them so it can be picked up and dragged.
+ * Tracking them separately is what stops one turning the other off — the bug
+ * where moving the mouse off an open card made Apply stop responding.
+ */
+const hudInteraction = { hovered: false, cardOpen: false }
+
+function syncHudInteractive(): void {
+  const interactive = hudInteraction.hovered || hudInteraction.cardOpen
+  // `forward: true` keeps mouse-move flowing to the renderer even while the
+  // window is transparent to clicks — which is how the hover is noticed at all.
+  hudWindow?.setIgnoreMouseEvents(!interactive, { forward: true })
+}
+
+/** Where the HUD should open: where the user last left it, or bottom centre. */
+function hudOrigin(): Point {
+  const { workArea } = screen.getPrimaryDisplay()
+  const saved = settings?.get().hudPosition ?? null
+  return saved ? clampPosition(saved, HUD_SIZE, workArea) : defaultPosition(HUD_SIZE, workArea)
+}
+
 /**
  * The HUD (docs/DESIGN.md §6.1).
  *
@@ -134,15 +169,12 @@ function load(win: BrowserWindow, page: string): void {
  * open (see services/hud.ts).
  */
 function createHudWindow(): BrowserWindow {
-  const { workArea } = screen.getPrimaryDisplay()
-  const width = 520
-  const height = 420
+  const origin = hudOrigin()
 
   const hud = new BrowserWindow({
-    width,
-    height,
-    x: Math.round(workArea.x + (workArea.width - width) / 2),
-    y: Math.round(workArea.y + workArea.height - height),
+    ...HUD_SIZE,
+    x: origin.x,
+    y: origin.y,
     show: false,
     frame: false,
     type: 'panel',
@@ -151,7 +183,9 @@ function createHudWindow(): BrowserWindow {
     hasShadow: false, // the panel casts its own (--shadow-hud)
     focusable: false,
     resizable: false,
-    movable: false,
+    // Dragged by hand rather than by `-webkit-app-region: drag`, which is not
+    // dependable on a non-activating panel. See IPC.hudDragMove below.
+    movable: true,
     skipTaskbar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -420,9 +454,8 @@ async function bootstrap(): Promise<void> {
     port: {
       send: pushHudState,
       setInteractive: (interactive) => {
-        // Click-through unless there is something to click. `forward: true`
-        // keeps hover state alive in the panel while it is transparent.
-        hudWindow?.setIgnoreMouseEvents(!interactive, { forward: true })
+        hudInteraction.cardOpen = interactive
+        syncHudInteractive()
       }
     }
   })
@@ -432,6 +465,7 @@ async function bootstrap(): Promise<void> {
     openWindow: (name) => void openAppWindow(name),
     undoLast: () => void runUndo(),
     demoCard: (kind) => void showDemoCard(kind),
+    resetHudPosition: () => resetHudPosition(),
     quit: () => app.quit()
   })
   tray.start()
@@ -456,6 +490,14 @@ async function bootstrap(): Promise<void> {
     }
   })
 
+  // Decides dictate-vs-edit. `useModel` is read per utterance, so switching to
+  // rules-only in Settings takes effect on the next thing you say.
+  intent = new IntentRouter({
+    engine,
+    useModel: () => settings?.get().routing !== 'rules',
+    log: logFn
+  })
+
   pipeline = new DictationPipeline(
     {
       sidecar,
@@ -464,6 +506,7 @@ async function bootstrap(): Promise<void> {
       insertion,
       journal: journal ?? undefined,
       sculpt,
+      intent,
       onState: (state) => hud?.setPipelineState(state),
       log: logFn,
       capture: {
@@ -625,6 +668,55 @@ ipcMain.handle(IPC.hudStateGet, () => hud?.getState() ?? pipeline?.getState() ??
 ipcMain.handle(IPC.hudAction, (_event, action: HudAction) => {
   hud?.act(action)
 })
+
+ipcMain.on(IPC.hudHover, (_event, hovered: boolean) => {
+  hudInteraction.hovered = hovered
+  syncHudInteractive()
+})
+
+/**
+ * Dragging the panel.
+ *
+ * Done by arithmetic rather than `-webkit-app-region: drag`: the HUD window is
+ * `focusable: false`, and app-region dragging on a non-activating panel is not
+ * something to stake the feature on. The renderer reports screen coordinates
+ * (which `MouseEvent` gives it directly), main remembers where the window was
+ * when the pointer went down, and every move is origin + delta, clamped.
+ */
+let hudDrag: { origin: Point; grab: Point } | null = null
+
+ipcMain.on(IPC.hudDragStart, (_event, pointer: Point) => {
+  if (!hudWindow || hudWindow.isDestroyed()) return
+  const [x = 0, y = 0] = hudWindow.getPosition()
+  hudDrag = { origin: { x, y }, grab: pointer }
+})
+
+ipcMain.on(IPC.hudDragMove, (_event, pointer: Point) => {
+  if (!hudDrag || !hudWindow || hudWindow.isDestroyed()) return
+  const { workArea } = screen.getDisplayNearestPoint(pointer)
+  const next = nextPosition(hudDrag.origin, hudDrag.grab, pointer, HUD_SIZE, workArea)
+  hudWindow.setPosition(next.x, next.y)
+})
+
+ipcMain.on(IPC.hudDragEnd, () => {
+  if (!hudDrag || !hudWindow || hudWindow.isDestroyed()) return
+  hudDrag = null
+  const [x = 0, y = 0] = hudWindow.getPosition()
+  // Remembered, so the HUD is still out of the way after a relaunch. Moving it
+  // once should be enough.
+  settings?.set({ hudPosition: { x, y } })
+})
+
+ipcMain.handle(IPC.hudResetPosition, () => resetHudPosition())
+
+/** Back to bottom centre — the way out of "I dragged it somewhere silly". */
+function resetHudPosition(): void {
+  settings?.set({ hudPosition: null })
+  if (!hudWindow || hudWindow.isDestroyed()) return
+  const { workArea } = screen.getPrimaryDisplay()
+  const home = defaultPosition(HUD_SIZE, workArea)
+  hudWindow.setPosition(home.x, home.y)
+}
 
 ipcMain.handle(IPC.windowOpen, (_event, name: MullWindow) => {
   if (!BUILT_WINDOWS.includes(name)) {

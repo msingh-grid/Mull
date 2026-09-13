@@ -39,6 +39,31 @@ export interface TransformResult {
   text: string
 }
 
+/**
+ * What the classifier is shown: what was said, and what is on screen to say it
+ * about. Never called when there is neither a selection nor field text — see
+ * the fast path in `src/main/pipeline/router.ts`.
+ */
+export interface ClassifyRequest {
+  transcript: string
+  app: { bundleId: string; name: string } | null
+  /** What is selected right now, or null. */
+  selection: string | null
+  /** The focused field's text when nothing is selected, or null. */
+  fieldText: string | null
+  /** True when `fieldText` is a window onto something longer. */
+  fieldTruncated: boolean
+}
+
+/**
+ * The routing decision. `dictate` is the safe answer and the default for every
+ * failure — typing an instruction is a nuisance, editing someone's sentence
+ * away is not.
+ */
+export type ClassifiedIntent =
+  | { kind: 'dictate' }
+  | { kind: 'edit'; target: 'selection' | 'document'; instruction: string }
+
 export interface PlanRequest {
   instruction: string
   app: { bundleId: string; name: string } | null
@@ -56,6 +81,15 @@ export interface Engine {
   /** The model actually in use, or null when there isn't one. For the ledger. */
   readonly model: string | null
   ready(): Promise<EngineState>
+  /**
+   * Words to type, or an instruction about text on screen?
+   *
+   * On the critical path, so implementations use the fastest model they have
+   * (see `CLASSIFIER_MODEL`) and answer in a handful of tokens. Throwing is
+   * allowed — `IntentRouter` treats any failure, including a timeout, as
+   * `dictate` and falls back to the local rules.
+   */
+  classify(request: ClassifyRequest): Promise<ClassifiedIntent>
   /**
    * Edit text. `onPartial` receives progressively longer prefixes of the
    * result so the card can fill in as it arrives rather than appearing whole —

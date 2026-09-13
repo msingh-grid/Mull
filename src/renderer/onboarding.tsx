@@ -67,8 +67,8 @@ function PageWhat(): JSX.Element {
             ✓
           </span>
           <span>
-            <strong>On-device.</strong> Your voice is transcribed on this Mac and discarded. Nothing
-            is uploaded.
+            <strong>Your voice stays here.</strong> Audio is transcribed on this Mac and discarded —
+            it never leaves. Only text you ask Mull to change is sent anywhere.
           </span>
         </div>
         <div className="tenet">
@@ -285,8 +285,9 @@ function PageModel(): JSX.Element {
 
       <div className="foot-note">
         <span>
-          Because the model is local, the transcript never crosses the network — the privacy claim
-          on page 1 is architecture, not policy.
+          Because speech recognition is local, your audio never crosses the network — that part is
+          architecture, not policy. Text is different: when you ask Mull to change something, the
+          passage goes to a model. Settings → Engine has a switch that keeps even that on this Mac.
         </span>
       </div>
     </>
