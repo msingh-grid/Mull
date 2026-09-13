@@ -63,6 +63,31 @@ final class StubSystem: SystemActions {
         targetCalls.append((maxTargets, deadlineMs))
         return targets
     }
+    var pressCalls: [(harvestId: String, index: Int, role: String?, title: String?)] = []
+    var pressOutcome = TargetActionInfo(
+        ok: true, reason: nil, actualRole: "AXRow", actualTitle: "Priya Sharma")
+    func pressTarget(harvestId: String, index: Int, expectRole: String?, expectTitle: String?)
+        -> TargetActionInfo
+    {
+        pressCalls.append((harvestId, index, expectRole, expectTitle))
+        return pressOutcome
+    }
+    var focusCalls: [(harvestId: String, index: Int)] = []
+    var focusOutcome = TargetActionInfo(
+        ok: true, reason: nil, actualRole: "AXTextField", actualTitle: "Search")
+    func focusTarget(harvestId: String, index: Int, expectRole: String?, expectTitle: String?)
+        -> TargetActionInfo
+    {
+        focusCalls.append((harvestId, index))
+        return focusOutcome
+    }
+    var navKeys: [String] = []
+    func navKey(key: String) -> (sent: Bool, reason: String?) {
+        // The whitelist itself lives in RealSystem; the fake only records what
+        // the dispatcher let through, so a test can prove ⏎ never gets here.
+        navKeys.append(key)
+        return (true, nil)
+    }
     func startHotkeyTap(chords: [String], swallow: Bool) -> (started: Bool, reason: String?) {
         hotkeyChords = chords
         return (true, nil)
@@ -331,10 +356,10 @@ final class VerbTests: XCTestCase {
     func testEveryContractMethodIsRegistered() {
         let dispatcher = makeDispatcher(system: system)
         let expected = [
-            "activateApp", "checkPermissions", "focusedElement", "frontmostApp", "init",
-            "insertText", "keyChord", "promptAccessibility", "promptScreenRecording",
-            "replaceRange", "replaceSelection", "secureInputState", "selectedText",
-            "startHotkeyTap", "stopHotkeyTap", "uiTargets", "windowContext"
+            "activateApp", "checkPermissions", "focusTarget", "focusedElement", "frontmostApp",
+            "init", "insertText", "keyChord", "navKey", "pressTarget", "promptAccessibility",
+            "promptScreenRecording", "replaceRange", "replaceSelection", "secureInputState",
+            "selectedText", "startHotkeyTap", "stopHotkeyTap", "uiTargets", "windowContext"
         ]
         XCTAssertEqual(dispatcher.methods, expected)
     }
@@ -443,6 +468,59 @@ final class VerbTests: XCTestCase {
         let result = try XCTUnwrap(obj["result"] as? [String: Any])
         XCTAssertEqual(result["stoppedBy"] as? String, "no-accessibility")
         XCTAssertTrue(system.targetCalls.isEmpty)
+    }
+
+    // MARK: - pressTarget / focusTarget / navKey
+
+    func testPressTargetQuotesTheScanBack() throws {
+        let obj = try handle(
+            #"""
+            {"jsonrpc":"2.0","id":64,"method":"pressTarget","params":{"harvestId":"scan-3","index":37,"expectRole":"AXRow","expectTitle":"Priya Sharma"}}
+            """#)
+        let result = try XCTUnwrap(obj["result"] as? [String: Any])
+        XCTAssertEqual(result["ok"] as? Bool, true)
+        let call = try XCTUnwrap(system.pressCalls.first)
+        XCTAssertEqual(call.harvestId, "scan-3")
+        XCTAssertEqual(call.index, 37)
+        // The expectations reach the system layer intact — this is the whole
+        // defence against a stale index landing on a different row.
+        XCTAssertEqual(call.role, "AXRow")
+        XCTAssertEqual(call.title, "Priya Sharma")
+    }
+
+    /// Acting is a write, so it takes the write guard order — and never runs.
+    func testPressTargetRefusesUnderSecureInput() throws {
+        system.secureInput = true
+        let obj = try handle(
+            #"{"jsonrpc":"2.0","id":65,"method":"pressTarget","params":{"harvestId":"s","index":0}}"#)
+        let result = try XCTUnwrap(obj["result"] as? [String: Any])
+        XCTAssertEqual(result["ok"] as? Bool, false)
+        XCTAssertEqual(result["reason"] as? String, "secure-input")
+        XCTAssertTrue(system.pressCalls.isEmpty)
+    }
+
+    func testFocusTargetRefusesWithoutAccessibility() throws {
+        system.trusted = false
+        let obj = try handle(
+            #"{"jsonrpc":"2.0","id":66,"method":"focusTarget","params":{"harvestId":"s","index":0}}"#)
+        let result = try XCTUnwrap(obj["result"] as? [String: Any])
+        XCTAssertEqual(result["reason"] as? String, "no-accessibility")
+        XCTAssertTrue(system.focusCalls.isEmpty)
+    }
+
+    /// The one that matters most, and the reason `navKey` is not `keyChord`
+    /// with a filter: ⏎ is how Slack, Messages, Discord and Mail all send. It
+    /// is the actuator, and it is not a navigation key.
+    func testNavKeyKnowsNothingOfReturn() {
+        let system = RealSystem()
+        XCTAssertNil(RealSystem.navKeyCodes["return"])
+        XCTAssertNil(RealSystem.navKeyCodes["enter"])
+        XCTAssertEqual(system.navKey(key: "return").reason, "not-a-navigation-key")
+        XCTAssertEqual(system.navKey(key: "enter").reason, "not-a-navigation-key")
+        // And there is no way to ask for a modifier at all, so no ⌘Q either.
+        XCTAssertEqual(system.navKey(key: "cmd+k").reason, "not-a-navigation-key")
+        XCTAssertNotNil(RealSystem.navKeyCodes["escape"])
+        XCTAssertNotNil(RealSystem.navKeyCodes["down"])
     }
 
     func testCheckPermissionsReportsScreenRecording() throws {

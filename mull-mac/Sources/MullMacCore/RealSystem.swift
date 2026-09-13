@@ -197,6 +197,54 @@ public final class RealSystem: SystemActions {
             scanMs: scan.elapsedMs)
     }
 
+    public func pressTarget(
+        harvestId: String, index: Int, expectRole: String?, expectTitle: String?
+    ) -> TargetActionInfo {
+        let outcome = AXTargets.press(
+            harvestId: harvestId, index: index, expectRole: expectRole, expectTitle: expectTitle)
+        return TargetActionInfo(
+            ok: outcome.ok, reason: outcome.reason, actualRole: outcome.actualRole,
+            actualTitle: outcome.actualTitle)
+    }
+
+    public func focusTarget(
+        harvestId: String, index: Int, expectRole: String?, expectTitle: String?
+    ) -> TargetActionInfo {
+        let outcome = AXTargets.focus(
+            harvestId: harvestId, index: index, expectRole: expectRole, expectTitle: expectTitle)
+        return TargetActionInfo(
+            ok: outcome.ok, reason: outcome.reason, actualRole: outcome.actualRole,
+            actualTitle: outcome.actualTitle)
+    }
+
+    /// The only keys the navigator may ask for.
+    ///
+    /// A separate map from `keyCodes`, not a filter over it, because the point
+    /// is that ⏎ cannot be named here. `keyCodes` contains "return" and
+    /// "enter"; this one contains neither, and a filter would be one edit away
+    /// from letting them through. ⏎ is how Slack, Messages, Discord and Mail all
+    /// send — it is the actuator, so it is not navigation.
+    ///
+    /// No modifiers are accepted at all, so there is no ⌘Q, no ⌘W, and no chord
+    /// that could mean something else in an app nobody tested.
+    static let navKeyCodes: [String: CGKeyCode] = [
+        "escape": CGKeyCode(kVK_Escape),
+        "tab": CGKeyCode(kVK_Tab),
+        "up": CGKeyCode(kVK_UpArrow),
+        "down": CGKeyCode(kVK_DownArrow),
+        "left": CGKeyCode(kVK_LeftArrow),
+        "right": CGKeyCode(kVK_RightArrow),
+        "pageup": CGKeyCode(kVK_PageUp),
+        "pagedown": CGKeyCode(kVK_PageDown)
+    ]
+
+    public func navKey(key: String) -> (sent: Bool, reason: String?) {
+        guard let code = Self.navKeyCodes[key.lowercased()] else {
+            return (false, "not-a-navigation-key")
+        }
+        return postKey(code, flags: []) ? (true, nil) : (false, "cgevent-post-failed")
+    }
+
     public func focusedElement(context: Int) -> FocusedElementLookup {
         guard AXIsProcessTrusted() else { return .unavailable("no-accessibility") }
         guard let element = AXText.focusedElement() else {

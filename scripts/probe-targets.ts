@@ -10,6 +10,13 @@
  *   npx tsx scripts/probe-targets.ts                 # the default seven
  *   npx tsx scripts/probe-targets.ts Slack Mail      # just these
  *   npx tsx scripts/probe-targets.ts --verbose       # print every target
+ *   npx tsx scripts/probe-targets.ts Slack --press 3 # press one, then escape
+ *
+ * `--press` is the other half of the question, and the half a list cannot
+ * answer: an element can advertise `AXPress` and do nothing when pressed. It
+ * presses one target, re-scans to see whether the window changed, then sends
+ * escape — so it is safe to point at a search button and pointless to point at
+ * anything that commits.
  *
  * **Pass bar, written down before the numbers arrive:** the frontmost window's
  * primary navigation — sidebar rows and the search control — must be
@@ -25,7 +32,11 @@ import type { UiTarget } from '../src/shared/sidecar-api'
 const DEFAULT_APPS = ['Finder', 'Notes', 'Mail', 'Messages', 'Slack', 'Code', 'Google Chrome']
 
 const verbose = process.argv.includes('--verbose')
-const named = process.argv.slice(2).filter((arg) => !arg.startsWith('--'))
+const pressAt = process.argv.indexOf('--press')
+const pressIndex = pressAt === -1 ? null : Number(process.argv[pressAt + 1])
+const named = process.argv
+  .slice(2)
+  .filter((arg, i) => !arg.startsWith('--') && i + 2 !== pressAt + 1)
 const apps = named.length > 0 ? named : DEFAULT_APPS
 
 /** Roughly: would a model reading this list know what it is choosing? */
@@ -103,6 +114,47 @@ async function main(): Promise<void> {
         console.log(`    search → ${JSON.stringify(search[0]!.title.slice(0, 60))}`)
       }
     }
+    if (pressIndex !== null) {
+      const target = scan.targets[pressIndex]
+      if (!target) {
+        console.log(`    no target ${pressIndex} to press`)
+      } else {
+        console.log(`\n    pressing ${pressIndex}: ${JSON.stringify(target.title)}`)
+        const pressed = await client.pressTarget({
+          harvestId: scan.harvestId,
+          index: pressIndex,
+          expectRole: target.role,
+          expectTitle: target.title
+        })
+        console.log(`    -> ${JSON.stringify(pressed)}`)
+
+        // A press that returns ok is only half an answer: AXPress can succeed
+        // against an element that does nothing. The window changing is the
+        // evidence, so look again and compare.
+        await new Promise((r) => setTimeout(r, 700))
+        const after = await client.uiTargets({ maxTargets: 200, deadlineMs: 1_200 })
+        const before = new Set(scan.targets.map((t) => t.title))
+        const fresh = after.targets.filter((t) => !before.has(t.title))
+        console.log(
+          `    after: ${after.targets.length} targets, ${fresh.length} of them new` +
+            `${fresh.length > 0 ? ` — e.g. ${JSON.stringify(fresh.slice(0, 3).map((t) => t.title))}` : ''}`
+        )
+
+        // The stale-index guard, tested the only way that proves anything:
+        // press the *same* index against the scan that has since been replaced.
+        const stale = await client.pressTarget({
+          harvestId: scan.harvestId,
+          index: pressIndex,
+          expectRole: 'AXNonsense',
+          expectTitle: 'something else entirely'
+        })
+        console.log(`    stale-expectation press -> ${JSON.stringify(stale)}`)
+
+        const escaped = await client.navKey({ key: 'escape' })
+        console.log(`    escape -> ${JSON.stringify(escaped)}`)
+      }
+    }
+
     console.log('')
   }
 

@@ -340,6 +340,171 @@ public enum AXTargets {
         return CGRect(origin: origin, size: extent)
     }
 
+    // MARK: - Acting on one
+
+    public struct Outcome {
+        public let ok: Bool
+        /// Why not. "stale-scan" | "no-such-target" | "changed" | "disabled"
+        /// | "not-pressable" | "not-typeable" | "press-refused" | "focus-refused"
+        public let reason: String?
+        /// What the element says it is *now*, so a refusal can be explained on
+        /// the card rather than merely reported.
+        public let actualRole: String?
+        public let actualTitle: String?
+    }
+
+    /// Press the element a scan found — after checking it is still that element.
+    ///
+    /// The re-read is the point. `insertText` verifies *after* it writes, which
+    /// is the only honest order for a write; a press has to verify *before*,
+    /// because there is no undo and the failure mode is pressing the wrong
+    /// thing rather than pressing nothing. Between the scan the model reasoned
+    /// about and this call, the user may have scrolled, a notification may have
+    /// pushed a row down, the app may have re-rendered. A UI that has moved
+    /// under us is the expected case.
+    ///
+    /// So the caller quotes back the role and title it was shown, and a
+    /// mismatch refuses. An index alone would be an offset into a list that no
+    /// longer exists.
+    public static func press(
+        harvestId: String, index: Int, expectRole: String?, expectTitle: String?
+    ) -> Outcome {
+        switch resolve(harvestId: harvestId, index: index, expectRole: expectRole,
+                       expectTitle: expectTitle) {
+        case .refused(let outcome):
+            return outcome
+        case .found(let found):
+            guard found.actions.contains(kAXPressAction) else {
+                return Outcome(
+                    ok: false, reason: "not-pressable", actualRole: found.role,
+                    actualTitle: found.title)
+            }
+            guard found.enabled else {
+                return Outcome(
+                    ok: false, reason: "disabled", actualRole: found.role,
+                    actualTitle: found.title)
+            }
+            let status = AXUIElementPerformAction(found.element, kAXPressAction as CFString)
+            guard status == .success else {
+                return Outcome(
+                    ok: false, reason: "press-refused", actualRole: found.role,
+                    actualTitle: found.title)
+            }
+            return Outcome(ok: true, reason: nil, actualRole: found.role, actualTitle: found.title)
+        }
+    }
+
+    /// Put the caret in a search field — and nowhere else.
+    ///
+    /// This exists so the navigator can type a query, and it deliberately does
+    /// not type: the caller focuses here and then uses the ordinary
+    /// `insertText` chain, which already knows each app's paste timing and
+    /// already reads back what it wrote. Two verbs rather than one, because
+    /// "put the caret somewhere" and "write text" want different guards.
+    ///
+    /// **`AXTextArea` is not on `textRoles`, and that is load-bearing.** A
+    /// message composer is a text area (or, in Chromium, a contenteditable
+    /// group); a search box is a text field. Slack's scan bears this out — its
+    /// only `type` target is the new-message recipient box, and the composer
+    /// does not appear at all. So the navigator cannot focus a composer even
+    /// before the executor checks what the thing is called.
+    public static func focus(
+        harvestId: String, index: Int, expectRole: String?, expectTitle: String?
+    ) -> Outcome {
+        switch resolve(harvestId: harvestId, index: index, expectRole: expectRole,
+                       expectTitle: expectTitle) {
+        case .refused(let outcome):
+            return outcome
+        case .found(let found):
+            guard textRoles.contains(found.role) else {
+                return Outcome(
+                    ok: false, reason: "not-typeable", actualRole: found.role,
+                    actualTitle: found.title)
+            }
+            let status = AXUIElementSetAttributeValue(
+                found.element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            guard status == .success else {
+                return Outcome(
+                    ok: false, reason: "focus-refused", actualRole: found.role,
+                    actualTitle: found.title)
+            }
+            // Read it back. Setting the attribute is a request, not a result —
+            // an app may accept the write and put the caret somewhere else.
+            var value: CFTypeRef?
+            let focused =
+                AXUIElementCopyAttributeValue(found.element, kAXFocusedAttribute as CFString, &value)
+                == .success && (value.flatMap { AXHarvest.bool($0) } ?? false)
+            guard focused else {
+                return Outcome(
+                    ok: false, reason: "focus-refused", actualRole: found.role,
+                    actualTitle: found.title)
+            }
+            return Outcome(ok: true, reason: nil, actualRole: found.role, actualTitle: found.title)
+        }
+    }
+
+    private struct Found {
+        let element: AXUIElement
+        let role: String
+        let title: String
+        let actions: [String]
+        let enabled: Bool
+    }
+
+    private enum Resolution {
+        case found(Found)
+        case refused(Outcome)
+    }
+
+    /// Find the handle, and confirm it is still what the caller was shown.
+    private static func resolve(
+        harvestId: String, index: Int, expectRole: String?, expectTitle: String?
+    ) -> Resolution {
+        guard let held = Store.shared.element(harvestId: harvestId, index: index) else {
+            // Two different failures, said separately: the scan has aged out of
+            // the store, or that scan never had this many targets. The first is
+            // "look again", the second is a bug in whatever chose the index.
+            let known = Store.shared.knows(harvestId: harvestId)
+            return .refused(
+                Outcome(
+                    ok: false, reason: known ? "no-such-target" : "stale-scan",
+                    actualRole: nil, actualTitle: nil))
+        }
+
+        AXUIElementSetMessagingTimeout(held.element, messagingTimeout)
+        let node = read(held.element)
+        let name = [node.title, node.help].compactMap { $0?.trimmed }.first { !$0.isEmpty } ?? ""
+
+        // An element that answers with no role at all is not a changed element,
+        // it is a destroyed one — the handle outlived the thing. Pressing
+        // Slack's Search button replaces the whole window contents, and every
+        // handle from the previous scan comes back empty like this. "The row
+        // you meant is gone" and "the row you meant is now somebody else" want
+        // different sentences on the card.
+        if node.role.isEmpty {
+            return .refused(
+                Outcome(ok: false, reason: "gone", actualRole: nil, actualTitle: nil))
+        }
+        if let expectRole, expectRole != node.role {
+            return .refused(
+                Outcome(
+                    ok: false, reason: "changed", actualRole: node.role, actualTitle: name))
+        }
+        if let expectTitle, expectTitle != AXHarvest.clamp(name, to: 120) {
+            return .refused(
+                Outcome(
+                    ok: false, reason: "changed", actualRole: node.role, actualTitle: name))
+        }
+        return .found(
+            Found(
+                element: held.element, role: node.role, title: name, actions: node.actions,
+                enabled: node.enabled))
+    }
+
+    /// Same as `AXHarvest`'s, and for the same reason: one unresponsive element
+    /// must not hang the call.
+    private static let messagingTimeout: Float = 0.25
+
     // MARK: - Keeping the handles
 
     /// The elements a scan found, held so a later press can address them.
@@ -373,6 +538,14 @@ public enum AXTargets {
             entries.append(Entry(harvestId: harvestId, pid: pid, elements: elements))
             if entries.count > 2 { entries.removeFirst(entries.count - 2) }
             return harvestId
+        }
+
+        /// Is this scan still held at all? Distinguishes "look again" from
+        /// "that index never existed".
+        func knows(harvestId: String) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            return entries.contains { $0.harvestId == harvestId }
         }
 
         func element(harvestId: String, index: Int) -> (element: AXUIElement, pid: pid_t)? {

@@ -10,6 +10,10 @@ import {
   WindowContextParamsSchema,
   WindowContextResultSchema,
   UiTargetsResultSchema,
+  NavKeySchema,
+  NavKeyParamsSchema,
+  TargetActionParamsSchema,
+  TargetActionResultSchema,
   SIDECAR_PROTOCOL_VERSION
 } from './sidecar-api'
 
@@ -106,6 +110,9 @@ describe('sidecar-api zod contract', () => {
       'selectedText',
       'windowContext',
       'uiTargets',
+      'pressTarget',
+      'focusTarget',
+      'navKey',
       'promptScreenRecording',
       'insertText',
       'replaceSelection',
@@ -190,6 +197,74 @@ describe('uiTargets', () => {
       scanMs: 1
     })
     expect(parsed.targets[0]?.frame).toBeNull()
+  })
+})
+
+/**
+ * The narrowest interface in the codebase, and deliberately so.
+ *
+ * ⏎ is how Slack, Messages, Discord and Mail all send. It is the actuator, so
+ * the navigator is handed a verb in which it cannot be named — which keeps "the
+ * model cannot send a message" a property of the type rather than a promise
+ * about behaviour. This is the same seam as `ClassifiedIntent` having no `send`
+ * field, one layer down.
+ */
+describe('navKey', () => {
+  it('cannot express the send key, in any spelling', () => {
+    for (const key of ['return', 'enter', 'Return', '\n']) {
+      expect(NavKeyParamsSchema.safeParse({ key }).success).toBe(false)
+    }
+  })
+
+  it('cannot express a modifier at all', () => {
+    // No ⌘K, and so also no ⌘Q, no ⌘W, and no chord that means something
+    // unexpected in an app nobody tested.
+    for (const key of ['cmd+k', 'k', 'space', 'delete']) {
+      expect(NavKeyParamsSchema.safeParse({ key }).success).toBe(false)
+    }
+  })
+
+  it('is exactly the eight keys that only move a caret or a highlight', () => {
+    expect(NavKeySchema.options).toEqual([
+      'escape',
+      'tab',
+      'up',
+      'down',
+      'left',
+      'right',
+      'pageUp',
+      'pageDown'
+    ])
+  })
+})
+
+describe('pressTarget', () => {
+  /**
+   * The expectations are what make an index safe. Optional in the schema so a
+   * caller *can* omit them, and the executor never does — but the sidecar's own
+   * refusal is what actually enforces it, so this only pins the shape.
+   */
+  it('carries the role and title the caller was shown', () => {
+    const parsed = TargetActionParamsSchema.parse({
+      harvestId: 'scan-3',
+      index: 37,
+      expectRole: 'AXRow',
+      expectTitle: 'Anil Turaga (away, notifications snoozed)'
+    })
+    expect(parsed.expectTitle).toBe('Anil Turaga (away, notifications snoozed)')
+    expect(() => TargetActionParamsSchema.parse({ harvestId: 's', index: -1 })).toThrow()
+  })
+
+  it('says what the element turned out to be when it refuses', () => {
+    const parsed = TargetActionResultSchema.parse({
+      ok: false,
+      reason: 'changed',
+      actualRole: 'AXRow',
+      actualTitle: 'Dheeraj Kasavajjala'
+    })
+    // "No" is not enough on a card: the user needs to see that the row they
+    // meant is now somebody else.
+    expect(parsed.actualTitle).toBe('Dheeraj Kasavajjala')
   })
 })
 

@@ -252,6 +252,9 @@ export class SidecarClient extends EventEmitter<SidecarEvents> implements Sideca
   selectedText = (p: SidecarParams<'selectedText'>) => this.call('selectedText', p)
   windowContext = (p: SidecarParams<'windowContext'>) => this.call('windowContext', p)
   uiTargets = (p: SidecarParams<'uiTargets'>) => this.call('uiTargets', p)
+  pressTarget = (p: SidecarParams<'pressTarget'>) => this.call('pressTarget', p)
+  focusTarget = (p: SidecarParams<'focusTarget'>) => this.call('focusTarget', p)
+  navKey = (p: SidecarParams<'navKey'>) => this.call('navKey', p)
   promptScreenRecording = (p: SidecarParams<'promptScreenRecording'>) =>
     this.call('promptScreenRecording', p)
   insertText = (p: SidecarParams<'insertText'>) => this.call('insertText', p)
@@ -544,7 +547,8 @@ export class FakeSidecar implements SidecarApi {
       return empty('tree-warming')
     }
 
-    const targets: UiTarget[] = (this.overrides.targets ?? []).map((target, index) =>
+    const source = this.liveTargets ?? this.overrides.targets ?? []
+    const targets: UiTarget[] = source.map((target, index) =>
       typeof target === 'string'
         ? {
             index,
@@ -561,6 +565,7 @@ export class FakeSidecar implements SidecarApi {
           }
         : { ...target, index }
     )
+    this.scanned = targets
     return {
       app,
       windowTitle: null,
@@ -572,6 +577,72 @@ export class FakeSidecar implements SidecarApi {
     }
   }
   private targetsWarmed = false
+
+  /** Every press and focus the executor asked for, in order. */
+  targetActions: Array<{ verb: 'press' | 'focus' | 'navKey'; index?: number; key?: string }> = []
+
+  /**
+   * Swap what the pretend window offers, mid-test.
+   *
+   * The interesting case for a press is not "did it work" but "the row moved
+   * between the scan and the keystroke", and that cannot be staged without
+   * changing the list after the scan.
+   */
+  retarget(targets: Array<string | UiTarget>): void {
+    this.liveTargets = targets
+    this.scanned = null
+  }
+  private liveTargets: Array<string | UiTarget> | null = null
+  /** The list as of the last scan — what a press is entitled to expect. */
+  private scanned: UiTarget[] | null = null
+
+  private async actOnTarget(
+    verb: 'press' | 'focus',
+    p: SidecarParams<'pressTarget'>
+  ): Promise<{ ok: boolean; reason: string | null; actualRole: string | null; actualTitle: string | null }> {
+    const refuse = (reason: string, target?: UiTarget) => ({
+      ok: false,
+      reason,
+      actualRole: target?.role ?? null,
+      actualTitle: target?.title ?? null
+    })
+    if (this.overrides.secureInput) return refuse('secure-input')
+    if (!this.overrides.accessibility) return refuse('no-accessibility')
+    if (!this.scanned || p.harvestId !== 'scan-1') return refuse('stale-scan')
+
+    // Resolve against the window as it is *now*, not as it was scanned — which
+    // is the whole point of the expectations below.
+    const now = (await this.uiTargets({})).targets
+    const target = now[p.index]
+    if (!target) return refuse('no-such-target')
+    if (p.expectRole !== undefined && p.expectRole !== target.role) return refuse('changed', target)
+    if (p.expectTitle !== undefined && p.expectTitle !== target.title) {
+      return refuse('changed', target)
+    }
+
+    if (verb === 'press') {
+      if (!target.actions.includes('AXPress')) return refuse('not-pressable', target)
+      if (!target.enabled) return refuse('disabled', target)
+    } else if (target.kind !== 'type') {
+      return refuse('not-typeable', target)
+    }
+
+    this.targetActions.push({ verb, index: p.index })
+    return { ok: true, reason: null, actualRole: target.role, actualTitle: target.title }
+  }
+
+  async pressTarget(p: SidecarParams<'pressTarget'>) {
+    return this.actOnTarget('press', p)
+  }
+  async focusTarget(p: SidecarParams<'focusTarget'>) {
+    return this.actOnTarget('focus', p)
+  }
+  async navKey(p: SidecarParams<'navKey'>) {
+    if (this.overrides.secureInput) return { sent: false, reason: 'secure-input' }
+    if (!this.overrides.accessibility) return { sent: false, reason: 'no-accessibility' }
+    this.targetActions.push({ verb: 'navKey', key: p.key })
+    return { sent: true, reason: null }
+  }
 
   async frontmostApp() {
     return {

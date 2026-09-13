@@ -57,6 +57,19 @@ struct UiTargetsParams: Decodable {
     let deadlineMs: Int?
 }
 
+/// Quoting the scan back. `expectRole` and `expectTitle` are what the caller was
+/// shown; a mismatch refuses rather than pressing whatever now sits at `index`.
+struct TargetActionParams: Decodable {
+    let harvestId: String
+    let index: Int
+    let expectRole: String?
+    let expectTitle: String?
+}
+
+struct NavKeyParams: Decodable {
+    let key: String
+}
+
 struct ReplaceRangeParams: Decodable {
     let start: Int
     let length: Int
@@ -199,6 +212,23 @@ public struct UiTargetInfo {
     }
 }
 
+/// The result of acting on one enumerated target.
+public struct TargetActionInfo {
+    public let ok: Bool
+    public let reason: String?
+    /// What the element says it is now. Present on a refusal so the card can
+    /// say *why* rather than only *no*.
+    public let actualRole: String?
+    public let actualTitle: String?
+
+    public init(ok: Bool, reason: String?, actualRole: String?, actualTitle: String?) {
+        self.ok = ok
+        self.reason = reason
+        self.actualRole = actualRole
+        self.actualTitle = actualTitle
+    }
+}
+
 public struct UiTargetsInfo {
     /// Names the set of element handles the sidecar is holding. A press quotes
     /// it back, so a press decided against a stale look is refused rather than
@@ -321,6 +351,21 @@ public protocol SystemActions {
     /// numbered. Also a read — it presses nothing, and the numbering is the
     /// only thing a later `pressTarget` is allowed to act on.
     func uiTargets(maxTargets: Int, deadlineMs: Int) -> UiTargetsInfo
+    /// Press one enumerated target, after confirming it is still the element
+    /// the caller was shown. Verifies *before* acting: a press has no undo, and
+    /// the failure mode is pressing the wrong thing, not pressing nothing.
+    func pressTarget(harvestId: String, index: Int, expectRole: String?, expectTitle: String?)
+        -> TargetActionInfo
+    /// Put the caret in an enumerated *search* field. Types nothing; the caller
+    /// follows with the ordinary `insertText` chain.
+    func focusTarget(harvestId: String, index: Int, expectRole: String?, expectTitle: String?)
+        -> TargetActionInfo
+    /// Post one navigation key with no modifiers, ever.
+    ///
+    /// A separate verb from `keyChord`, which can express ⏎ and ⌘-anything.
+    /// This one structurally cannot, which is what keeps "the navigator cannot
+    /// send a message" a property of the interface rather than a promise.
+    func navKey(key: String) -> (sent: Bool, reason: String?)
     /// Insert at the caret with a concrete strategy ("ax" | "paste" | "type").
     func insert(text: String, strategy: String, settleMs: Int) -> InsertOutcome
     /// Replace the current selection, reporting what was there before.
@@ -538,6 +583,65 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
             "stoppedBy": .string(info.stoppedBy),
             "scanMs": .int(info.scanMs)
         ])
+    }
+
+    /// The two verbs that act on a scan, and the one that does not act on one.
+    ///
+    /// These write into someone else's window, so they take the full write
+    /// guard order — secure input, then accessibility — rather than the reading
+    /// guard `uiTargets` uses. Secure input first for the usual reason: it is
+    /// the one the user can turn on *after* Mull decided to act.
+    func targetAction(
+        _ raw: Data?, _ act: (TargetActionParams) -> TargetActionInfo
+    ) throws -> JSON {
+        let params = try decodeParams(TargetActionParams.self, from: raw)
+        if system.secureInputActive() {
+            return .object([
+                "ok": .bool(false), "reason": .string("secure-input"),
+                "actualRole": .null, "actualTitle": .null
+            ])
+        }
+        guard system.accessibilityTrusted() else {
+            return .object([
+                "ok": .bool(false), "reason": .string("no-accessibility"),
+                "actualRole": .null, "actualTitle": .null
+            ])
+        }
+        let info = act(params)
+        return .object([
+            "ok": .bool(info.ok),
+            "reason": optional(info.reason),
+            "actualRole": optional(info.actualRole),
+            "actualTitle": optional(info.actualTitle)
+        ])
+    }
+
+    d.register("pressTarget") { raw in
+        try targetAction(raw) { params in
+            system.pressTarget(
+                harvestId: params.harvestId, index: params.index, expectRole: params.expectRole,
+                expectTitle: params.expectTitle)
+        }
+    }
+
+    d.register("focusTarget") { raw in
+        try targetAction(raw) { params in
+            system.focusTarget(
+                harvestId: params.harvestId, index: params.index, expectRole: params.expectRole,
+                expectTitle: params.expectTitle)
+        }
+    }
+
+    d.register("navKey") { raw in
+        let params = try decodeParams(NavKeyParams.self, from: raw)
+        if system.secureInputActive() {
+            return .object(["sent": .bool(false), "reason": .string("secure-input")])
+        }
+        guard system.accessibilityTrusted() else {
+            return .object(["sent": .bool(false), "reason": .string("no-accessibility")])
+        }
+        let (sent, reason) = system.navKey(key: params.key)
+        return .object(["sent": .bool(sent), "reason": optional(reason)])
     }
 
     d.register("frontmostApp") { _ in

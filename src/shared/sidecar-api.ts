@@ -282,6 +282,73 @@ export const UiTargetsResultSchema = z.object({
   scanMs: z.number().int().nonnegative()
 })
 
+/**
+ * Act on one enumerated target — quoting the scan back.
+ *
+ * `expectRole` and `expectTitle` are what the caller was shown. The sidecar
+ * re-reads the element and refuses on a mismatch, which is the read-back
+ * discipline `insertText` has, moved to *before* the act rather than after.
+ * That order is deliberate and the two cases are genuinely different: a write
+ * can be checked afterwards and undone, a press cannot, and its failure mode is
+ * hitting the wrong thing rather than hitting nothing. Between the scan the
+ * model reasoned about and this call the user may have scrolled, or a
+ * notification may have pushed a row down. A moved UI is the expected case.
+ */
+export const TargetActionParamsSchema = z.object({
+  harvestId: z.string(),
+  index: z.number().int().nonnegative(),
+  expectRole: z.string().optional(),
+  expectTitle: z.string().optional()
+})
+
+export const TargetActionResultSchema = z.object({
+  ok: z.boolean(),
+  /**
+   * 'stale-scan' — that scan has aged out; look again.
+   * 'no-such-target' — the scan is held but never had this many targets.
+   * 'gone' — the handle outlived the element; the window has been replaced.
+   * 'changed' — the element is no longer what the caller was shown.
+   * 'disabled' | 'not-pressable' | 'not-typeable' | 'press-refused'
+   * | 'focus-refused' | 'secure-input' | 'no-accessibility'
+   */
+  reason: z.string().nullable(),
+  /** What the element says it is now, so a refusal can be explained. */
+  actualRole: z.string().nullable(),
+  actualTitle: z.string().nullable()
+})
+
+/**
+ * One navigation key, no modifiers, ever.
+ *
+ * **A separate verb from `keyChord`, and that is the point.** `keyChord` can
+ * express ⏎ and ⌘-anything; this one structurally cannot. ⏎ is how Slack,
+ * Messages, Discord and Mail all send, so it is the actuator — and the
+ * navigator is handed an interface in which the actuator cannot be named. That
+ * keeps "the model cannot send a message" a property of the type rather than a
+ * promise about behaviour, the same seam as `ClassifiedIntent` having no
+ * `send` field.
+ *
+ * Not a filter over `keyChord`'s map either: a filter is one edit away from
+ * letting ⏎ through, and this list is one where it was never present.
+ */
+export const NavKeySchema = z.enum([
+  'escape',
+  'tab',
+  'up',
+  'down',
+  'left',
+  'right',
+  'pageUp',
+  'pageDown'
+])
+export type NavKey = z.infer<typeof NavKeySchema>
+
+export const NavKeyParamsSchema = z.object({ key: NavKeySchema })
+export const NavKeyResultSchema = z.object({
+  sent: z.boolean(),
+  reason: z.string().nullable()
+})
+
 export const PromptScreenRecordingParamsSchema = z.object({})
 export const PromptScreenRecordingResultSchema = z.object({
   prompted: z.boolean(),
@@ -476,6 +543,9 @@ export const SidecarMethods = {
   selectedText: { params: SelectedTextParamsSchema, result: SelectedTextResultSchema },
   windowContext: { params: WindowContextParamsSchema, result: WindowContextResultSchema },
   uiTargets: { params: UiTargetsParamsSchema, result: UiTargetsResultSchema },
+  pressTarget: { params: TargetActionParamsSchema, result: TargetActionResultSchema },
+  focusTarget: { params: TargetActionParamsSchema, result: TargetActionResultSchema },
+  navKey: { params: NavKeyParamsSchema, result: NavKeyResultSchema },
   promptScreenRecording: {
     params: PromptScreenRecordingParamsSchema,
     result: PromptScreenRecordingResultSchema
