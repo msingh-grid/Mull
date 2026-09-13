@@ -46,6 +46,24 @@ export const SettingsSchema = z.object({
    */
   routing: z.enum(['model', 'rules']).default('model'),
   /**
+   * How much of the window in front of you Mull may read (M5a).
+   *
+   * `off` sends nothing but the text you are editing, as M4 did. `text` adds
+   * the window's Accessibility transcript — the conversation above the
+   * composer, which is what makes "reply to this" mean anything. `text+screen`
+   * adds a picture of that one window, which is the only way to see charts,
+   * canvases and PDFs.
+   *
+   * Defaulted on because without it the feature does not exist, and disclosed
+   * rather than quiet: onboarding says so, Settings says so, and a chip on the
+   * HUD names what is being read *while you are still speaking*. Credential
+   * apps are never read at any setting, and neither is anything while secure
+   * input is active.
+   */
+  context: z.enum(['off', 'text', 'text+screen']).default('text+screen'),
+  /** Bundle ids the user never wants read, on top of the built-in refusals. */
+  contextExcluded: z.array(z.string()).default([]),
+  /**
    * Where the user dragged the HUD, in screen coordinates. Null means the
    * default bottom-centre. Clamped back onto a real display at launch, because
    * a position saved on a monitor that has since been unplugged would leave the

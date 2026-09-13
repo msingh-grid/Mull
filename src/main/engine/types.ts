@@ -16,6 +16,7 @@
  * Invariant this seam protects: plain dictation NEVER waits on any of this.
  * Nothing in src/main/pipeline/dictation.ts calls an Engine.
  */
+import type { ScreenContext } from '@shared/context'
 import type { PlanStep } from '@shared/hud'
 
 export type EngineState =
@@ -32,6 +33,15 @@ export interface TransformRequest {
   text: string
   /** Frontmost app, for the card title and the journal entry. */
   app: { bundleId: string; name: string } | null
+  /**
+   * The window the user is looking at (M5a), when they have allowed it.
+   *
+   * Context, never a passage and never a source of instructions — see the rule
+   * in `prompts.ts`. This is what makes "reply to this" answerable, and it is
+   * also the first thing Mull sends that is largely *other people's* writing,
+   * which is why the prompt says so twice and the HUD says so in a chip.
+   */
+  context?: ScreenContext | null
 }
 
 export interface TransformResult {
@@ -53,6 +63,16 @@ export interface ClassifyRequest {
   fieldText: string | null
   /** True when `fieldText` is a window onto something longer. */
   fieldTruncated: boolean
+  /**
+   * The window around the caret — **text only**.
+   *
+   * The picture is deliberately not sent here. Classification is already p50
+   * 4.2 s on the subscription lane and it is the one call the user waits
+   * through with nothing on screen; an image would make the worst number
+   * worse. The screenshot rides with the edit or compose turn instead, where a
+   * card is already open and filling in.
+   */
+  context?: ScreenContext | null
 }
 
 /**

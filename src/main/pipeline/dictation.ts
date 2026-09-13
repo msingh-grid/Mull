@@ -1,3 +1,4 @@
+import type { ContextMode, ScreenContext } from '@shared/context'
 import type { HudChip } from '@shared/hud'
 import {
   IDLE_HUD_STATE,
@@ -59,6 +60,7 @@ export interface SculptLaneLike {
     transcript: string
     target: EditTarget
     app: { bundleId: string; name: string } | null
+    context?: ScreenContext | null
     routedBy?: string
     classifyMs?: number | null
   }): Promise<void>
@@ -75,6 +77,12 @@ export interface DictationDeps {
   sculpt?: SculptLaneLike
   /** Decides dictate-vs-edit. Absent = every utterance is dictation. */
   intent?: IntentRouter
+  /**
+   * How much of the screen Mull may read, asked fresh each utterance so a
+   * change in Settings takes effect on the next thing you say. Absent means
+   * nothing is read, which is what every pre-M5a test runs against.
+   */
+  screenContext?: () => { mode: ContextMode; excluded?: readonly string[] }
   /** Where applied and failed actions are written down. Optional in tests. */
   journal?: JournalStore
   onState: (state: HudState) => void
@@ -172,13 +180,19 @@ export class DictationPipeline {
     // What is in front of the caret, read while the user is still speaking.
     // Taking it here is what lets the routing decision cost nothing extra, and
     // what lets the fast path know there is nothing to edit without asking.
-    this.focusPromise = captureFocus(this.deps.sidecar, this.log)
+    this.focusPromise = captureFocus(
+      this.deps.sidecar,
+      this.log,
+      this.deps.screenContext?.()
+    )
     void this.focusPromise.then((snapshot) => {
       if (this.phase !== 'capturing') return
       // Announced before the user finishes speaking, so they can see what Mull
       // is looking at in time to change their mind (docs/DESIGN.md §7.5).
-      const chip = focusChip(snapshot)
-      if (chip) this.setState({ chips: [chip] })
+      const chips = [focusChip(snapshot), readingChip(snapshot)].filter(
+        (chip): chip is HudChip => chip !== null
+      )
+      if (chips.length > 0) this.setState({ chips })
     })
 
     this.maxTimer = setTimeout(() => {
@@ -333,6 +347,10 @@ export class DictationPipeline {
             transcript: text,
             target: target.target,
             app: this.state.app ?? routed.snapshot.app,
+            // The same window the routing decision was made from — read at
+            // key-down, never re-read. An edit is a promise about what the user
+            // was looking at when they spoke.
+            context: routed.snapshot.context,
             routedBy: routed.by,
             classifyMs: routed.classifyMs
           })
@@ -612,4 +630,27 @@ function focusChip(snapshot: FocusSnapshot): HudChip | null {
     return { kind: 'dict', id: 'focus', label: app ? `${app} — this field` : 'this field' }
   }
   return null
+}
+
+/**
+ * What Mull is reading, said out loud before the user stops speaking.
+ *
+ * This chip is the reason capturing the window by default is acceptable rather
+ * than creepy. Mull now reads the conversation around the caret and, when the
+ * user allows it, photographs the window — and the person doing the talking
+ * finds out while they can still let go of the key, not afterwards in a
+ * settings pane. Silence here would be the whole difference between a tool that
+ * is transparent and one that merely has a privacy policy.
+ *
+ * Nothing read, no chip: there is no news in "Mull looked at nothing".
+ */
+function readingChip(snapshot: FocusSnapshot): HudChip | null {
+  const context = snapshot.context
+  if (!context) return null
+  if (context.chars === 0 && !context.image) return null
+  return {
+    kind: 'mem',
+    id: 'reading',
+    label: context.image ? 'reading this window + screenshot' : 'reading this window'
+  }
 }

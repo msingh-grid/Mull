@@ -1,4 +1,6 @@
+import type { ContextMode, ScreenContext } from '@shared/context'
 import type { SidecarApi } from '@shared/sidecar-api'
+import { captureContext } from './context'
 
 /**
  * What is in front of the caret, read once and remembered.
@@ -33,6 +35,15 @@ import type { SidecarApi } from '@shared/sidecar-api'
 
 export interface FocusSnapshot {
   app: { bundleId: string; name: string } | null
+  /**
+   * The window around the caret (M5a), or null when Mull was not allowed to
+   * look — the setting is off, the app is a credential manager, secure input is
+   * on, or accessibility could not read it.
+   *
+   * Read in parallel with the other two during the hold, so it costs the
+   * utterance nothing, and announced in a chip before the user stops speaking.
+   */
+  context: ScreenContext | null
   /**
    * What is highlighted right now, anywhere in the frontmost app — not only in
    * the focused element. `source` says where it was found and `editable`
@@ -97,14 +108,16 @@ const CONTEXT_CHARS = 8_192
  */
 export async function captureFocus(
   sidecar: SidecarApi,
-  log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
+  log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void,
+  context?: { mode: ContextMode; excluded?: readonly string[] }
 ): Promise<FocusSnapshot> {
-  const empty: FocusSnapshot = { app: null, selection: null, field: null }
+  const empty: FocusSnapshot = { app: null, selection: null, field: null, context: null }
 
-  // Two questions, and they are genuinely different: "what is the caret in"
-  // and "what has the user highlighted". Asked together and in parallel, both
-  // during the hold, so neither costs the utterance anything.
-  const [focused, selected] = await Promise.all([
+  // Three questions, and they are genuinely different: "what is the caret in",
+  // "what has the user highlighted", and "what is on this screen at all".
+  // Asked together and in parallel, all during the hold, so none of them costs
+  // the utterance anything.
+  const [focused, selected, screen] = await Promise.all([
     sidecar.focusedElement({ contextBytes: CONTEXT_CHARS }).catch((err: unknown) => {
       log?.('warn', 'focus: focusedElement failed', err)
       return null
@@ -112,12 +125,21 @@ export async function captureFocus(
     sidecar.selectedText({}).catch((err: unknown) => {
       log?.('warn', 'focus: selectedText failed', err)
       return null
-    })
+    }),
+    context
+      ? captureContext({ sidecar, mode: context.mode, excluded: context.excluded, log }).catch(
+          (err: unknown) => {
+            log?.('warn', 'focus: windowContext failed', err)
+            return null
+          }
+        )
+      : Promise.resolve(null)
   ])
 
   const app = focused?.app ? { bundleId: focused.app.bundleId, name: focused.app.name } : null
   return {
-    app,
+    app: app ?? screen?.app ?? null,
+    context: screen,
     selection:
       selected?.text && selected.text.trim()
         ? {
@@ -174,11 +196,13 @@ export function classifierContext(snapshot: FocusSnapshot): {
   selection: string | null
   fieldText: string | null
   fieldTruncated: boolean
+  context: ScreenContext | null
 } {
   return {
     selection: snapshot.selection?.text ?? null,
     fieldText: snapshot.field?.text ?? null,
-    fieldTruncated: snapshot.field?.truncated ?? false
+    fieldTruncated: snapshot.field?.truncated ?? false,
+    context: snapshot.context
   }
 }
 

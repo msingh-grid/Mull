@@ -1,3 +1,4 @@
+import type { ScreenContext } from '@shared/context'
 import type { HudAction, HudCard, HudChip } from '@shared/hud'
 import type { HudState } from '@shared/ipc'
 import type { SidecarApi } from '@shared/sidecar-api'
@@ -52,6 +53,12 @@ export interface SculptRequest {
   /** What the edit will rewrite: a selection, or the whole field. */
   target: EditTarget
   app: { bundleId: string; name: string } | null
+  /**
+   * The window the user was looking at when they spoke (M5a), or null when
+   * Mull was not allowed to read it. Handed straight to the engine as context —
+   * never as a passage, and never as a source of instructions.
+   */
+  context?: ScreenContext | null
   /** How the routing decision was reached, for the ledger. */
   routedBy?: string
   classifyMs?: number | null
@@ -126,11 +133,19 @@ export class SculptLane {
     // never awaited here — the card must be on screen (and escapable) while
     // the engine is still writing.
     const stream = this.deps.engine
-      .transform({ instruction: request.instruction, text: before, app: request.app }, (partial) => {
-        if (session.firstTokenMs === null) session.firstTokenMs = this.now() - session.startedAt
-        const { segments, changes } = diffText(before, partial)
-        this.deps.hud.updateCard({ kind: 'diff', app: cardApp, segments, changes })
-      })
+      .transform(
+        {
+          instruction: request.instruction,
+          text: before,
+          app: request.app,
+          context: request.context ?? null
+        },
+        (partial) => {
+          if (session.firstTokenMs === null) session.firstTokenMs = this.now() - session.startedAt
+          const { segments, changes } = diffText(before, partial)
+          this.deps.hud.updateCard({ kind: 'diff', app: cardApp, segments, changes })
+        }
+      )
       .then((result) => result.text)
       .catch((err: unknown) => {
         // Swallowed into `failure` rather than rethrown: the card's answer

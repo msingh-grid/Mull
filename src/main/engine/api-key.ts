@@ -17,7 +17,13 @@ import {
   classifyPrompt,
   parseClassification
 } from './classify'
-import { EDIT_SYSTEM_PROMPT, cleanEditOutput, cleanEditPartial, editPrompt, maxOutputTokens } from './prompts'
+import {
+  EDIT_SYSTEM_PROMPT,
+  cleanEditOutput,
+  cleanEditPartial,
+  editContent,
+  maxOutputTokens
+} from './prompts'
 
 /**
  * ApiKeyEngine — the Messages API directly.
@@ -100,7 +106,7 @@ export class ApiKeyEngine implements Engine {
         system: [
           { type: 'text', text: EDIT_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
         ],
-        messages: [{ role: 'user', content: editPrompt(request.instruction, request.text) }]
+        messages: [{ role: 'user', content: editContent(request) as Anthropic.MessageParam['content'] }]
       })
 
       if (onPartial) {

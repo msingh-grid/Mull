@@ -16,7 +16,13 @@ import {
   classifyPrompt,
   parseClassification
 } from './classify'
-import { EDIT_SYSTEM_PROMPT, cleanEditOutput, cleanEditPartial, editPrompt } from './prompts'
+import {
+  EDIT_SYSTEM_PROMPT,
+  cleanEditOutput,
+  cleanEditPartial,
+  editContent,
+  type PromptBlock
+} from './prompts'
 
 /**
  * AgentEngine — the user's own Claude subscription, through the Agent SDK.
@@ -125,7 +131,7 @@ export class AgentEngine implements Engine {
   ): Promise<TransformResult> {
     try {
       const text = await this.edit.ask(
-        editPrompt(request.instruction, request.text),
+        editContent(request),
         onPartial ? (partial) => onPartial(cleanEditPartial(partial)) : undefined
       )
       this.health.recover()
@@ -184,7 +190,18 @@ class AgentSession {
     }
   }
 
-  ask(prompt: string, onPartial?: (text: string) => void): Promise<string> {
+  /**
+   * `content` is a string for an ordinary turn and blocks when a picture is
+   * attached. `SDKUserMessage.message` is a full `MessageParam`, so the harness
+   * carries image blocks the same way the Messages API does — measured against
+   * the live subscription lane before anything was built on it, because the
+   * types describing what may be *sent* say nothing about what survives the
+   * trip through Claude Code.
+   */
+  ask(
+    content: string | PromptBlock[],
+    onPartial?: (text: string) => void
+  ): Promise<string> {
     if (this.turn) {
       return Promise.reject(new Error(`The engine is already busy (${this.options.label}).`))
     }
@@ -194,7 +211,7 @@ class AgentSession {
       this.turn = { text: '', onPartial, resolve, reject }
       prompts.push({
         type: 'user',
-        message: { role: 'user', content: prompt },
+        message: { role: 'user', content },
         parent_tool_use_id: null,
         session_id: ''
       } as SDKUserMessage)

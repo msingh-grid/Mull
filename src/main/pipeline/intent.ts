@@ -1,3 +1,4 @@
+import type { ScreenContext } from '@shared/context'
 import type { ClassifiedIntent, Engine } from '../engine/types'
 import { mightBeInstruction, nothingToEdit, route, type Route } from './router'
 
@@ -47,6 +48,8 @@ export interface IntentInput {
   /** The focused field's text when nothing is selected, or null. */
   fieldText: string | null
   fieldTruncated: boolean
+  /** The window around the caret, when Mull was allowed to read it (M5a). */
+  context?: ScreenContext | null
 }
 
 export interface IntentRouterDeps {
@@ -125,7 +128,10 @@ export class IntentRouter {
           app: input.app,
           selection: input.selection,
           fieldText: input.selection === null ? input.fieldText : null,
-          fieldTruncated: input.fieldTruncated
+          fieldTruncated: input.fieldTruncated,
+          // Text only. The picture belongs to the turn that produces something
+          // the user can look at, not to the one they wait through blind.
+          context: input.context ?? null
         }),
         this.timeoutMs
       )

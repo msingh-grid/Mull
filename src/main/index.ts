@@ -507,6 +507,12 @@ async function bootstrap(): Promise<void> {
       journal: journal ?? undefined,
       sculpt,
       intent,
+      // Read per utterance, so changing it in Settings takes effect on the
+      // next thing you say rather than the next launch.
+      screenContext: () => ({
+        mode: settings?.get().context ?? 'off',
+        excluded: settings?.get().contextExcluded ?? []
+      }),
       onState: (state) => hud?.setPipelineState(state),
       log: logFn,
       capture: {
