@@ -104,7 +104,19 @@ the run. Anything there that the table doesn't already know is a table change.
 `npm run notarize:dryrun` proves the parts that don't need an Apple account:
 entitlements are well-formed and complete, the builder config asks for the
 hardened runtime and signs the nested sidecar, and the sidecar signs and
-verifies. Three things remain yours:
+verifies.
+
+For an app that only ever runs on this Mac, that is already enough:
+
+```bash
+npm run pack:local      # → release/Mull-0.0.1-arm64.dmg, ad-hoc signed
+```
+
+See `docs/LOCAL-BUILD.md` — in particular the `tccutil reset` step, which is
+needed after every rebuild because TCC keys grants to the code signature.
+
+Distribution to anyone else needs three things that only an Apple Developer
+account provides:
 
 - [ ] Set a real `appId` in `electron-builder.yml` (it is a placeholder).
 - [ ] Developer ID Application certificate in the login keychain.

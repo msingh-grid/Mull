@@ -174,8 +174,10 @@ async function main(): Promise<void> {
   console.log('    signed, stable bundle id differently from a dev-mode Electron binary')
 
   if (pending.length > 0) {
-    console.log('\nstill to do by hand:')
+    console.log('\nstill to do by hand — only if the app is to be distributed:')
     for (const item of pending) console.log(`  · ${item}`)
+    console.log('  for a build that only runs on this Mac, none of the above is needed:')
+    console.log('    npm run pack:local   → an ad-hoc signed DMG (docs/LOCAL-BUILD.md)')
   }
 
   console.log(failures === 0 ? '\nDRYRUN_OK' : `\nDRYRUN_FAILED (${failures})`)

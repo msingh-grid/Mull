@@ -14,6 +14,7 @@
     "fetch:model": "tsx scripts/fetch-model.ts",
     "smoke": "tsx scripts/smoke.ts",
     "notarize:dryrun": "tsx scripts/notarize-dryrun.ts",
+    "pack:local": "npm run build:sidecar && npm run build && tsx scripts/pack-local.ts",
     "test": "vitest run"
   },
   "author": "",
