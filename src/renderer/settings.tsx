@@ -356,29 +356,39 @@ function SettingsWindow(): JSX.Element {
 
         <section className="section">
           <h2>Hotkey</h2>
+          {/*
+            Two keys, two verbs — not a preference. Mull used to guess which one
+            you meant from the words ("tighten", "reply", "summarise"), and the
+            guess was wrong for every phrasing nobody had listed. The key is the
+            answer now, so there is nothing here to choose.
+          */}
           <Row label="Hold to dictate" hint={`in use: ${hotkeyLive}`}>
-            <select
-              value={settings.hotkey}
-              onChange={(event) => void update({ hotkey: event.target.value as Settings['hotkey'] })}
-            >
-              <option value="opt-space">⌥Space</option>
-              <option value="fn">Fn (globe)</option>
-            </select>
+            <span className="fixed-key">⌥Space</span>
           </Row>
+          <Row label="Hold to ask" hint={about?.canInstruct ? 'ready' : 'unavailable'}>
+            <span className="fixed-key">Fn (globe)</span>
+          </Row>
+          <p>
+            ⌥Space types what you say, instantly, with nothing sent anywhere. Fn asks Mull to
+            act on it — “summarise this thread”, “make this less apologetic”, “reply saying I’ll
+            have it by five” — and shows you a card before anything changes.
+          </p>
           {about?.hotkeyMode !== 'tap' && about?.hotkeyTapReason ? (
             <p className="warn-line">
               {about.hotkeyTapReason === 'no-input-monitoring'
-                ? 'Mull is watching the key the older way because Input Monitoring isn’t granted. Grant it above, then quit and reopen Mull — the better path also removes the stray space ⌥Space types.'
-                : `The event tap isn’t in use (${about.hotkeyTapReason}); Mull fell back to the older listener.`}
+                ? 'Mull is watching the key the older way because Input Monitoring isn’t granted, and that path can’t see Fn at all — so dictation works and asking doesn’t. Grant it above, then quit and reopen Mull.'
+                : `The event tap isn’t in use (${about.hotkeyTapReason}), so Fn can’t be watched; ⌥Space still dictates.`}
             </p>
           ) : null}
-          {settings.hotkey === 'fn' && about?.hotkeyMode !== 'tap' ? (
+          {about?.canInstruct ? (
             <p className="warn-line">
-              Fn needs the event tap, so ⌥Space is what actually works right now.
+              macOS also acts on the globe key and won’t let Mull stop it. Set System Settings →
+              Keyboard → “Press 🌐 to” → <strong>Do Nothing</strong>, or Fn will open the emoji
+              picker every time you ask Mull for something.
             </p>
           ) : null}
           <p>
-            ⌥Z undoes the last thing Mull did, wherever you are. Both chords are released the
+            ⌥Z undoes the last thing Mull did, wherever you are. Every chord is released the
             moment Mull quits.
           </p>
         </section>

@@ -56,9 +56,12 @@ function PageWhat(): JSX.Element {
   return (
     <>
       <Plate step={1} title="A thinking layer for your Mac">
-        Hold <kbd>⌥&nbsp;Space</kbd> in any app — Mail, Notes, your editor — and speak. Mull turns
-        your words into clean text, placed exactly where your cursor is. Ask for changes, and it
-        shows every mark before anything lands.
+        Two keys, and which one you hold is the whole instruction. Hold{' '}
+        <kbd>⌥&nbsp;Space</kbd> in any app — Mail, Notes, your editor — and speak: Mull turns your
+        words into clean text, placed exactly where your cursor is, instantly and with nothing sent
+        anywhere. Hold <kbd>Fn</kbd> instead and the words are a request — “summarise this thread”,
+        “make this less apologetic”, “reply saying I’ll have it by five” — answered on a card you
+        approve before anything lands.
       </Plate>
 
       <div className="tenets">

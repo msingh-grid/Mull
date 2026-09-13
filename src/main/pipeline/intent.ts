@@ -1,37 +1,38 @@
 import type { ScreenContext } from '@shared/context'
 import type { ClassifiedIntent, Engine } from '../engine/types'
-import { justSend, route, worthAsking, type Route, type RouteContext } from './router'
+import { justSend, route, type Route, type RouteContext } from './router'
 
 /**
  * IntentRouter — the one call the dictation loop makes to find out what the
  * user meant.
  *
- * It owns the order, and the order is the design:
+ * **It is only ever reached on the instruct key.** ⌥Space does not come here
+ * at all: those words are the message, the user said so by choosing that key,
+ * and `DictationPipeline` types them without an engine in the loop. That is the
+ * "dictation never waits" invariant, back in its unqualified form.
  *
- *   1. **Fast path.** Nothing selected, empty field → `dictate`, synchronously.
- *      No engine, no network, no perceptible pause. This is the narrowed
- *      invariant from docs/PLAN.md, and it still covers the ordinary case of
- *      talking into an empty box.
- *   2. **Fast path again.** Text is present, but the words carry no instruction
- *      verb at all — "and I'll send the deck tonight". Also `dictate`, also
- *      synchronously. This second gate exists because of a measurement, not a
- *      preference: see `mightBeInstruction` in router.ts. Without it every
- *      utterance into a half-written email would pay seconds.
- *   3. **The model**, for what is left: text on screen *and* words that could
- *      plausibly be an instruction. Raced against a timeout, because a
+ * So by the time anything below runs, the question "was that an instruction?"
+ * has already been answered — by a key press, rather than by a table of verbs
+ * that got it wrong for every phrasing nobody had listed ("summarize this
+ * thread", "catch me up on this"). What is left is the narrower question of
+ * *which* instruction, and that is what the model is for.
+ *
+ * The order, and the order is the design:
+ *
+ *   1. **A bare send**, answered locally and instantly. "Send the message" has
+ *      nothing to write, so there is nothing to ask about — and the model has
+ *      no way to request an irreversible act, which is the point. See
+ *      `justSend`.
+ *   2. **The model**, for everything else. Raced against a timeout, because a
  *      classifier that hangs must not hold the user's words hostage.
- *   4. **The rules**, when the model could not answer — signed out, offline,
+ *   3. **The rules**, when the model could not answer — signed out, offline,
  *      rate limited, timed out, or switched off in Settings. Mull still has to
- *      decide something, and refusing to type is not a decision.
- *   5. **The rules from then on**, once an engine has timed out twice. A
- *      timeout is the worst outcome available: the user waits the whole budget
- *      and then receives the answer the rules had instantly. Finding that out
- *      costs two utterances; continuing to pay for it would be a slower Mull
- *      that decides exactly the same things. See `DEMOTE_AFTER_TIMEOUTS`.
+ *      decide something, and refusing to act is not a decision.
+ *   4. **The rules from then on**, once an engine has timed out twice. See
+ *      `DEMOTE_AFTER_TIMEOUTS`.
  *
- * Never throws. Every failure lands on `dictate`, which is recoverable with one
- * keystroke; the alternative failure — routing someone's sentence into a card —
- * is not.
+ * Never throws. Every failure lands somewhere recoverable: a card the user
+ * approves, or text one keystroke undoes.
  */
 
 export type RoutedBy = 'fast-path' | 'model' | 'rules'
@@ -132,13 +133,6 @@ export class IntentRouter {
       hasScreen: (input.context?.blocks.length ?? 0) > 0 || input.context?.image != null
     }
 
-    const straightToTheCaret = (): RoutedIntent => ({
-      route: { kind: 'dictate', text: transcript },
-      by: 'fast-path',
-      classifyMs: null,
-      fallbackReason: null
-    })
-
     // "Send the message." Answered here, from the words alone, before any of
     // the machinery below — there is nothing to write, so there is nothing to
     // ask a model about, and the one utterance whose whole point is immediacy
@@ -149,13 +143,6 @@ export class IntentRouter {
       return { route: { kind: 'send' }, by: 'fast-path', classifyMs: null, fallbackReason: null }
     }
 
-    // One gate now, where there used to be two. It answers: could these words,
-    // against what is actually on screen, be asking for anything at all? No
-    // means type them, synchronously, with no engine in the loop — and that is
-    // still most of what anyone says. See `worthAsking` in router.ts for why
-    // the invariant reads the way it does now.
-    if (!worthAsking(transcript, context)) return straightToTheCaret()
-
     const rules = (reason: string): RoutedIntent => ({
       route: route(transcript, context),
       by: 'rules',
@@ -164,6 +151,7 @@ export class IntentRouter {
     })
 
     if (this.deps.useModel && !this.deps.useModel()) return rules('rules-only')
+
     // Asked and answered, twice. Waiting again would buy nothing.
     if (this.tooSlow) return rules('too-slow')
 

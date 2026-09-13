@@ -115,7 +115,7 @@ describe('sidecar-api zod contract', () => {
       'stopHotkeyTap'
     ])
     // Bumped whenever a shape changes; the sidecar's `init` refuses a mismatch.
-    expect(SIDECAR_PROTOCOL_VERSION).toBe(5)
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(6)
   })
 })
 

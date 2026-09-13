@@ -398,8 +398,8 @@ export class FakeSidecar implements SidecarApi {
   caret: number
   selectionLength: number
 
-  /** Which chord the pretend tap is watching, or null when it is stopped. */
-  hotkeyTapChord: 'opt-space' | 'fn' | null = null
+  /** Which chords the pretend tap is watching. Empty when it is stopped. */
+  hotkeyTapChords: Array<'opt-space' | 'fn'> = []
   /** Every chord that was actually posted into the pretend app, in order. */
   chords: Array<{ key: string; modifiers: string[] }> = []
 
@@ -677,21 +677,21 @@ export class FakeSidecar implements SidecarApi {
     return { sent: true, reason: null }
   }
 
-  async startHotkeyTap(params: { chord: 'opt-space' | 'fn'; swallow?: boolean }) {
+  async startHotkeyTap(params: { chords: Array<'opt-space' | 'fn'>; swallow?: boolean }) {
     if (this.overrides.hotkeyTap === false) {
       return { started: false, reason: 'no-input-monitoring', swallowing: false }
     }
-    this.hotkeyTapChord = params.chord
+    this.hotkeyTapChords = [...params.chords]
     return {
       started: true,
       reason: null,
-      swallowing: params.chord !== 'fn' && params.swallow !== false
+      swallowing: params.chords.includes('opt-space') && params.swallow !== false
     }
   }
 
   async stopHotkeyTap() {
-    const was = this.hotkeyTapChord !== null
-    this.hotkeyTapChord = null
+    const was = this.hotkeyTapChords.length > 0
+    this.hotkeyTapChords = []
     return { stopped: was }
   }
 

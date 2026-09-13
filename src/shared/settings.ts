@@ -10,7 +10,16 @@ import { z } from 'zod'
  */
 
 export const SettingsSchema = z.object({
-  /** Which chord starts dictation. `fn` needs the M3 sidecar event tap. */
+  /**
+   * Gone at M5b, kept only so a stored settings file still parses.
+   *
+   * It used to choose *which* key starts dictation. The two keys now mean two
+   * different things — ⌥Space dictates, Fn asks Mull to act — so there is
+   * nothing left to choose, and a setting that quietly did nothing would be
+   * worse than none. Nothing reads this.
+   *
+   * @deprecated
+   */
   hotkey: z.enum(['opt-space', 'fn']).default('opt-space'),
   /** Window appearance. The HUD follows this too unless `hudTheme` overrides. */
   theme: z.enum(['system', 'light', 'dark']).default('system'),

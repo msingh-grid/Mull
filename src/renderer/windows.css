@@ -467,3 +467,15 @@ select:focus-visible {
   background: var(--hairline);
 }
 .ticks i.done { background: var(--ink-3); }
+
+/* A key that is stated rather than chosen (Settings → Hotkey, M5b). Sized like
+   the <select> it replaced so the rows still line up. */
+.fixed-key {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper-recessed);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-kbd);
+  padding: 4px 9px;
+}

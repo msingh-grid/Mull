@@ -357,8 +357,8 @@ describe('DictationPipeline — routing', () => {
       selectionLength: SELECTED.length
     })
 
-  async function utterance(h: Harness): Promise<void> {
-    h.pipe.begin()
+  async function utterance(h: Harness, intent: 'dictate' | 'instruct' = 'instruct'): Promise<void> {
+    h.pipe.begin(intent)
     h.pipe.pushChunk(speech(1.2))
     h.clock.advance(1_200)
     h.pipe.end()
@@ -383,17 +383,26 @@ describe('DictationPipeline — routing', () => {
     h.pipe.dispose()
   })
 
-  it('types ordinary speech even with text selected', async () => {
+  /**
+   * The invariant, in its unqualified form again (M5b).
+   *
+   * ⌥Space is dictation and nothing else — not "unless there is something to
+   * edit", not "unless the words contain a verb from a list". Those qualifiers
+   * were what typed "summarize this thread" into a Slack composer, and they are
+   * gone: the key says which of the two things the user meant.
+   */
+  it('types on ⌥Space even with text selected and an instruction on the tongue', async () => {
     const h = harness({
       sidecar: withSelection(),
-      transcript: 'make sure Priya signs off before Friday',
+      transcript: 'make this less apologetic',
       sculpt: true,
-      classifies: 'offline'
+      classifies: { kind: 'edit', target: 'selection', instruction: 'make it less apologetic' }
     })
-    await utterance(h)
+    await utterance(h, 'dictate')
 
+    // The classifier above would have said "edit". It was never asked.
     expect(h.sculpted).toEqual([])
-    expect(h.sidecar.insertions).toEqual(['Make sure Priya signs off before Friday'])
+    expect(h.sidecar.insertions).toEqual(['Make this less apologetic'])
     h.pipe.dispose()
   })
 
@@ -410,11 +419,9 @@ describe('DictationPipeline — routing', () => {
     h.pipe.dispose()
   })
 
-  it('types an instruction into an empty box without asking anyone', async () => {
-    // The fast path: nothing selected, nothing in the field, so there is
-    // nothing an edit could act on and no classifier is consulted.
+  it('never consults the engine on ⌥Space, whatever the words are', async () => {
     const h = harness({ transcript: 'make this crisp', sculpt: true })
-    await utterance(h)
+    await utterance(h, 'dictate')
 
     expect(h.sculpted).toEqual([])
     expect(h.sidecar.insertions).toEqual(['Make this crisp'])
@@ -458,7 +465,7 @@ describe('DictationPipeline — dictation does not depend on the engine', () => 
       classifies: 'offline'
     })
 
-    h.pipe.begin()
+    h.pipe.begin('instruct')
     h.pipe.pushChunk(speech(1.2))
     h.clock.advance(1_200)
     h.pipe.end()
@@ -501,8 +508,8 @@ describe('DictationPipeline — an instruction about the field in front of you',
       selectionLength: 0
     })
 
-  async function utterance(h: Harness): Promise<void> {
-    h.pipe.begin()
+  async function utterance(h: Harness, intent: 'dictate' | 'instruct' = 'instruct'): Promise<void> {
+    h.pipe.begin(intent)
     h.pipe.pushChunk(speech(1.2))
     h.clock.advance(1_200)
     h.pipe.end()
@@ -592,8 +599,8 @@ describe('DictationPipeline — an instruction about the field in front of you',
 describe('DictationPipeline — a selection that is not in the focused element', () => {
   const SENT = 'I am so sorry to bother you again about the terms doc.'
 
-  async function utterance(h: Harness): Promise<void> {
-    h.pipe.begin()
+  async function utterance(h: Harness, intent: 'dictate' | 'instruct' = 'instruct'): Promise<void> {
+    h.pipe.begin(intent)
     h.pipe.pushChunk(speech(1.2))
     h.clock.advance(1_200)
     h.pipe.end()
@@ -704,8 +711,8 @@ describe('DictationPipeline — the send wish comes off the transcript', () => {
       context: [THREAD]
     })
 
-  async function utterance(h: Harness): Promise<void> {
-    h.pipe.begin()
+  async function utterance(h: Harness, intent: 'dictate' | 'instruct' = 'instruct'): Promise<void> {
+    h.pipe.begin(intent)
     h.pipe.pushChunk(speech(1.2))
     h.clock.advance(1_200)
     h.pipe.end()
@@ -784,8 +791,8 @@ describe('DictationPipeline — "send" reaches the right lane', () => {
       context: ['Priya: any word on the code?']
     })
 
-  async function utterance(h: Harness): Promise<void> {
-    h.pipe.begin()
+  async function utterance(h: Harness, intent: 'dictate' | 'instruct' = 'instruct'): Promise<void> {
+    h.pipe.begin(intent)
     h.pipe.pushChunk(speech(1.2))
     h.clock.advance(1_200)
     h.pipe.end()
@@ -862,5 +869,91 @@ describe('DictationPipeline — "send" reaches the right lane', () => {
     expect(h.sends).toEqual([])
     expect(h.sidecar.insertions).toEqual(['Send the message'])
     h.pipe.dispose()
+  })
+})
+
+describe('DictationPipeline — the two keys', () => {
+  const withThread = (text: string): FakeSidecar =>
+    new FakeSidecar({
+      accessibility: true,
+      text,
+      caret: text.length,
+      selectionLength: 0,
+      context: ['Priya: any word on the redlines?']
+    })
+
+  /**
+   * The six sentences that were typed into a Slack composer before M5b, because
+   * no verb table listed them. None of them is listed anywhere now — the key
+   * says they were instructions, and the model decides what kind.
+   */
+  const ONCE_TYPED = [
+    'summarize this thread',
+    'catch me up on this',
+    'what did they decide about the redlines',
+    'turn this thread into bullet points',
+    'translate this to French',
+    'send that I will get the code done in 2 days'
+  ]
+
+  for (const transcript of ONCE_TYPED) {
+    it(`asks about “${transcript}” on Fn`, async () => {
+      const h = harness({
+        sidecar: withThread(''),
+        transcript,
+        sculpt: true,
+        context: 'text',
+        classifies: { kind: 'compose', instruction: transcript }
+      })
+      h.pipe.begin('instruct')
+      h.pipe.pushChunk(speech(1.2))
+      h.clock.advance(1_200)
+      h.pipe.end()
+      await settle()
+
+      expect(h.sculpted.length).toBe(1)
+      expect(h.sidecar.insertions).toEqual([])
+      h.pipe.dispose()
+    })
+
+    it(`types “${transcript}” on ⌥Space`, async () => {
+      const h = harness({
+        sidecar: withThread(''),
+        transcript,
+        sculpt: true,
+        context: 'text',
+        classifies: { kind: 'compose', instruction: transcript }
+      })
+      h.pipe.begin('dictate')
+      h.pipe.pushChunk(speech(1.2))
+      h.clock.advance(1_200)
+      h.pipe.end()
+      await settle()
+
+      expect(h.sculpted).toEqual([])
+      expect(h.sidecar.insertions.length).toBe(1)
+      h.pipe.dispose()
+    })
+  }
+
+  /**
+   * Announced while the key is still down. Fn means the words are about to be
+   * sent somewhere and acted on, and the moment to learn that is before letting
+   * go — it also makes a mis-press visible, since Fn has a lot of neighbours.
+   */
+  it('shows a chip while Fn is held, and none while ⌥Space is', async () => {
+    const asking = harness({ sidecar: withThread(''), sculpt: true, context: 'text' })
+    asking.pipe.begin('instruct')
+    await settle()
+    expect(
+      asking.states.flatMap((s) => s.chips ?? []).some((chip) => chip.id === 'ask')
+    ).toBe(true)
+    asking.pipe.dispose()
+
+    const plain = harness({ sidecar: withThread(''), sculpt: true, context: 'text' })
+    plain.pipe.begin('dictate')
+    await settle()
+    expect(plain.states.flatMap((s) => s.chips ?? []).some((chip) => chip.id === 'ask')).toBe(false)
+    plain.pipe.dispose()
   })
 })

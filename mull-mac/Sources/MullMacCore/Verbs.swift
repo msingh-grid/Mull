@@ -19,8 +19,8 @@ import Foundation
 /// `screenRecording` field on `checkPermissions`. `init` rejects a mismatch
 /// loudly, so a stale binary fails at boot rather than returning shapes the
 /// host cannot parse.
-public let SIDECAR_PROTOCOL_VERSION = 5
-public let SIDECAR_VERSION = "0.5.0"
+public let SIDECAR_PROTOCOL_VERSION = 6
+public let SIDECAR_VERSION = "0.6.0"
 
 // MARK: - Param structs (mirror the zod schemas)
 
@@ -66,8 +66,9 @@ struct KeyChordParams: Decodable {
 }
 
 struct StartHotkeyTapParams: Decodable {
-    /// "opt-space" | "fn"
-    let chord: String
+    /// Chords to watch at once: "opt-space" and/or "fn" (M5a — they mean
+    /// different things now, so both are watched rather than one chosen).
+    let chords: [String]
     /// Consume the chord so the focused app never sees it. Ignored for Fn.
     let swallow: Bool?
 }
@@ -256,7 +257,7 @@ public protocol SystemActions {
     func activateApp(bundleId: String) -> (activated: Bool, reason: String?)
     func keyChord(key: String, modifiers: [String]) -> (sent: Bool, reason: String?)
     /// Watch the push-to-talk chord. Emits `hotkey` notifications until stopped.
-    func startHotkeyTap(chord: String, swallow: Bool) -> (started: Bool, reason: String?)
+    func startHotkeyTap(chords: [String], swallow: Bool) -> (started: Bool, reason: String?)
     func stopHotkeyTap() -> Bool
 }
 
@@ -569,17 +570,21 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
     /// ladder to walk down.
     d.register("startHotkeyTap") { raw in
         let params = try decodeParams(StartHotkeyTapParams.self, from: raw)
-        guard ["opt-space", "fn"].contains(params.chord) else {
-            throw RpcError.invalidParams("unknown chord '\(params.chord)'")
+        let chords = params.chords
+        guard !chords.isEmpty else { throw RpcError.invalidParams("no chords given") }
+        for chord in chords where !["opt-space", "fn"].contains(chord) {
+            throw RpcError.invalidParams("unknown chord '\(chord)'")
         }
         let (started, reason) = system.startHotkeyTap(
-            chord: params.chord, swallow: params.swallow ?? true)
+            chords: chords, swallow: params.swallow ?? true)
         return .object([
             "started": .bool(started),
             "reason": optional(reason),
             // Fn is observable but not consumable; say so rather than letting
-            // the host assume the key never reaches the focused app.
-            "swallowing": .bool(started && params.chord != "fn" && (params.swallow ?? true))
+            // the host assume the key never reaches the focused app. Reported
+            // for the *swallowable* chords only — with both watched, ⌥Space is
+            // consumed and Fn is not, and the host has to tell the user so.
+            "swallowing": .bool(started && chords.contains("opt-space") && (params.swallow ?? true))
         ])
     }
 

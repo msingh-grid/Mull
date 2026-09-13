@@ -19,6 +19,15 @@ export interface AboutInfo {
   hotkeyMode: string
   /** Why the sidecar event tap is not in use, when it is not. Actionable. */
   hotkeyTapReason: string | null
+  /**
+   * Can the user ask Mull for something right now, or only dictate?
+   *
+   * False whenever the sidecar event tap is not running: Fn is the instruct key
+   * and no other rung can see it. Surfaced rather than inferred because
+   * "nothing happens when I press Fn" is otherwise indistinguishable from a
+   * broken app.
+   */
+  canInstruct: boolean
   /** Whether ASR is the real local engine or the fake. */
   asrProvider: string
   paths: {

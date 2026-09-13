@@ -88,6 +88,7 @@ let permissions: PermissionsService | null = null
 let runtime = {
   hotkeyMode: 'unavailable',
   hotkeyTapReason: null as string | null,
+  canInstruct: false,
   asrProvider: 'none',
   sidecarVersion: null as string | null
 }
@@ -528,13 +529,12 @@ async function bootstrap(): Promise<void> {
   }
 
   hotkey = new HotkeyService({
-    chord: settings.get().hotkey,
     sidecar,
-    onStart: () => {
+    onStart: (intent) => {
       // A new utterance withdraws whatever proposal was on screen — answered
       // as a cancel, so it lands in the journal rather than vanishing.
       hud?.cancelOpen()
-      pipeline?.begin()
+      pipeline?.begin(intent)
     },
     onStop: () => pipeline?.end(),
     log: logFn
@@ -543,10 +543,11 @@ async function bootstrap(): Promise<void> {
   runtime = {
     hotkeyMode: mode,
     hotkeyTapReason: hotkey.tapReason,
+    canInstruct: hotkey.canInstruct,
     asrProvider: selection.degradedReason ? 'fake (degraded)' : 'whisper-cli',
     sidecarVersion: runtime.sidecarVersion
   }
-  tray?.setStatus(describeHotkeyMode(mode, settings.get().hotkey))
+  tray?.setStatus(describeHotkeyMode(mode))
   if (mode === 'unavailable') {
     pushHudState({
       ...pipeline.getState(),
@@ -585,13 +586,20 @@ async function bootstrap(): Promise<void> {
   }
 }
 
-/** The menu-bar status line: what the hotkey actually is right now. */
-function describeHotkeyMode(mode: string, chord: string): string {
-  const key = mode === 'tap' && chord === 'fn' ? 'Fn' : '⌥Space'
+/**
+ * The menu-bar status line: what the keys actually do right now.
+ *
+ * Two of them since M5b, and the second only exists on the tap rung — so this
+ * line is also where someone finds out that Fn is doing nothing because Input
+ * Monitoring was never granted.
+ */
+function describeHotkeyMode(mode: string): string {
+  const key = '⌥Space'
   switch (mode) {
     case 'tap':
+      return `Hold ${key} to dictate · Fn to ask`
     case 'ptt':
-      return `Hold ${key} to dictate`
+      return `Hold ${key} to dictate · Fn needs Input Monitoring`
     case 'ptt-passive':
       return `Hold ${key} — it also reaches the app`
     case 'toggle':
@@ -756,38 +764,9 @@ ipcMain.handle(IPC.settingsSet, (_event, patch: Partial<Settings>) => {
       if (!win.isDestroyed()) win.webContents.send(IPC.settingsChanged, next)
     }
     applyLaunchAtLogin(next)
-    void applyHotkeyChoice(next)
   }
   return next
 })
-
-/**
- * Switch chords without a relaunch.
- *
- * Only the tap rung can actually offer Fn, so this is also where a user who
- * picks it on a Mac without Input Monitoring finds out: the restart lands on
- * whatever rung is available and the menu-bar status says which.
- */
-async function applyHotkeyChoice(next: Settings): Promise<void> {
-  if (!hotkey || hotkey.chord === next.hotkey) return
-  hotkey.stop(globalShortcut)
-  hotkey = new HotkeyService({
-    chord: next.hotkey,
-    sidecar,
-    onStart: () => {
-      // A new utterance withdraws whatever proposal was on screen — answered
-      // as a cancel, so it lands in the journal rather than vanishing.
-      hud?.cancelOpen()
-      pipeline?.begin()
-    },
-    onStop: () => pipeline?.end(),
-    log: logFn
-  })
-  const mode = await hotkey.start(globalShortcut)
-  runtime = { ...runtime, hotkeyMode: mode, hotkeyTapReason: hotkey.tapReason }
-  tray?.setStatus(describeHotkeyMode(mode, next.hotkey))
-  log.info(`hotkey switched to ${next.hotkey}: mode ${mode}`)
-}
 
 /** A warm subprocess is the difference between 1.2 s and 2 s on the first edit. */
 function warmEngine(): void {
@@ -924,6 +903,7 @@ ipcMain.handle(IPC.about, async (): Promise<AboutInfo> => {
     sidecarProtocol: runtime.sidecarVersion ? SIDECAR_PROTOCOL_VERSION : null,
     hotkeyMode: runtime.hotkeyMode,
     hotkeyTapReason: runtime.hotkeyTapReason,
+    canInstruct: runtime.canInstruct,
     asrProvider: runtime.asrProvider,
     paths: {
       journal: journalPath(),

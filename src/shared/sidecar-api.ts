@@ -305,7 +305,14 @@ export const ActivateAppResultSchema = z.object({
 // ---------------------------------------------------------------------------
 
 export const StartHotkeyTapParamsSchema = z.object({
-  chord: z.enum(['opt-space', 'fn']),
+  /**
+   * Every chord to watch, at once (M5a).
+   *
+   * They used to be alternatives chosen in Settings; they now mean different
+   * things — ⌥Space dictates, Fn instructs — so the tap watches both and says
+   * which one fired in the notification.
+   */
+  chords: z.array(z.enum(['opt-space', 'fn'])).min(1),
   /**
    * Consume the chord so the focused app never sees it — this is what removes
    * the stray U+00A0 that ⌥Space types. Ignored for Fn, which the window
@@ -316,7 +323,11 @@ export const StartHotkeyTapParamsSchema = z.object({
 export const StartHotkeyTapResultSchema = z.object({
   started: z.boolean(),
   reason: z.string().nullable(),
-  /** False when the tap is watching but the key still reaches the app. */
+  /**
+   * Is ⌥Space being consumed? Fn never is — the window server handles the globe
+   * key above this layer — so with both watched this reports the swallowable
+   * one, and the host tells the user what to do about the other.
+   */
   swallowing: z.boolean()
 })
 
@@ -351,11 +362,14 @@ export const KeyChordResultSchema = z.object({
  * The sidecar's deployment target moves to macOS 14 with it: the capture is
  * `SCScreenshotManager`, and the deprecated `CGWindowListCreateImage` is not a
  * thing to build a new feature on.
+ * 6 (M5b): `startHotkeyTap` takes `chords` rather than one `chord`. The two
+ * keys stopped being alternatives and became two verbs — ⌥Space dictates and
+ * Fn instructs — so the tap watches both at once and names the one that fired.
  *
  * The `init` handshake rejects a mismatch, so a stale `mull-mac` binary fails
  * loudly at boot instead of returning shapes the host can't parse.
  */
-export const SIDECAR_PROTOCOL_VERSION = 5
+export const SIDECAR_PROTOCOL_VERSION = 6
 
 // ---------------------------------------------------------------------------
 // Notifications: sidecar -> host, no id, no reply.

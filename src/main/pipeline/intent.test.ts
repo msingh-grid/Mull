@@ -39,27 +39,47 @@ const INPUT = {
   fieldTruncated: false
 }
 
-describe('IntentRouter — the fast path', () => {
-  /**
-   * The invariant, narrowed but intact: an empty box has nothing an edit could
-   * act on, so nothing is asked and nothing is waited for.
-   */
-  it('types without asking anyone when there is nothing to edit', async () => {
-    const engine = engineThat({ answer: { kind: 'edit', target: 'document', instruction: 'x' } })
-    const router = new IntentRouter({ engine })
-
-    const decision = await router.decide({ ...INPUT, fieldText: null })
-
-    expect(decision.by).toBe('fast-path')
-    expect(decision.route).toEqual({ kind: 'dictate', text: SAID })
-    expect(engine.asked).toEqual([])
+/**
+ * There is no longer a gate here.
+ *
+ * `IntentRouter` is only ever reached on the instruct key, so the question
+ * "was that an instruction?" has already been answered by a key press. What
+ * used to sit at the top of `decide()` — a table of verbs deciding whether the
+ * question was worth asking — is gone, along with the bug it kept producing.
+ */
+describe('IntentRouter — it asks, because the key already decided', () => {
+  it('asks about words a verb table would have typed', async () => {
+    for (const transcript of [
+      'summarize this thread',
+      'catch me up on this',
+      'what did they decide about the redlines',
+      'and I will send the deck tonight'
+    ]) {
+      const engine = engineThat()
+      await new IntentRouter({ engine }).decide({ ...INPUT, transcript })
+      expect(engine.asked.length).toBe(1)
+    }
   })
 
-  it('treats a whitespace-only field as empty', async () => {
+  it('asks even when there is nothing in the field to edit', async () => {
     const engine = engineThat()
-    const router = new IntentRouter({ engine })
-    expect((await router.decide({ ...INPUT, fieldText: '   \n ' })).by).toBe('fast-path')
-    expect(engine.asked).toEqual([])
+    await new IntentRouter({ engine }).decide({ ...INPUT, fieldText: null })
+    expect(engine.asked.length).toBe(1)
+  })
+
+  /**
+   * The model is still free to answer "those were just words" — and that is
+   * now the only thing that can produce a dictate from this lane.
+   */
+  it('types the words when the model says they were the message', async () => {
+    const engine = engineThat({ answer: { kind: 'dictate' } })
+    const decision = await new IntentRouter({ engine }).decide({
+      ...INPUT,
+      transcript: 'and I will send the deck tonight'
+    })
+
+    expect(decision.by).toBe('model')
+    expect(decision.route).toEqual({ kind: 'dictate', text: 'and I will send the deck tonight' })
   })
 })
 
@@ -189,44 +209,6 @@ describe('IntentRouter — the fallback', () => {
  * email would make dictation unusable, so ordinary speech has to skip the
  * question entirely.
  */
-describe('IntentRouter — words that could not be an instruction', () => {
-  const PLAIN = [
-    'and I will send the deck tonight',
-    'Thanks so much, that really helped',
-    'Following up on the terms doc, we still need your sign-off',
-    'I think we should wait for the next round',
-    'sounds good, Tuesday works for me'
-  ]
-
-  for (const transcript of PLAIN) {
-    it(`types without asking: “${transcript}”`, async () => {
-      const engine = engineThat()
-      const decision = await new IntentRouter({ engine }).decide({ ...INPUT, transcript })
-
-      expect(decision.by).toBe('fast-path')
-      expect(engine.asked).toEqual([])
-    })
-  }
-
-  /**
-   * The other half of the trade. These *might* be instructions, so they are
-   * worth a few seconds of asking — including the ones the model will correctly
-   * send straight back as dictation.
-   */
-  for (const transcript of [
-    'Can you make my last message less apologetic?',
-    'tighten this up',
-    'make sure Priya signs off before Friday',
-    'fix the meeting to 3pm and tell Dan'
-  ]) {
-    it(`asks about: “${transcript}”`, async () => {
-      const engine = engineThat()
-      await new IntentRouter({ engine }).decide({ ...INPUT, transcript })
-      expect(engine.asked.length).toBe(1)
-    })
-  }
-})
-
 /**
  * Compose (M5a) — the route that needs no text in the field, only something on
  * screen to answer.
@@ -276,21 +258,6 @@ describe('IntentRouter — composing a reply', () => {
     const engine = engineThat()
     await new IntentRouter({ engine }).decide(EMPTY_COMPOSER)
     expect(engine.asked.length).toBe(1)
-  })
-
-  /**
-   * The invariant survives the narrowing. An empty box plus ordinary speech is
-   * still the fast path, screenshot or no screenshot.
-   */
-  it('still types ordinary speech into an empty box without asking', async () => {
-    const engine = engineThat()
-    const decision = await new IntentRouter({ engine }).decide({
-      ...EMPTY_COMPOSER,
-      transcript: 'and I will send the deck tonight'
-    })
-
-    expect(decision.by).toBe('fast-path')
-    expect(engine.asked).toEqual([])
   })
 
   /**

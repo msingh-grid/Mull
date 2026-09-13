@@ -28,10 +28,43 @@ export type HotkeyMode = 'tap' | 'ptt' | 'ptt-passive' | 'toggle' | 'unavailable
 
 export type HotkeyChord = 'opt-space' | 'fn'
 
+/**
+ * What the user meant by holding *that* key.
+ *
+ * M5b turned the two chords from alternatives into two verbs, and this is the
+ * whole reason the change was worth making:
+ *
+ *   dictate   ⌥Space. The words are the message. Typed instantly, with no
+ *             engine in the loop, ever — which is the "dictation never waits"
+ *             invariant restored to its unqualified form.
+ *   instruct  Fn. The words are a request. Always goes to the model, and
+ *             waiting a second or two is fine, because the user asked for work
+ *             rather than for transcription.
+ *
+ * Mull used to guess between these from a table of verbs — "tighten", "reply",
+ * "summarise" — because asking the model on every utterance cost 2.5s on the
+ * subscription lane. The table could not be made right: every phrasing nobody
+ * had listed got typed into the composer instead ("catch me up on this",
+ * "what did they decide"). A second key is the honest gate. The user knows
+ * which of the two things they are doing; Mull does not have to infer it.
+ */
+export type HotkeyIntent = 'dictate' | 'instruct'
+
+/** Which key means what. The tap reports the chord; this says what it is for. */
+export const CHORD_INTENT: Record<HotkeyChord, HotkeyIntent> = {
+  'opt-space': 'dictate',
+  fn: 'instruct'
+}
+
 export interface HotkeyServiceOptions {
   accelerator?: string
-  /** Which key to watch. `fn` is only possible on the tap rung. */
-  chord?: HotkeyChord
+  /**
+   * Which keys to watch. Both, normally — they are two verbs now, not two
+   * settings. Only the tap rung can see Fn at all, so the fallback rungs watch
+   * ⌥Space alone and `instruct` is simply unavailable there; Settings says so
+   * rather than the key silently doing the wrong thing.
+   */
+  chords?: HotkeyChord[]
   /** The sidecar, when one is running. Without it the tap rung is skipped. */
   sidecar?: SidecarApi | null
   /**
@@ -40,8 +73,8 @@ export interface HotkeyServiceOptions {
    * not something a test run should do to the machine it runs on.
    */
   loadUiohook?: () => UiohookLike
-  onStart: () => void
-  onStop: () => void
+  onStart: (intent: HotkeyIntent) => void
+  onStop: (intent: HotkeyIntent) => void
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
 }
 
@@ -69,7 +102,7 @@ export class HotkeyService {
   private sidecarTapRunning = false
   private offHotkey: (() => void) | null = null
   private readonly accelerator: string
-  readonly chord: HotkeyChord
+  readonly chords: HotkeyChord[]
   private readonly log: NonNullable<HotkeyServiceOptions['log']>
   mode: HotkeyMode = 'unavailable'
   /** Why the passive listener could not be loaded, if it could not. */
@@ -83,7 +116,7 @@ export class HotkeyService {
 
   constructor(private readonly options: HotkeyServiceOptions) {
     this.accelerator = options.accelerator ?? 'Alt+Space'
-    this.chord = options.chord ?? 'opt-space'
+    this.chords = options.chords ?? ['opt-space', 'fn']
     this.log = options.log ?? (() => {})
   }
 
@@ -97,15 +130,20 @@ export class HotkeyService {
   }): Promise<HotkeyMode> {
     if (await this.trySidecarTap()) {
       this.mode = 'tap'
-      this.log('info', 'hotkey mode: tap', { chord: this.chord })
+      this.log('info', 'hotkey mode: tap', { chords: this.chords })
       return this.mode
     }
 
-    if (this.chord === 'fn') {
-      // Only the tap can see Fn. Rather than silently watching a different key
-      // than the one Settings claims, say so — the fallback still runs, so the
-      // user keeps a working hotkey while they fix the permission.
-      this.log('warn', 'hotkey: Fn needs the sidecar event tap; falling back to ⌥Space')
+    if (this.chords.includes('fn')) {
+      // Only the tap can see Fn, and Fn is the instruct key. Losing it is worth
+      // a line in the log and a line in Settings: dictation still works, but
+      // "summarise this" has no key to arrive on until Input Monitoring is
+      // granted. Silently watching ⌥Space for both would be worse — it would
+      // put the guessing back.
+      this.log(
+        'warn',
+        'hotkey: Fn needs the sidecar event tap — instructions are unavailable until Input Monitoring is granted'
+      )
     }
 
     const claimed = this.tryGlobalShortcut(globalShortcut)
@@ -132,15 +170,21 @@ export class HotkeyService {
     if (!sidecar) return false
 
     try {
-      const result = await sidecar.startHotkeyTap({ chord: this.chord, swallow: true })
+      const result = await sidecar.startHotkeyTap({ chords: this.chords, swallow: true })
       if (!result.started) {
         this.tapReason = result.reason
         this.log('info', `hotkey: sidecar tap unavailable (${result.reason ?? 'unknown'})`)
         return false
       }
       if (!result.swallowing) {
-        // True for Fn, which the window server will not let anyone consume.
-        this.log('info', `hotkey: watching ${this.chord}, but the app still receives it`)
+        this.log('info', 'hotkey: watching the chord, but the app still receives it')
+      }
+      if (this.chords.includes('fn')) {
+        // Fn is never consumable: the window server acts on the globe key above
+        // this layer. Whatever "Press 🌐 key to" is set to in System Settings
+        // fires as well as Mull, so the onboarding tells the user to set it to
+        // "Do Nothing". Logged because it is the single most likely surprise.
+        this.log('info', 'hotkey: Fn is observed but not consumed — macOS still acts on it')
       }
 
       const emitter = sidecar as Partial<SidecarClient>
@@ -152,9 +196,10 @@ export class HotkeyService {
         return false
       }
 
-      const handler = (event: { phase: 'down' | 'up' }): void => {
-        if (event.phase === 'down') this.options.onStart()
-        else this.options.onStop()
+      const handler = (event: { phase: 'down' | 'up'; chord: HotkeyChord }): void => {
+        const intent = CHORD_INTENT[event.chord] ?? 'dictate'
+        if (event.phase === 'down') this.options.onStart(intent)
+        else this.options.onStop(intent)
       }
       emitter.on('hotkey', handler)
       this.offHotkey = () => emitter.off?.('hotkey', handler)
@@ -203,23 +248,32 @@ export class HotkeyService {
     }
   }
 
+  // Every fallback rung watches ⌥Space and only ⌥Space, so everything below
+  // this line is dictation. Fn is invisible without the tap, and a rung that
+  // pretended otherwise would be back to guessing which of the two the user
+  // meant — the thing M5b exists to stop doing.
   private onHookEvent(event: PttKeyEvent): void {
     const action = this.machine?.handle(event)
-    if (action === 'start') this.options.onStart()
-    else if (action === 'stop') this.options.onStop()
+    if (action === 'start') this.options.onStart('dictate')
+    else if (action === 'stop') this.options.onStop('dictate')
   }
 
   private onShortcutPressed(): void {
     if (this.mode === 'toggle' || !this.machine) {
       // No key-up source: the same chord starts and stops.
       this.toggleActive = !this.toggleActive
-      if (this.toggleActive) this.options.onStart()
-      else this.options.onStop()
+      if (this.toggleActive) this.options.onStart('dictate')
+      else this.options.onStop('dictate')
       return
     }
     if (this.machine.isActive) return // key repeat via the shortcut
     this.machine.markStarted()
-    this.options.onStart()
+    this.options.onStart('dictate')
+  }
+
+  /** Can the user give Mull an instruction right now, or only dictate? */
+  get canInstruct(): boolean {
+    return this.mode === 'tap' && this.chords.includes('fn')
   }
 
   /** Force the machine back to rest — called on app blur / session change. */

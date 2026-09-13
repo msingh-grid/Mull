@@ -72,7 +72,7 @@ Minimum text size anywhere: 11px, and only for `--fs-label`/`--fs-chip`/`--fs-kb
 Non-activating floating panel (`type:'panel'`, transparent window, `focusable:false`). The panel paints `--paper`, `--r-panel`, `--shadow-hud`. Never translucent over wallpaper — the paper is opaque; legibility is never borrowed. Layout: `hud-top` row (orb 13px · waveform · transcript flex-1 · state label), then optional chips row (margin-top 10px), then optional card (margin-top 11px).
 
 **States** (class on the panel root):
-- `is-idle` — orb hollow (inset 1.5px ring in `--ink-3`), waveform static low ticks in `--ink-3`, transcript shows ghost hint (*"Hold ⌥Space and speak"*, serif italic `--ink-3`), label `IDLE` in `--ink-3`. Optional `last-action` ghost row: hairline-top, 11px `--ink-3`, "Applied · summary · time" + `⌥Z undo` kbd right-aligned.
+- `is-idle` — orb hollow (inset 1.5px ring in `--ink-3`), waveform static low ticks in `--ink-3`, transcript shows ghost hint (*"Hold ⌥Space to dictate · Fn to ask"*, serif italic `--ink-3`), label `IDLE` in `--ink-3`. The hint names both keys because a key nobody knows about is a feature that does not exist. Optional `last-action` ghost row: hairline-top, 11px `--ink-3`, "Applied · summary · time" + `⌥Z undo` kbd right-aligned.
 - `is-listening` — orb fills `--ink` + ping; bars animate in `--ink-2`; transcript streams live with `--ins` caret; label `LISTENING` in `--ink`; intent chip rises in as soon as the router decides.
 - `is-thinking` — same as listening but static waveform, label `THINKING`; used while the engine streams.
 - `is-preview` — diff or plan card open; label `THINKING` until card completes, then `PREVIEW`.
@@ -87,6 +87,8 @@ Non-activating floating panel (`type:'panel'`, transparent window, `focusable:fa
 | mem | `--mem-wash` | `--mem-edge` | `--mem` | glyph ◈; a real `<button>` with `aria-label="Show memory citation: {name}"` (hover deepens wash); opens citation popover |
 | dict | `--paper-bright` | `--hairline` | `--ink-2` | plain "Dictation" |
 | warn | `--warn-wash` | `--warn-edge` | `--warn` | e.g. "secure input — paused" |
+
+**The ask chip (M5b).** Holding Fn raises a `cmd` chip reading "asking Mull · Fn" *while the key is still down*. ⌥Space raises nothing — it is the default and needs no announcement. Fn does, because those words are about to leave the Mac and be acted on, and the moment to learn that is before letting go rather than after. It also makes a mis-press visible: Fn has a lot of neighbours.
 Key hints inside chips: mono 11px at 70% opacity.
 
 ### 6.3 Diff card

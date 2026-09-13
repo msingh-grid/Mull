@@ -270,6 +270,86 @@ routes to dictation, because it opens with `click`. Naming a control to press is
 the AX-clicking path this plan declines on purpose (see Stage 5) — and the
 useful half of that sentence, "send them a written message", works on its own.
 
+## M5b — the key is the intent
+
+Stage 4.1 fixed three sentences. Then these six were typed into a Slack
+composer, verbatim:
+
+```
+summarize this thread          what did they decide about the redlines
+catch me up on this            turn this thread into bullet points
+translate this to French       ask her when the vendor call is
+```
+
+The verb table was never going to stop doing this. Every phrasing nobody had
+listed got typed; adding the missing verb fixed that one sentence and nothing
+else; the table grew until nobody could reason about it.
+
+### Why the table existed at all
+
+Not a preference — a measurement. `scripts/probe-router.ts` asks the warm
+subscription lane to decide *and* do the work in one streaming turn, so the wait
+is time-to-first-token rather than time-to-completion. If the M4 figure of 882 ms
+had held, the gate could simply have been deleted. It does not:
+
+```
+✓ decided  2566ms  first-token  2534ms  COMPOSE   "summarize this thread"
+✓ decided  1784ms  first-token  1784ms  DICTATE   "and I will send the deck tonight"
+✓ decided  6520ms  first-token  6492ms  DICTATE   "thanks that really helped"
+✓ decided 19825ms  first-token 19825ms  DICTATE   "send Priya the numbers"
+
+decided: p50 2541ms · min 1784ms · max 19825ms · 8/10 correct
+```
+
+The Claude Code harness costs ~2.5 s **in front of** the stream, with a 20-second
+tail. Streaming does not rescue it, and whisper-cli is batch, so the router
+cannot run during the hold either. On the subscription lane the model cannot sit
+on the critical path of every utterance. That is the constraint the verb table
+was working around, and no prompt work moves it.
+
+Worth noting from the same run: the judgement was 8/10, and both misses were the
+model disagreeing with the rules rather than failing to understand. The model
+still needs the guidance the regexes encoded — but as prose, which generalises
+to "catch me up on this" without anyone adding a word to a list.
+
+### The fix: a second key
+
+| Key | Means | Cost |
+|---|---|---|
+| ⌥Space | these words are the message | 0 ms, no engine, ever |
+| **Fn** | do something with these words | the model, always |
+
+The user knows which of the two things they are doing. A key press says so with
+no inference at all, and the "dictation never waits" invariant goes back to its
+unqualified form — it had been narrowed twice (M4.1, M5a) and both narrowings
+are now reverted.
+
+**What was deleted.** `router.ts` went from 418 lines to 164: `TIER_A`, `TIER_B`,
+`TIER_C`, `SEND_COMPOSE`, `STOPLIST`, `DEICTIC`, `TARGET_NOUN`, `WRITING_NOUN`,
+`PREAMBLE`, `mightBeInstruction`, `mightBeCompose`, `looksLikeInstruction`,
+`worthAsking`, and the 88-case fixture table that existed to defend them.
+
+**What survived, and why.** `justSend` and `wantsSend` read the user's own
+transcript and stay on the main path — they are not intent detection, they are
+the authorisation check that keeps an irreversible act out of the model's hands.
+And `route()` remains as the degraded fallback for "Fn pressed, no engine": it
+picks a lane from where the caret is rather than from the words, because
+language is precisely what it has no business judging.
+
+**Fn cannot be swallowed.** The window server acts on the globe key above the
+tap layer, so whatever "Press 🌐 key to" is set to fires as well as Mull.
+Settings says to set it to *Do Nothing*, and the sidecar reports `swallowing`
+for ⌥Space only rather than claiming a consumption it cannot deliver.
+
+**Fn needs Input Monitoring.** No other rung can see it, so on a Mac without the
+permission dictation works and instructions have nowhere to arrive. `canInstruct`
+carries that to Settings and the menu bar rather than leaving a dead key.
+
+Sidecar protocol 6: `startHotkeyTap` takes `chords` rather than one `chord`, and
+`HotkeyTap` watches both with independent held state — a chord's key-down is
+ignored while another is mid-press, so one utterance at a time is enforced in
+Swift rather than left for the host to untangle.
+
 ## Stage 5 — Reading somewhere else
 
 *"Read abilities to navigate to other chat and gather context."* This is the one

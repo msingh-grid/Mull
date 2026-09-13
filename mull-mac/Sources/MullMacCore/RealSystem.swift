@@ -583,11 +583,12 @@ public final class RealSystem: SystemActions {
 
     // MARK: - Hotkey tap (M3)
 
-    public func startHotkeyTap(chord: String, swallow: Bool) -> (started: Bool, reason: String?) {
-        guard let parsed = HotkeyTap.Chord(rawValue: chord) else {
+    public func startHotkeyTap(chords: [String], swallow: Bool) -> (started: Bool, reason: String?) {
+        let parsed = chords.compactMap(HotkeyTap.Chord.init(rawValue:))
+        guard parsed.count == chords.count, !parsed.isEmpty else {
             return (false, "unknown-chord")
         }
-        return hotkeyTap.start(chord: parsed, swallow: swallow)
+        return hotkeyTap.start(chords: parsed, swallow: swallow)
     }
 
     public func stopHotkeyTap() -> Bool {

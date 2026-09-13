@@ -31,7 +31,12 @@ export interface HudView {
   interactive: boolean
 }
 
-const GHOST_HINT = 'Hold ⌥Space and speak'
+/**
+ * The idle line, and the only place most people will ever learn there are two
+ * keys. Worth the extra four words: a key nobody knows about is a feature that
+ * does not exist.
+ */
+const GHOST_HINT = 'Hold ⌥Space to dictate · Fn to ask'
 
 export function hudView(state: HudState, now = Date.now()): HudView {
   const card = state.card

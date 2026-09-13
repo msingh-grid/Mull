@@ -25,14 +25,14 @@ const noHook = (): never => {
 
 /** A sidecar that can deliver notifications, like the real client. */
 class TapSidecar extends EventEmitter {
-  started: Array<{ chord: string; swallow?: boolean }> = []
+  started: Array<{ chords: string[]; swallow?: boolean }> = []
   stopped = 0
 
   constructor(private readonly outcome: { started: boolean; reason?: string; swallowing?: boolean } = { started: true }) {
     super()
   }
 
-  async startHotkeyTap(params: { chord: string; swallow?: boolean }) {
+  async startHotkeyTap(params: { chords: string[]; swallow?: boolean }) {
     this.started.push(params)
     return {
       started: this.outcome.started,
@@ -80,7 +80,8 @@ describe('HotkeyService ladder', () => {
     })
 
     expect(await service.start(gs)).toBe('tap')
-    expect(sidecar.started).toEqual([{ chord: 'opt-space', swallow: true }])
+    // Both chords, always — they are two verbs now, not a preference.
+    expect(sidecar.started).toEqual([{ chords: ['opt-space', 'fn'], swallow: true }])
     expect(gs.claimed).toEqual([])
   })
 
@@ -147,7 +148,7 @@ describe('HotkeyService ladder', () => {
     })
 
     expect(await service.start(shortcuts())).toBe('toggle')
-    expect(sidecar.hotkeyTapChord).toBeNull()
+    expect(sidecar.hotkeyTapChords).toEqual([])
     expect(service.tapReason).toBe('no-notification-channel')
   })
 
@@ -161,28 +162,46 @@ describe('HotkeyService ladder', () => {
     expect(await service.start(shortcuts(false))).toBe('unavailable')
   })
 
-  it('asks the tap for Fn when that is the chosen chord', async () => {
+  /**
+   * The point of M5b: the chord is no longer a setting, it is the verb. ⌥Space
+   * says "these words are the message" and Fn says "do something with them",
+   * and knowing which is what Mull used to try to guess from a table of verbs.
+   */
+  it('reports which key was held, so the pipeline knows what was meant', async () => {
     const sidecar = new TapSidecar()
+    const starts: string[] = []
+    const stops: string[] = []
     const service = new HotkeyService({
-      chord: 'fn',
       sidecar: sidecar as unknown as SidecarApi,
       loadUiohook: noHook,
-      onStart: () => {},
-      onStop: () => {}
+      onStart: (intent) => starts.push(intent),
+      onStop: (intent) => stops.push(intent)
     })
+    await service.start(shortcuts())
 
-    expect(await service.start(shortcuts())).toBe('tap')
-    expect(sidecar.started[0]?.chord).toBe('fn')
+    sidecar.emit('hotkey', { phase: 'down', chord: 'opt-space' })
+    sidecar.emit('hotkey', { phase: 'up', chord: 'opt-space' })
+    sidecar.emit('hotkey', { phase: 'down', chord: 'fn' })
+    sidecar.emit('hotkey', { phase: 'up', chord: 'fn' })
+
+    expect(starts).toEqual(['dictate', 'instruct'])
+    expect(stops).toEqual(['dictate', 'instruct'])
+    expect(service.canInstruct).toBe(true)
   })
 
-  it('says so when Fn is asked for but only the fallback is available', async () => {
+  /**
+   * Only the tap can see Fn. Every rung below it watches ⌥Space alone, so
+   * dictation keeps working and instructions have nowhere to arrive — which
+   * Settings says out loud rather than leaving the key silently dead.
+   */
+  it('cannot offer instructions without the tap, and says so', async () => {
     const sidecar = new TapSidecar({ started: false, reason: 'no-input-monitoring' })
     const warnings: string[] = []
+    const starts: string[] = []
     const service = new HotkeyService({
-      chord: 'fn',
       sidecar: sidecar as unknown as SidecarApi,
-      loadUiohook: noHook,
-      onStart: () => {},
+      loadUiohook: fakeHook,
+      onStart: (intent) => starts.push(intent),
       onStop: () => {},
       log: (level, message) => {
         if (level === 'warn') warnings.push(message)
@@ -190,6 +209,7 @@ describe('HotkeyService ladder', () => {
     })
 
     await service.start(shortcuts())
+    expect(service.canInstruct).toBe(false)
     expect(warnings.some((line) => line.includes('Fn needs the sidecar event tap'))).toBe(true)
   })
 

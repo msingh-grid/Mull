@@ -56,9 +56,11 @@ final class StubSystem: SystemActions {
         harvestCalls.append((maxChars, deadlineMs, screenshot))
         return harvest
     }
-    func startHotkeyTap(chord: String, swallow: Bool) -> (started: Bool, reason: String?) {
-        (true, nil)
+    func startHotkeyTap(chords: [String], swallow: Bool) -> (started: Bool, reason: String?) {
+        hotkeyChords = chords
+        return (true, nil)
     }
+    var hotkeyChords: [String] = []
     func stopHotkeyTap() -> Bool { true }
     func insert(text: String, strategy: String, settleMs: Int) -> InsertOutcome {
         inserts.append((text, strategy, settleMs))

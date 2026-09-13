@@ -23,7 +23,8 @@ import {
   type FocusSnapshot
 } from './selection'
 import type { IntentRouter } from './intent'
-import { mightBeInstruction, wantsSend } from './router'
+import { wantsSend } from './router'
+import type { HotkeyIntent } from '../services/hotkey'
 import type { JournalStore } from '../store/journal'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 
@@ -115,6 +116,8 @@ export class DictationPipeline {
   private lingerTimer: NodeJS.Timeout | null = null
   /** Read during the hold; resolved by the time a normal utterance ends. */
   private focusPromise: Promise<FocusSnapshot> | null = null
+  /** Which key started this utterance. See `begin`. */
+  private intent: HotkeyIntent = 'dictate'
   private readonly now: () => number
   private readonly log: NonNullable<DictationDeps['log']>
 
@@ -172,8 +175,13 @@ export class DictationPipeline {
     if (rate > 0) this.sampleRate = rate
   }
 
-  begin(): void {
+  /**
+   * @param intent Which key was held. `dictate` never touches an engine —
+   *        that is the whole point of there being two keys.
+   */
+  begin(intent: HotkeyIntent = 'dictate'): void {
     if (this.phase !== 'idle') return
+    this.intent = intent
     if (this.lingerTimer) {
       clearTimeout(this.lingerTimer)
       this.lingerTimer = null
@@ -197,7 +205,7 @@ export class DictationPipeline {
       if (this.phase !== 'capturing') return
       // Announced before the user finishes speaking, so they can see what Mull
       // is looking at in time to change their mind (docs/DESIGN.md §7.5).
-      const chips = [focusChip(snapshot), readingChip(snapshot)].filter(
+      const chips = [askChip(this.intent), focusChip(snapshot), readingChip(snapshot)].filter(
         (chip): chip is HudChip => chip !== null
       )
       if (chips.length > 0) this.setState({ chips })
@@ -543,13 +551,17 @@ export class DictationPipeline {
     | null
   > {
     if (!this.deps.sculpt || !this.deps.intent || !this.focusPromise) return null
+    // ⌥Space is dictation and nothing else. No engine, no screen read sent
+    // anywhere, no pause — the invariant at the top of this file, back in its
+    // unqualified form now that a second key carries the other meaning.
+    if (this.intent !== 'instruct') return null
+
     let snapshot = await this.focusPromise
 
-    // Nothing highlighted that AX could see, but the words sound like an
-    // instruction about *something*. Ask the app the way every other Mac tool
-    // does — ⌘C — before concluding there is nothing to edit. Narrowly gated
-    // because it presses a key in someone else's app.
-    if (!snapshot.selection && mightBeInstruction(text)) {
+    // Nothing highlighted that AX could see. Ask the app the way every other
+    // Mac tool does — ⌘C — before concluding there is nothing to edit. Only on
+    // the instruct key, because it presses a key in someone else's app.
+    if (!snapshot.selection) {
       snapshot = await probeSelectionByCopy(this.deps.sidecar, snapshot, this.log)
     }
     const decision = await this.deps.intent.decide({
@@ -679,6 +691,18 @@ function focusChip(snapshot: FocusSnapshot): HudChip | null {
  *
  * Nothing read, no chip: there is no news in "Mull looked at nothing".
  */
+/**
+ * Which key is being held, said out loud while the user is still holding it.
+ *
+ * Only for Fn. ⌥Space is the default and needs no announcement — but Fn means
+ * the words are about to be sent somewhere and acted on, and the moment to
+ * learn that is *before* letting go, not after. It also makes a mis-press
+ * visible: Fn is right next to a lot of other keys.
+ */
+function askChip(intent: HotkeyIntent): HudChip | null {
+  return intent === 'instruct' ? { kind: 'cmd', id: 'ask', label: 'asking Mull', hint: 'Fn' } : null
+}
+
 function readingChip(snapshot: FocusSnapshot): HudChip | null {
   const context = snapshot.context
   if (!context) return null

@@ -34,7 +34,7 @@ describe('hudView', () => {
 
   it('shows the ghost hint only when idle and silent', () => {
     expect(hudView(state({})).transcript).toEqual({
-      text: 'Hold ⌥Space and speak',
+      text: 'Hold ⌥Space to dictate · Fn to ask',
       ghost: true,
       caret: false
     })
