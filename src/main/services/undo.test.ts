@@ -162,3 +162,85 @@ describe('UndoService', () => {
     expect(undo.peek()).toBeNull()
   })
 })
+
+describe('UndoService.undo(entryId)', () => {
+  it('reverses a specific entry, not merely the newest one', async () => {
+    const { undo, sidecar, journal, id } = setup()
+    // A later entry that is not undoable — ⌥Z would stop at the older one
+    // anyway, but the journal window points at this id directly.
+    journal.append({
+      intent: { kind: 'dictate', text: 'later' },
+      app: { bundleId: 'com.apple.mail', name: 'Mail' },
+      before: null,
+      after: 'later',
+      strategyUsed: 'paste',
+      status: 'applied',
+      summary: 'Dictation · Mail · “later”',
+      verified: null,
+      caret: null,
+      undoable: true
+    })
+
+    const result = await undo.undo(id)
+    expect(result.ok).toBe(true)
+    expect(sidecar.text).toBe('Hi there. ')
+    expect(journal.get(id)?.status).toBe('undone')
+  })
+
+  it('refuses an entry it has already undone', async () => {
+    const { undo, id } = setup()
+    expect((await undo.undo(id)).ok).toBe(true)
+
+    const again = await undo.undo(id)
+    expect(again.ok).toBe(false)
+    expect(again.reason).toBe('nothing-to-undo')
+    expect(again.message).toMatch(/already been undone/)
+  })
+
+  it('refuses an entry the store never considered undoable', async () => {
+    const { undo, journal } = setup()
+    const unverified = journal.append({
+      intent: { kind: 'dictate', text: 'pasted' },
+      app: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack' },
+      before: null,
+      after: 'pasted',
+      strategyUsed: 'paste',
+      status: 'applied',
+      summary: 'Dictation · Slack',
+      verified: null,
+      caret: null,
+      undoable: true // the store overrides this: verified is not true
+    })
+
+    const result = await undo.undo(unverified.id)
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('not-verified')
+  })
+
+  it('refuses an id that is not in the journal', async () => {
+    const { undo } = setup()
+    const result = await undo.undo('no-such-entry')
+    expect(result.ok).toBe(false)
+    expect(result.entry).toBeNull()
+  })
+
+  it('applies the same app gate as ⌥Z', async () => {
+    const { undo, id, sidecar } = setup({
+      app: { bundleId: 'com.apple.Notes', name: 'Notes', pid: 9 }
+    })
+    const result = await undo.undo(id)
+
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('different-app')
+    expect(sidecar.text).toContain(INSERTED)
+  })
+
+  it('applies the same changed-text gate as ⌥Z', async () => {
+    const { undo, id, sidecar } = setup({ text: 'Hi there. Send the deck today!' })
+    const result = await undo.undo(id)
+
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('text-changed')
+    expect(sidecar.text).toBe('Hi there. Send the deck today!')
+  })
+})

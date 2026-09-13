@@ -99,6 +99,8 @@ export const IPC = {
   journalUndo: 'mull:journal:undo',
   /** journal window -> main: undo one specific entry. */
   journalUndoEntry: 'mull:journal:undo-entry',
+  /** journal window -> main: the marks for one entry, diffed in main. */
+  journalDetail: 'mull:journal:detail',
   /** main -> journal window: the journal changed; re-read it. */
   journalChanged: 'mull:journal:changed',
 

@@ -61,6 +61,7 @@ export class UndoService {
     return this.deps.journal.lastUndoable()
   }
 
+  /** ⌥Z: reverse the most recent entry that can still be reversed. */
   async undoLast(): Promise<UndoOutcome> {
     const entry = this.deps.journal.lastUndoable()
     if (!entry) {
@@ -71,7 +72,43 @@ export class UndoService {
         message: 'Nothing to undo.'
       }
     }
+    return this.undoEntry(entry)
+  }
 
+  /**
+   * Undo one specific entry — what the journal window's per-row button does.
+   *
+   * Every gate below is the same one ⌥Z passes through, which is the point: a
+   * journal row whose Undo button took a shortcut the keyboard path doesn't
+   * would be a button that lies about what it does. The only thing this adds
+   * is the lookup, and it refuses an entry the store no longer considers
+   * undoable rather than re-deciding that question here.
+   */
+  async undo(entryId: string): Promise<UndoOutcome> {
+    const entry = this.deps.journal.get(entryId)
+    if (!entry) {
+      return { ok: false, entry: null, reason: 'nothing-to-undo', message: 'That entry is gone.' }
+    }
+    if (entry.status === 'undone') {
+      return {
+        ok: false,
+        entry,
+        reason: 'nothing-to-undo',
+        message: 'That one has already been undone.'
+      }
+    }
+    if (!entry.undoable) {
+      return {
+        ok: false,
+        entry,
+        reason: 'not-verified',
+        message: 'Mull couldn’t confirm that text when it was inserted, so it won’t remove it now.'
+      }
+    }
+    return this.undoEntry(entry)
+  }
+
+  private async undoEntry(entry: JournalEntry): Promise<UndoOutcome> {
     const inserted = entry.after ?? ''
     const restore = entry.before ?? ''
     if (!inserted) {

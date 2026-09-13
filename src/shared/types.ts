@@ -79,6 +79,15 @@ export type JournalDraft = Omit<JournalEntry, 'id' | 'at' | 'undoneAt'> & {
   at?: number
 }
 
+/**
+ * An entry as the journal window receives it. `changes` is computed in main
+ * from before/after so there is exactly one diff implementation in the app —
+ * the row's count and the expanded row's marks can never disagree.
+ */
+export interface JournalEntryView extends JournalEntry {
+  changes: number | null
+}
+
 // ---------------------------------------------------------------------------
 // Memory v0 — FTS5-backed working memory items (M5).
 // ---------------------------------------------------------------------------

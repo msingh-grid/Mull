@@ -10,6 +10,7 @@ import {
   type MullWindow
 } from '@shared/ipc'
 import type { PlanStep } from '@shared/hud'
+import type { JournalEntryView } from '@shared/types'
 import type { SidecarApi } from '@shared/sidecar-api'
 import { benchPath, journalPath, resolveSidecarPath } from './locations'
 import { Bench } from './bench'
@@ -46,7 +47,7 @@ let sidecar: SidecarApi & { dispose?: () => Promise<void> }
 let asr: AsrProvider
 
 /** Windows whose renderer exists. Each M3 stage adds one. */
-const BUILT_WINDOWS: MullWindow[] = []
+const BUILT_WINDOWS: MullWindow[] = ['journal']
 
 const WINDOW_SIZES: Record<MullWindow, { width: number; height: number; minWidth: number }> = {
   journal: { width: 760, height: 620, minWidth: 560 },
@@ -459,8 +460,41 @@ async function runUndo(): Promise<{ ok: boolean; message: string }> {
 // ---------------------------------------------------------------------------
 
 ipcMain.handle(IPC.ping, () => 'pong')
-ipcMain.handle(IPC.journalRecent, (_event, limit?: number) => journal?.recent(limit ?? 50) ?? [])
+/**
+ * Entries for the journal window, each carrying its change count.
+ *
+ * The count is computed here rather than in the renderer so the app has one
+ * diff implementation: the number on a row and the marks inside it come from
+ * the same call, and cannot describe different edits.
+ */
+ipcMain.handle(IPC.journalRecent, (_event, limit?: number): JournalEntryView[] => {
+  const entries = journal?.recent(limit ?? 50) ?? []
+  return entries.map((entry) => ({
+    ...entry,
+    changes:
+      entry.before !== null && entry.after !== null
+        ? diffText(entry.before, entry.after).changes
+        : null
+  }))
+})
+
+ipcMain.handle(IPC.journalDetail, (_event, id: string) => {
+  const entry = journal?.get(id)
+  if (!entry) return null
+  return { segments: diffText(entry.before ?? '', entry.after ?? '').segments }
+})
+
 ipcMain.handle(IPC.journalUndo, () => runUndo())
+
+ipcMain.handle(IPC.journalUndoEntry, async (_event, id: string) => {
+  if (!undo) return { ok: false, message: 'Undo is unavailable — Mull couldn’t open its journal.' }
+  const outcome = await undo.undo(id)
+  if (outcome.ok) notifyJournalChanged()
+  // The HUD says so too: an undo triggered from the journal window still
+  // happened in whatever app the user is looking at.
+  pipeline?.announce(outcome.ok ? 'applied' : 'error', outcome.message)
+  return { ok: outcome.ok, message: outcome.message }
+})
 
 // The controller's state, not the pipeline's: first paint must include an open
 // card, or a HUD that reloads mid-preview would come back showing nothing.

@@ -18,10 +18,12 @@ export default defineConfig({
     resolve: { alias: shared },
     build: {
       rollupOptions: {
-        // Two renderers: the HUD, and the hidden window that owns the mic.
+        // One entry per window: the HUD, the hidden mic window, and each of
+        // Mull's ordinary windows (docs/DESIGN.md §6.8).
         input: {
           index: resolve(__dirname, 'src/renderer/index.html'),
-          capture: resolve(__dirname, 'src/renderer/capture.html')
+          capture: resolve(__dirname, 'src/renderer/capture.html'),
+          journal: resolve(__dirname, 'src/renderer/journal.html')
         }
       }
     }

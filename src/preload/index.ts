@@ -6,7 +6,8 @@ import {
   type HudState,
   type MullWindow
 } from '@shared/ipc'
-import type { JournalEntry } from '@shared/types'
+import type { DiffSegment } from '@shared/hud'
+import type { JournalEntryView } from '@shared/types'
 
 /**
  * The bridge. Renderers get exactly these functions and nothing else — no
@@ -33,8 +34,10 @@ export interface MullApi {
     open: (window: MullWindow) => Promise<void>
   }
   journal: {
-    /** Newest entries first. */
-    recent: (limit?: number) => Promise<JournalEntry[]>
+    /** Newest entries first, each with its change count. */
+    recent: (limit?: number) => Promise<JournalEntryView[]>
+    /** The diff marks for one entry; computed in main, never here. */
+    detail: (id: string) => Promise<{ segments: DiffSegment[] } | null>
     /** Same path as ⌥Z; the result message is also shown on the HUD. */
     undoLast: () => Promise<{ ok: boolean; message: string }>
     /** Undo one specific entry, with the same refusal gates as ⌥Z. */
@@ -76,7 +79,9 @@ const api: MullApi = {
   },
 
   journal: {
-    recent: (limit) => ipcRenderer.invoke(IPC.journalRecent, limit) as Promise<JournalEntry[]>,
+    recent: (limit) => ipcRenderer.invoke(IPC.journalRecent, limit) as Promise<JournalEntryView[]>,
+    detail: (id) =>
+      ipcRenderer.invoke(IPC.journalDetail, id) as Promise<{ segments: DiffSegment[] } | null>,
     undoLast: () =>
       ipcRenderer.invoke(IPC.journalUndo) as Promise<{ ok: boolean; message: string }>,
     undoEntry: (id) =>
