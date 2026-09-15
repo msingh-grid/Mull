@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { UiTarget } from '@shared/sidecar-api'
 import { FakeSidecar } from '../services/sidecar'
 import { NavStepSchema, type NavStep } from '@shared/nav'
+import { NavKeySchema } from '@shared/sidecar-api'
 import { ActionExecutor, type Scan } from './actions'
 
 /**
@@ -205,16 +206,31 @@ describe('type — the only text the navigator can put anywhere', () => {
   })
 
   /**
-   * The one that matters. A composer is a text area and a search box is a text
-   * field, so the sidecar's own `textRoles` already refuses this — but an app
-   * could put a one-line reply box on `AXTextField`, so the name is checked too.
+   * It used to refuse this, and the refusal was a name check: a `SEARCH_FIELD`
+   * regex the title had to match. That is an allow-list of names, which fails
+   * the way every allow-list in this codebase has failed — an event title, a
+   * description, a comment box and a guest field all fall through it, which is
+   * to say every form in every app.
+   *
+   * What the check was really protecting was a message being *sent*, and typing
+   * is not sending. Text in a box is visible, is reversible, and does nothing
+   * until something presses Return — and nothing here can. See the note above
+   * `SEARCH_FIELD`'s grave in `actions.ts`.
    */
-  it('will not type into a message composer', async () => {
+  it('types into any text control, including a composer', async () => {
     const h = harness()
     await scanned(h.sidecar)
     const result = await h.run({ verb: 'type', index: 4, text: 'see you at five' })
-    expect(result.ok).toBe(false)
-    expect(h.sidecar.insertions).toEqual([])
+    expect(result.ok).toBe(true)
+    expect(h.sidecar.insertions).toEqual(['see you at five'])
+  })
+
+  // …and the reason that is not reckless, asserted where someone changing it
+  // would look: there is no verb that presses a key.
+  it('has no way to send what it typed', () => {
+    const verbs = NavStepSchema.options.map((option) => option.shape.verb.value)
+    expect(verbs).toEqual(['press', 'type', 'navKey', 'read', 'done'])
+    expect(NavKeySchema.options).not.toContain('return')
   })
 
   it('will not type into a button', async () => {
@@ -225,12 +241,19 @@ describe('type — the only text the navigator can put anywhere', () => {
     expect(h.sidecar.insertions).toEqual([])
   })
 
-  it('refuses a text field whose name is not a search box', async () => {
-    const h = harness([target(0, { title: 'Reply', role: 'AXTextField', kind: 'type' })])
+  /**
+   * The receipt that replaced the name guard. Typing anywhere is only
+   * acceptable if what it replaced is written down.
+   */
+  it('records what the field held before it wrote over it', async () => {
+    const h = harness([
+      target(0, { title: 'Title', role: 'AXTextField', kind: 'type', value: 'Untitled event' })
+    ])
     await scanned(h.sidecar)
-    const result = await h.run({ verb: 'type', index: 0, text: 'sure' })
-    expect(result).toMatchObject({ ok: false, refusedBy: 'not-a-search-field' })
-    expect(h.sidecar.insertions).toEqual([])
+    const result = await h.run({ verb: 'type', index: 0, text: 'Q3 review' })
+    expect(result).toMatchObject({ ok: true, before: 'Untitled event' })
+    expect(result.detail).toContain('was “Untitled event”')
+    expect(h.sidecar.insertions).toEqual(['Q3 review'])
   })
 })
 

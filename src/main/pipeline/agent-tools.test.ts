@@ -3,7 +3,16 @@ import type { UiTarget } from '@shared/sidecar-api'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 import { FakeSidecar } from '../services/sidecar'
 import { ActionExecutor } from './actions'
-import { STOPPED_MESSAGE, find, findTargets, look, note, press, type ToolContext } from './agent-tools'
+import {
+  STOPPED_MESSAGE,
+  find,
+  findTargets,
+  look,
+  note,
+  press,
+  setText,
+  type ToolContext
+} from './agent-tools'
 
 /**
  * The five things the agent can actually do, and the one thing it cannot do
@@ -211,6 +220,74 @@ describe('press', () => {
 
     expect(out.ok).toBe(false)
     expect(out.text).toMatch(/no target 9/)
+  })
+})
+
+describe('setText', () => {
+  const form = [
+    target(0, 'Save'),
+    target(1, 'Title', 'type'),
+    target(2, 'Add guests', 'type')
+  ]
+
+  it('puts text in, and says what it replaced', async () => {
+    const h = harness()
+    ;(h.sidecar as unknown as { overrides: { targets?: UiTarget[] } }).overrides.targets = [
+      ...form.slice(0, 1),
+      { ...(form[1] as UiTarget), value: 'Untitled event' },
+      ...form.slice(2)
+    ]
+    await look(h.context, { want: 'targets' }, sleep)
+    const out = await setText(h.context, { index: 1, expectTitle: 'Title', text: 'Q3 review' })
+
+    expect(out.ok).toBe(true)
+    expect(h.sidecar.insertions).toEqual(['Q3 review'])
+    expect(out.text).toContain('replacing “Untitled event”')
+    // Said out loud, because a model that has filled a form will otherwise go
+    // looking for a way to submit it — and there isn't one.
+    expect(out.text).toMatch(/Nothing has been submitted/)
+  })
+
+  it('refuses before anything has been looked at', async () => {
+    const h = harness()
+    const out = await setText(h.context, { index: 1, expectTitle: 'Title', text: 'x' })
+    expect(out.ok).toBe(false)
+    expect(h.sidecar.insertions).toEqual([])
+  })
+
+  /**
+   * A button is not a field, and saying which it is beats saying "no" — the
+   * model's next move should be `press`, and it will only get there if told.
+   */
+  it('will not type into something that does not take text', async () => {
+    const h = harness()
+    ;(h.sidecar as unknown as { overrides: { targets?: UiTarget[] } }).overrides.targets = form
+    await look(h.context, { want: 'targets' }, sleep)
+    const out = await setText(h.context, { index: 0, expectTitle: 'Save', text: 'x' })
+
+    expect(out.ok).toBe(false)
+    expect(out.text).toMatch(/does not take text/)
+    expect(out.text).toMatch(/Press it instead/)
+    expect(h.sidecar.insertions).toEqual([])
+  })
+
+  /**
+   * Unlike a press, which replaces the window. A run filling in four fields
+   * should not have to re-read the list four times.
+   */
+  it('keeps the scan, so a form can be filled in without re-reading it', async () => {
+    const h = harness()
+    ;(h.sidecar as unknown as { overrides: { targets?: UiTarget[] } }).overrides.targets = form
+    await look(h.context, { want: 'targets' }, sleep)
+    await setText(h.context, { index: 1, expectTitle: 'Title', text: 'Q3 review' })
+    expect(h.context.scan).not.toBeNull()
+
+    const second = await setText(h.context, {
+      index: 2,
+      expectTitle: 'Add guests',
+      text: 'priya@example.com'
+    })
+    expect(second.ok).toBe(true)
   })
 })
 

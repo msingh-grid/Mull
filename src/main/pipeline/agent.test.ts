@@ -47,6 +47,7 @@ type Move =
   | { tool: 'look'; want: 'text' | 'targets' | 'both' }
   | { tool: 'find'; query: string }
   | { tool: 'press'; index: number; title: string }
+  | { tool: 'setText'; index: number; title: string; text: string }
   | { tool: 'note'; text: string }
   | { tool: 'done'; found: boolean; because: string }
 
@@ -146,6 +147,12 @@ function harness(
         else if (move.tool === 'find') await request.handlers.find({ query: move.query })
         else if (move.tool === 'press')
           await request.handlers.press({ index: move.index, expectTitle: move.title })
+        else if (move.tool === 'setText')
+          await request.handlers.setText({
+            index: move.index,
+            expectTitle: move.title,
+            text: move.text
+          })
         else if (move.tool === 'note') await request.handlers.note({ text: move.text })
         else await request.handlers.done({ found: move.found, because: move.because })
       }
@@ -250,6 +257,32 @@ describe('Run', () => {
     expect(h.answers).toEqual([])
     expect(h.last().note).toMatch(/no Anil/)
     expect(h.runRow()?.status).toBe('failed')
+  })
+
+  /**
+   * Filling a form and stopping short of the button. The run that M-A could not
+   * do at all, and the one the vocabulary was widened for.
+   */
+  it('fills in a field and says so on the card, without submitting anything', async () => {
+    const h = harness(
+      [
+        { tool: 'look', want: 'targets' },
+        { tool: 'setText', index: 1, title: 'Title', text: 'Q3 review' },
+        { tool: 'done', found: false, because: 'filled in the title; the rest is yours to save' }
+      ],
+      { listed: [...targets('Save'), { ...targets('Title')[0]!, index: 1, kind: 'type' }] }
+    )
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.sidecar.insertions).toEqual(['Q3 review'])
+    // The text on the card, not just the field name: a write is the one act
+    // where what went in matters more than where it went.
+    const typed = h.last().steps.find((step) => step.verb === 'type')
+    expect(typed?.object).toContain('Q3 review')
+    expect(typed?.state).toBe('done')
+    expect(h.sidecar.chords).toEqual([])
   })
 
   it('still puts the window back when the loop throws', async () => {

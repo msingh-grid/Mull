@@ -17,6 +17,7 @@ import {
   MAX_AGENT_TURNS,
   NoteInputSchema,
   PressInputSchema,
+  SetTextInputSchema,
   toolName
 } from '@shared/agent'
 import { AGENT_SYSTEM_PROMPT, agentPrompt } from './prompts'
@@ -68,6 +69,7 @@ export interface AgentHandlers {
   look(input: { want: 'text' | 'targets' | 'both' }): Promise<string>
   find(input: { query: string; kind?: 'press' | 'type' }): Promise<string>
   press(input: { index: number; expectTitle: string }): Promise<string>
+  setText(input: { index: number; expectTitle: string; text: string }): Promise<string>
   note(input: { text: string }): Promise<string>
   done(input: { found: boolean; because: string }): Promise<string>
 }
@@ -143,6 +145,12 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentRunResult
         'Press one numbered thing from the current scan.',
         PressInputSchema.shape,
         async (input) => reply(await request.handlers.press(input))
+      ),
+      tool(
+        'setText',
+        'Put text into a field, a box or a combo. Replaces what is there. Nothing is submitted.',
+        SetTextInputSchema.shape,
+        async (input) => reply(await request.handlers.setText(input))
       ),
       tool(
         'note',

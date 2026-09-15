@@ -11,7 +11,15 @@ import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
 import { Trace } from '../trace'
 import type { ActionExecutor, Scan } from './actions'
-import { find, look, note, press, type ToolContext, type ToolOutcome } from './agent-tools'
+import {
+  find,
+  look,
+  note,
+  press,
+  setText,
+  type ToolContext,
+  type ToolOutcome
+} from './agent-tools'
 
 /**
  * Going to look somewhere else, and coming back — with the model driving.
@@ -72,6 +80,7 @@ export interface AgentDeps {
       look(input: { want: 'text' | 'targets' | 'both' }): Promise<string>
       find(input: { query: string; kind?: 'press' | 'type' }): Promise<string>
       press(input: { index: number; expectTitle: string }): Promise<string>
+      setText(input: { index: number; expectTitle: string; text: string }): Promise<string>
       note(input: { text: string }): Promise<string>
       done(input: { found: boolean; because: string }): Promise<string>
     }
@@ -259,6 +268,11 @@ export class AgentLane {
             act('find', `“${input.query}”`, () => find(context, input, this.sleep)),
           press: (input) =>
             act('press', `“${input.expectTitle}”`, () => press(context, input)),
+          setText: (input) =>
+            // The text on the card rather than the field name: a write is the
+            // one act where what went in matters more than where it went, and
+            // it is the only thing a watching user can check.
+            act('type', `“${input.text}” → ${input.expectTitle}`, () => setText(context, input)),
           note: (input) => act('note', input.text, () => note(context, input)),
           done: async (input) => {
             ending = input

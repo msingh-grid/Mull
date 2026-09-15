@@ -46,14 +46,26 @@ const DESTRUCTIVE =
   /\b(delete|remove|leave|archive|block|unsend|discard|trash|deactivate|unsubscribe|sign out|log out|log off)\b/i
 
 /**
- * What a `type` target has to look like.
+ * There is no name check on typing any more, and its absence is deliberate.
  *
- * Belt and braces over the sidecar's own `textRoles`, which already excludes
- * `AXTextArea` — a composer is a text area, a search box is a text field. This
- * adds the name check, because an app could plausibly put a one-line reply box
- * on `AXTextField` and the navigator has no business typing into it.
+ * There was one: a `SEARCH_FIELD` regex of `search|find|filter|jump to|…` that a
+ * `type` target's title had to match. It is gone for the same reason the M5b
+ * verb tables are gone — it was an **allow-list of names**, and the failure mode
+ * of an allow-list is that every phrasing nobody thought of falls through. Here
+ * that meant an event title, a description, a comment box and a guest field
+ * were all refused, which is to say: every form, in every app.
+ *
+ * What it was protecting was never really the field. It was protecting against
+ * a message being *sent*, and typing is not sending — text in a box is visible,
+ * is reversible, and does nothing until something presses Return. The guard
+ * that stops Return is elsewhere and unchanged: `ClassifiedIntent` has no
+ * `send`, `NavStepSchema` carries no keystroke, `navKey` is a separate enum
+ * from `keyChord` with no Return in it, and `AGENT_TOOLS` has no key verb.
+ *
+ * What remains is a capability check — the target must be a text control, which
+ * the sidecar decides from its role — plus a receipt: every write records what
+ * was in the field before it, so a row in the journal says what was replaced.
  */
-const SEARCH_FIELD = /search|find|filter|jump to|go to|channel|user|name|query|address|url|location/i
 
 // ---------------------------------------------------------------------------
 
@@ -62,7 +74,16 @@ export interface StepResult {
   /** One clause, for the card and the journal. Always set, including on ok. */
   detail: string
   /** Set when the step was refused here rather than by the sidecar. */
-  refusedBy?: 'destructive' | 'not-a-search-field' | 'no-such-target' | 'wrong-kind'
+  refusedBy?: 'destructive' | 'no-such-target' | 'wrong-kind'
+  /**
+   * What the field held before a `type` wrote over it.
+   *
+   * The receipt that replaced the name guard. Typing used to be allowed only in
+   * things called "search", which was a weak promise weakly kept; it is now
+   * allowed in any text control, and what makes that inspectable is a row
+   * saying exactly what was replaced.
+   */
+  before?: string
   /**
    * What a `read` step read. Set only by `read`, and only when it succeeded.
    *
@@ -268,15 +289,6 @@ export class ActionExecutor {
             refusedBy: 'wrong-kind'
           }
         }
-        if (!SEARCH_FIELD.test(`${target.title} ${target.help ?? ''}`)) {
-          // The one place the navigator could put words into someone's app, so
-          // it is allowed exactly where words are a query and nowhere else.
-          return {
-            ok: false,
-            detail: `“${target.title}” doesn’t look like a search box`,
-            refusedBy: 'not-a-search-field'
-          }
-        }
         const focused = await this.deps.sidecar.focusTarget({
           harvestId: scan.harvestId,
           index: step.index,
@@ -294,10 +306,21 @@ export class ActionExecutor {
           settleMs: profile.settleMs
         })
         if (!wrote.inserted) {
-          return { ok: false, detail: wrote.reason ?? 'the query would not go in' }
+          return { ok: false, detail: wrote.reason ?? 'the text would not go in' }
         }
         await this.sleep(STEP_SETTLE_MS)
-        return { ok: true, detail: `“${step.text}” into ${target.title}` }
+        // What was there before, from the scan the model was shown. The receipt
+        // that replaced the name guard: a row saying "typed X into Y, which
+        // held Z" is inspectable in a way "it looked like a search box" never
+        // was.
+        const held = target.value?.trim()
+        return {
+          ok: true,
+          detail: held
+            ? `“${step.text}” into ${target.title} (was “${held}”)`
+            : `“${step.text}” into ${target.title}`,
+          ...(held ? { before: held } : {})
+        }
       }
     }
   }
@@ -377,8 +400,10 @@ export class ActionExecutor {
           transcript: context.goal
         },
         app: context.app,
-        before: null,
-        after: null,
+        // What the field held, and what it holds now. Only a `type` fills
+        // these; a press replaces nothing.
+        before: result.before ?? null,
+        after: step.verb === 'type' && result.ok ? step.text : null,
         strategyUsed: null,
         status: result.ok ? 'applied' : 'failed',
         summary: `${step.verb} · ${result.detail}`,

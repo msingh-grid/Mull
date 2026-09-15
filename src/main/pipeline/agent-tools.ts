@@ -267,6 +267,72 @@ export async function press(
   }
 }
 
+/**
+ * Put text into a field.
+ *
+ * Shares `press`'s discipline exactly — the scan must exist, the index must be
+ * in it, the title is quoted back and checked before anything is written — and
+ * adds one thing a press does not need: it says what the field held before, so
+ * a write that replaced something says so on the card and in the journal.
+ *
+ * It does **not** drop the scan afterwards. Typing into a form rarely rebuilds
+ * the window, and a run filling in four fields should not have to re-read the
+ * list four times. A press does; this does not; and when an autocomplete does
+ * replace the list, the next `look` says so through `describeChange`.
+ */
+export async function setText(
+  context: ToolContext,
+  input: { index: number; expectTitle: string; text: string }
+): Promise<ToolOutcome> {
+  if (context.stopped()) return STOPPED
+
+  const scan = context.scan
+  if (!scan) {
+    return {
+      text: 'you have not looked at this window yet — call look or find first',
+      detail: 'typed before looking',
+      ok: false
+    }
+  }
+  const target = scan.targets[input.index]
+  if (!target) {
+    return {
+      text: `there is no target ${input.index} in the list you were shown`,
+      detail: `no target ${input.index}`,
+      ok: false
+    }
+  }
+  if (target.kind !== 'type') {
+    return {
+      text:
+        `“${target.title}” does not take text — it is a ${target.role.replace(/^AX/, '').toLowerCase()}. ` +
+        'Press it instead, or find a field.',
+      detail: `${target.title} is not a text control`,
+      ok: false
+    }
+  }
+
+  context.steps += 1
+  const result = await context.executor.perform(
+    { verb: 'type', index: input.index, text: input.text },
+    scan,
+    { ...context.plan, step: context.steps }
+  )
+
+  if (!result.ok) {
+    return { text: `that did not work: ${result.detail}`, detail: result.detail, ok: false }
+  }
+  return {
+    text:
+      `put “${input.text}” into “${target.title}”` +
+      (result.before ? `, replacing “${result.before}”. ` : '. ') +
+      'Nothing has been submitted — look again to see what the field did with it.',
+    detail: result.detail,
+    ok: true,
+    ...(result.entryId ? { entryId: result.entryId } : {})
+  }
+}
+
 export function note(context: ToolContext, input: { text: string }): ToolOutcome {
   if (context.stopped()) return STOPPED
   return { text: 'noted', detail: input.text, ok: true }

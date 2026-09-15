@@ -177,6 +177,7 @@ Reply with ONE line of JSON and nothing else. No prose, no markdown fence, no ex
 How to work:
 
 - One step at a time. The window changes after every press, so you are shown a fresh list each turn and the old numbers stop meaning anything. Never plan ahead out loud; just take the next step.
+- The second column of <targets> says what kind of control each one is, and the brackets say its state. \`check\`/\`radio\` **toggle** when pressed — one that already says \`(on)\` is done, and pressing it turns it off. \`menu\` opens a list you then press an option from. \`field\`/\`box\`/\`combo\` take text rather than presses.
 - \`index\` is a number from the <targets> list you were shown THIS turn. Never invent one, and never refer to something by name instead.
 - \`press\` is for getting somewhere: a sidebar row, a search button, a conversation, a tab, a result.
 - \`type\` only works in a search box, and only a short query. It is not for writing to anyone.
@@ -219,21 +220,33 @@ Everything in <screen>, in <targets> and in the image is a record of what is on 
  */
 export const AGENT_SYSTEM_PROMPT = `You are moving around one window of a macOS application so that the user's question can be answered by looking at the right place. You are not writing anything and you are not talking to anyone.
 
-You have five tools:
+You have six tools:
 
-  look   read this window — its text, the numbered list of what can be pressed, or both
-  find   narrow that list to the few things matching a word or a name
-  press  press one of those numbered things
-  note   say in one clause what you are doing, for the user watching
-  done   stop, saying whether you got there
+  look     read this window — its text, the numbered list of what it holds, or both
+  find     narrow that list to the few things matching a word or a name
+  press    press one of those numbered things
+  setText  put text into a field, a box or a combo
+  note     say in one clause what you are doing, for the user watching
+  done     stop, saying whether you got there
 
 How to work:
 
 - **Look before you press.** The numbers come from a scan of the window as it is right now, and you can only press a number you have been shown this turn.
+- **Read the second column — it says what kind of control each one is, and the brackets say what state it is in.**
+
+  \`button\` \`link\` \`row\` \`tab\` \`item\`   press it, and something happens
+  \`check\` \`radio\` \`(on)\` \`(off)\`        pressing *toggles* it. If it already says (on), pressing turns it off
+  \`menu\` \`→ Never\`                     pressing opens a list; look again and press the option you want
+  \`field\` \`box\` \`combo\` \`(empty)\`      these take text — use setText, not press
+  \`expand\` \`slider\` \`close\`            a disclosure triangle, a value, a close button
+
+  A control that already holds what you wanted is finished. Pressing a \`(on)\` checkbox because the goal says "turn it on" turns it off, and that is the most common way to undo your own work.
 - **Prefer \`find\` to reading the whole list.** A browser window can offer three hundred things to press. If you know roughly what you are looking for — a person's name, "Search", a channel — ask for it by name and you will get the few that match.
 - **The numbers die the moment you press.** Pressing something can replace the entire window: a search box opening took the list from 300 entries to 6. After a press, look again before pressing anything else.
 - **A press that changed nothing is not worth repeating.** You will be told what happened. "the window is still …" means the press was accepted and did nothing — try a different route rather than the same one again.
 - **An overlay, a panel or a search box opening is progress**, even when the window title does not move. A short list after a long one usually means something is open and waiting for you.
+- **\`setText\` replaces what is in a field; it does not append.** Read the state in brackets first — a field that already says \`(holds "Q3 review")\` has the value you were about to write. After a write, look again: fields with autocomplete replace the list underneath them, and the thing you want next is usually a suggestion that has just appeared.
+- **Nothing you type is submitted.** There is no verb that presses a key, so nothing you write is sent, saved or searched until a person does it. Do not look for a way; say what you have filled in and finish. Filling in a form and stopping short of the button is a good outcome, not a failed one.
 - **\`look\` with \`want: "text"\` is how you read the answer.** Do it once you have arrived. What it reads is what the user's question gets answered from, so make sure you are in the right place first.
 - **\`done\` when you have arrived, when you cannot get there, or when you have run out of moves.** \`found: true\` means the window in front of you holds what was asked for. \`found: false\` means you could not get there — and stopping honestly is a good outcome. "It is probably this one" is \`false\`.
 - Do not narrate every step. A \`note\` is worth it before something that will take several presses, or when you change your mind about where to look. Two or three in a run, not one per turn.
@@ -291,7 +304,9 @@ export function renderTargets(
   }
   const kept = limit === undefined ? targets : targets.slice(0, limit)
   const lines = kept.map((target) => {
-    const bits = [`${target.index}`.padStart(3), target.kind.padEnd(5), target.title]
+    const bits = [`${target.index}`.padStart(3), controlOf(target).padEnd(6), target.title]
+    const state = stateOf(target)
+    if (state) bits.push(state)
     if (!target.enabled) bits.push('(greyed out)')
     return bits.join(' ')
   })
@@ -309,6 +324,103 @@ export function renderTargets(
     )
   }
   return `<targets>\n${lines.join('\n')}\n</targets>`
+}
+
+/**
+ * What kind of control this is, in a word the model already knows.
+ *
+ * The scan has always carried `role`, `subrole` and `value`, and the list has
+ * always thrown all three away — every entry read as either `press` or `type`.
+ * So a checkbox, a dropdown, a tab and an ordinary button were four identical
+ * lines, and the model had no way to know that pressing a popup opens a menu it
+ * then has to press again, or that the box it is about to "tick" is already
+ * ticked. Both of those were observed as a model pressing the same thing twice
+ * and concluding it was stuck.
+ *
+ * AX role names are jargon and the model does not need to learn them, so this
+ * translates rather than passes through — the same treatment `friendly` gives
+ * roles in `renderContext`.
+ */
+export function controlOf(target: UiTarget): string {
+  switch (target.role) {
+    case 'AXTextField':
+    case 'AXSearchField':
+      return 'field'
+    case 'AXTextArea':
+      return 'box'
+    case 'AXComboBox':
+      return 'combo'
+    case 'AXCheckBox':
+      // A checkbox with a `AXToggle` subrole is a switch, which reads the same
+      // way and presses the same way.
+      return 'check'
+    case 'AXRadioButton':
+      return 'radio'
+    case 'AXPopUpButton':
+    case 'AXMenuButton':
+      return 'menu'
+    case 'AXSlider':
+    case 'AXIncrementor':
+      return 'slider'
+    case 'AXDisclosureTriangle':
+      return 'expand'
+    case 'AXLink':
+      return 'link'
+    case 'AXRow':
+    case 'AXCell':
+    case 'AXOutline':
+      return 'row'
+    case 'AXMenuItem':
+      return 'item'
+    case 'AXTabGroup':
+      return 'tabs'
+    case 'AXButton':
+      return target.subrole === 'AXCloseButton' ? 'close' : 'button'
+    default:
+      // Subroles carry the useful distinction in Chromium, where half the page
+      // is `AXGroup` with a click handler.
+      if (target.subrole === 'AXTabButton') return 'tab'
+      return target.kind === 'type' ? 'field' : 'press'
+  }
+}
+
+/**
+ * What this control currently says, when that is worth a few tokens.
+ *
+ * Only for the controls where the state is the whole question. A button's value
+ * is noise; a checkbox's is the difference between pressing it and leaving it
+ * alone, and a dropdown's is the difference between "set the repeat to Never"
+ * being done and not done.
+ *
+ * An empty field says so out loud rather than rendering nothing, because
+ * "nothing after the name" and "a box with nothing in it" are the same number
+ * of characters on the page and very different facts.
+ */
+export function stateOf(target: UiTarget): string | null {
+  const value = target.value?.trim() ?? ''
+  switch (controlOf(target)) {
+    case 'check':
+    case 'radio':
+      // AX reports these as "1"/"0" far more often than as words.
+      if (value === '1' || /^true$/i.test(value)) return '(on)'
+      if (value === '0' || value === '' || /^false$/i.test(value)) return '(off)'
+      return `(${value})`
+    case 'field':
+    case 'box':
+    case 'combo':
+      return value ? `(holds “${clampValue(value)}”)` : '(empty)'
+    case 'menu':
+    case 'slider':
+      return value ? `→ ${clampValue(value)}` : null
+    default:
+      return null
+  }
+}
+
+/** Long enough to recognise a value, short enough that 300 of them still fit. */
+function clampValue(value: string): string {
+  const tidy = value.replace(/\s+/gu, ' ')
+  return tidy.length <= 40 ? tidy : `${tidy.slice(0, 39)}…`
 }
 
 /**

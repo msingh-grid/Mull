@@ -16,16 +16,29 @@ import { z } from 'zod'
  * for it every turn. What has *not* changed is that the vocabulary is closed and
  * the closure is the safety argument:
  *
- *   - no verb writes text anywhere
- *   - no verb carries a keystroke, so ⏎ still cannot be named
+ *   - **no verb carries a keystroke, so ⏎ still cannot be named**
  *   - no verb leaves the frontmost window, so nothing is opened, switched or
  *     activated
  *
- * A model that wanted to send a message still **could not describe the act**.
- * That is a much stronger statement than a model that has been asked not to, and
- * it does not depend on the model being well behaved or on the screen it was
- * shown being free of instructions. M-B and M-C widen this; each widening is a
- * decision taken on its own, with the gate in `canUseTool` to match.
+ * The first of those is the load-bearing one, and it is what everything else
+ * rests on. A model that wanted to send a message **could not describe the act**
+ * — a much stronger statement than one that has been asked not to, and it does
+ * not depend on the model being well behaved or on the screen it was shown being
+ * free of instructions.
+ *
+ * ### One line used to be here and is not any more
+ *
+ * *"no verb writes text anywhere."* `setText` writes text. That widening was
+ * taken deliberately, and the argument is that it does not touch the closure
+ * above: a message that has been typed but cannot be sent is a message sitting
+ * in a box the user can see and clear. Typing is visible and reversible;
+ * sending is neither, and sending is still unreachable.
+ *
+ * What that costs is real and worth naming. Mull can now put text into a
+ * composer, and a user with the muscle memory to press ⏎ can send it. The
+ * mitigations are that the card shows every write as it happens, and the journal
+ * records what each field held before. Locomotion and commit are still out; each
+ * is its own decision, with the gate in `canUseTool` to match.
  *
  * ### Targets are integers, never names
  *
@@ -71,6 +84,41 @@ export const PressInputSchema = z.object({
 })
 
 /**
+ * Put text into a field, a box or a combo.
+ *
+ * The first widening of this vocabulary, and the reasoning is worth keeping
+ * where the schema is rather than only in a commit message.
+ *
+ * Typing used to be unreachable here entirely, and in the older lane it was
+ * reachable only for controls whose *name* matched `search|find|filter|…`. That
+ * name check was an allow-list, and it failed the way allow-lists always fail in
+ * this codebase: an event title, a description, a comment and a guest field all
+ * fall through it, which is to say every form in every app.
+ *
+ * **The boundary moved rather than opened.** What the name check was really
+ * protecting was a message being *sent*, and typing is not sending: text in a
+ * box is visible, is reversible, and does nothing until something presses
+ * Return. Nothing in this vocabulary can press a key — there is still no verb
+ * that carries one, so `AGENT_TOOLS` below remains unable to describe the act.
+ * That closure is what makes this safe, and it is the thing to check before
+ * widening anything else.
+ *
+ * Two consequences worth stating: the field's previous contents are journalled,
+ * so a write says what it replaced; and `⌥Z` does not take this back, because
+ * undo follows the user's own caret rather than a run's.
+ */
+export const SetTextInputSchema = z.object({
+  index: z.number().int().nonnegative().describe('an index from the current scan'),
+  expectTitle: z
+    .string()
+    .describe('that target’s title as you were shown it — checked before the write'),
+  text: z
+    .string()
+    .max(2_000)
+    .describe('what to put in it. Replaces whatever is there; it does not append')
+})
+
+/**
  * Think out loud, once, in a sentence the user can read.
  *
  * Cheap externalised memory, and the only part of the model's reasoning that
@@ -100,7 +148,7 @@ export const DoneInputSchema = z.object({
 })
 
 /** Every tool, and nothing else. The list the loop is built from. */
-export const AGENT_TOOLS = ['look', 'find', 'press', 'note', 'done'] as const
+export const AGENT_TOOLS = ['look', 'find', 'press', 'setText', 'note', 'done'] as const
 export type AgentToolName = (typeof AGENT_TOOLS)[number]
 
 /**

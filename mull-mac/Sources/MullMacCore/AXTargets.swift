@@ -127,13 +127,33 @@ public enum AXTargets {
 
     /// Roles that can hold typed text.
     ///
-    /// Separated from the press targets because typing is the more dangerous of
-    /// the two: a press is one event in a place the user can see, and a typed
-    /// string lands somewhere that might be a message composer. The executor
-    /// refuses to type into anything that is not on this list, and refuses
-    /// again on anything whose name suggests a composer rather than a search.
+    /// Separated from the press targets because the two want different guards:
+    /// a press is one event in a place the user can see, and a typed string has
+    /// to land in something that actually takes text.
+    ///
+    /// ### Why `AXTextArea` is on this list now
+    ///
+    /// It was deliberately left off, on the reasoning that a message composer is
+    /// a text area while a search box is a text field — so excluding the role
+    /// meant the navigator could not focus a composer even before anything
+    /// checked what the thing was called.
+    ///
+    /// That guard was aimed at the wrong act. What makes a composer dangerous is
+    /// **sending**, not typing: text that appears in a box is visible, is
+    /// reversible, and does nothing until something presses Return. And the
+    /// closure that makes Return unreachable is elsewhere and unchanged —
+    /// `ClassifiedIntent` has no `send`, `NavStepSchema` carries no keystroke,
+    /// `navKey` is a separate enum from `keyChord` with no Return in it, and
+    /// `AGENT_TOOLS` has no key verb. Four layers, none of which depends on
+    /// guessing which box is a composer.
+    ///
+    /// Meanwhile the cost of the exclusion was the whole feature: an event
+    /// title, a description, a comment, a guest list and every multi-line field
+    /// in every app are text areas, so "fill this in" was unreachable in
+    /// general in order to avoid one specific field it could not reliably
+    /// identify anyway.
     private static let textRoles: Set<String> = [
-        "AXTextField", "AXSearchField", "AXComboBox"
+        "AXTextField", "AXSearchField", "AXComboBox", "AXTextArea"
     ]
 
     /// Roles that are never worth offering even when they advertise `AXPress`.
@@ -507,20 +527,18 @@ public enum AXTargets {
         }
     }
 
-    /// Put the caret in a search field — and nowhere else.
+    /// Put the caret in something that takes text.
     ///
-    /// This exists so the navigator can type a query, and it deliberately does
-    /// not type: the caller focuses here and then uses the ordinary
-    /// `insertText` chain, which already knows each app's paste timing and
-    /// already reads back what it wrote. Two verbs rather than one, because
-    /// "put the caret somewhere" and "write text" want different guards.
+    /// This deliberately does not type: the caller focuses here and then uses
+    /// the ordinary `insertText` chain, which already knows each app's paste
+    /// timing and already reads back what it wrote. Two verbs rather than one,
+    /// because "put the caret somewhere" and "write text" want different
+    /// guards.
     ///
-    /// **`AXTextArea` is not on `textRoles`, and that is load-bearing.** A
-    /// message composer is a text area (or, in Chromium, a contenteditable
-    /// group); a search box is a text field. Slack's scan bears this out — its
-    /// only `type` target is the new-message recipient box, and the composer
-    /// does not appear at all. So the navigator cannot focus a composer even
-    /// before the executor checks what the thing is called.
+    /// The role check is a capability check, not a safety one — see
+    /// `textRoles`. It answers "will this element accept a caret at all", and
+    /// the thing that keeps text from being *sent* lives in the step and tool
+    /// vocabularies rather than here.
     public static func focus(
         harvestId: String, index: Int, expectRole: String?, expectTitle: String?
     ) -> Outcome {

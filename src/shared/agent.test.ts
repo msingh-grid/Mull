@@ -6,6 +6,7 @@ import {
   LookInputSchema,
   NoteInputSchema,
   PressInputSchema,
+  SetTextInputSchema,
   toolName
 } from './agent'
 
@@ -66,6 +67,34 @@ describe('press', () => {
   })
 })
 
+describe('setText', () => {
+  it('takes an index, the title it was shown with, and the text', () => {
+    expect(
+      SetTextInputSchema.safeParse({ index: 3, expectTitle: 'Title', text: 'Q3 review' }).success
+    ).toBe(true)
+  })
+
+  // Same read-back discipline as a press, for the same reason: a stale index
+  // must refuse rather than write into whatever moved into that slot.
+  it('refuses a write that does not say what it thinks it is writing into', () => {
+    expect(SetTextInputSchema.safeParse({ index: 3, text: 'Q3 review' }).success).toBe(false)
+  })
+
+  // Empty is meaningful — it is how you clear a field.
+  it('allows clearing a field', () => {
+    expect(SetTextInputSchema.safeParse({ index: 0, expectTitle: 'Title', text: '' }).success).toBe(
+      true
+    )
+  })
+
+  it('refuses a document', () => {
+    expect(
+      SetTextInputSchema.safeParse({ index: 0, expectTitle: 'Title', text: 'x'.repeat(2_001) })
+        .success
+    ).toBe(false)
+  })
+})
+
 describe('note', () => {
   it('is one short clause, not an essay', () => {
     expect(NoteInputSchema.safeParse({ text: 'looking for Anil in the sidebar' }).success).toBe(true)
@@ -96,44 +125,60 @@ describe('done', () => {
 })
 
 describe('the closure', () => {
-  it('names five tools and no more', () => {
-    expect([...AGENT_TOOLS]).toEqual(['look', 'find', 'press', 'note', 'done'])
+  it('names six tools and no more', () => {
+    expect([...AGENT_TOOLS]).toEqual(['look', 'find', 'press', 'setText', 'note', 'done'])
   })
 
   /**
-   * The structural safety argument, asserted.
+   * The structural safety argument, asserted where anyone widening it will trip
+   * over it.
    *
-   * There is no verb that writes text, no verb that carries a keystroke, and no
-   * verb that leaves the frontmost window. A model that wanted to send a message
-   * could not describe the act — which holds whatever it was shown on screen,
-   * and does not depend on it being well behaved.
+   * **No verb carries a keystroke, and no verb leaves the frontmost window.** A
+   * model that wanted to send a message could not describe the act — which holds
+   * whatever it was shown on screen, and does not depend on it being well
+   * behaved.
    *
-   * M-B and M-C widen this deliberately. This test is what makes "deliberately"
-   * true: it fails the moment the vocabulary grows, so the widening arrives with
-   * the gate it needs rather than on its own.
+   * This used to assert "nothing writes text" as well. `setText` writes text,
+   * and that clause came out deliberately: typing is visible and reversible, and
+   * what makes it safe is precisely that the keystroke closure below did *not*
+   * move. A future change that makes this fail is the test working — the
+   * widening wants its own gate in `canUseTool` rather than a quiet edit here.
    */
-  it('carries nothing that writes, types, sends or leaves the window', () => {
-    const shapes = {
-      look: LookInputSchema,
-      find: FindInputSchema,
-      press: PressInputSchema,
-      note: NoteInputSchema,
-      done: DoneInputSchema
-    }
-    // Everything a tool could conceivably be asked to carry in order to write,
-    // press a key, or go somewhere else.
-    const forbidden = ['text', 'key', 'modifiers', 'send', 'url', 'app', 'bundleId', 'window']
-    for (const [tool, schema] of Object.entries(shapes)) {
+  it('carries nothing that presses a key or leaves the window', () => {
+    // The actuator, and the ways out of this window.
+    const forbidden = ['key', 'modifiers', 'chord', 'send', 'submit', 'url', 'bundleId', 'window']
+    for (const [tool, schema] of Object.entries(SHAPES)) {
       const fields = Object.keys(schema.shape)
       for (const field of forbidden) {
-        // `note.text` is the one word that collides, and it goes nowhere but the
-        // card — it is never typed into anything.
-        if (tool === 'note' && field === 'text') continue
         expect(fields, `${tool} must not carry "${field}"`).not.toContain(field)
       }
     }
   })
+
+  /**
+   * Which tools may carry text, and why the list is exactly this long.
+   *
+   * `setText` puts it in a field; `note` puts it on the card and nowhere else.
+   * A third would be a new way for words to reach somebody's app, and should
+   * arrive with an argument rather than by addition.
+   */
+  it('lets exactly two tools carry text, for two different reasons', () => {
+    const carriers = Object.entries(SHAPES)
+      .filter(([, schema]) => Object.keys(schema.shape).includes('text'))
+      .map(([name]) => name)
+    expect(carriers).toEqual(['setText', 'note'])
+  })
 })
+
+/** Every tool's input shape, so the assertions above cannot quietly miss one. */
+const SHAPES = {
+  look: LookInputSchema,
+  find: FindInputSchema,
+  press: PressInputSchema,
+  setText: SetTextInputSchema,
+  note: NoteInputSchema,
+  done: DoneInputSchema
+}
 
 describe('toolName', () => {
   // What `canUseTool` is handed, and therefore what the stop has to match on.

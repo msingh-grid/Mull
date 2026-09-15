@@ -112,6 +112,10 @@ function handlers(): AgentHandlers & { seen: string[] } {
       seen.push('press')
       return 'pressed “Anil Turaga”'
     },
+    setText: async () => {
+      seen.push('setText')
+      return 'put “Q3 review” into “Title”'
+    },
     note: async () => {
       seen.push('note')
       return 'noted'

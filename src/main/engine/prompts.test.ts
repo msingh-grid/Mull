@@ -5,11 +5,14 @@ import type { UiTarget } from '@shared/sidecar-api'
 import {
   EDIT_SYSTEM_PROMPT,
   NAVIGATE_SYSTEM_PROMPT,
+  controlOf,
   editContent,
   editPrompt,
   navigatePrompt,
   parseNavStep,
-  renderContext
+  renderContext,
+  renderTargets,
+  stateOf
 } from './prompts'
 
 function block(text: string, extra: Partial<ContextBlock> = {}): ContextBlock {
@@ -162,6 +165,80 @@ const navTarget = (index: number, title: string, patch: Partial<UiTarget> = {}):
   ...patch
 })
 
+/**
+ * What kind of control it is, and what state it is in.
+ *
+ * The scan has always carried role, subrole and value; the list threw all three
+ * away, so a checkbox, a dropdown, a tab and an ordinary button were four
+ * identical lines. The model had no way to know that pressing a popup opens a
+ * menu it then has to press again, or that the box it was about to tick was
+ * already ticked — both observed as it pressing the same thing twice and
+ * concluding it was stuck.
+ */
+describe('what a target looks like', () => {
+  const at = (role: string, patch: Partial<UiTarget> = {}): UiTarget =>
+    navTarget(0, 'Notify me', { role, ...patch })
+
+  it('names the control rather than repeating “press”', () => {
+    expect(controlOf(at('AXCheckBox'))).toBe('check')
+    expect(controlOf(at('AXPopUpButton'))).toBe('menu')
+    expect(controlOf(at('AXTextArea'))).toBe('box')
+    expect(controlOf(at('AXTextField'))).toBe('field')
+    expect(controlOf(at('AXRadioButton'))).toBe('radio')
+    expect(controlOf(at('AXLink'))).toBe('link')
+    expect(controlOf(at('AXButton'))).toBe('button')
+  })
+
+  // Chromium renders half a page as AXGroup with a click handler, so the
+  // subrole is where the useful distinction lives.
+  it('falls back to the subrole when the role says nothing', () => {
+    expect(controlOf(at('AXGroup', { subrole: 'AXTabButton' }))).toBe('tab')
+    expect(controlOf(at('AXButton', { subrole: 'AXCloseButton' }))).toBe('close')
+  })
+
+  /**
+   * The state of a toggle is the difference between pressing it and leaving it
+   * alone. Pressing a box that already says (on) turns it off, which is the
+   * most common way for a run to undo its own work.
+   */
+  it('says whether a toggle is already on', () => {
+    expect(stateOf(at('AXCheckBox', { value: '1' }))).toBe('(on)')
+    expect(stateOf(at('AXCheckBox', { value: '0' }))).toBe('(off)')
+    // AX reports these as 1/0 far more often than as words, but not always.
+    expect(stateOf(at('AXCheckBox', { value: 'true' }))).toBe('(on)')
+    // Absent is off: an unticked box frequently reports no value at all.
+    expect(stateOf(at('AXCheckBox', { value: null }))).toBe('(off)')
+  })
+
+  it('says what a field holds, and says when it holds nothing', () => {
+    expect(stateOf(at('AXTextField', { value: 'Q3 review' }))).toBe('(holds “Q3 review”)')
+    expect(stateOf(at('AXTextField', { value: null }))).toBe('(empty)')
+    expect(stateOf(at('AXPopUpButton', { value: 'Never' }))).toBe('→ Never')
+  })
+
+  it('says nothing about controls whose value is noise', () => {
+    expect(stateOf(at('AXButton', { value: 'Save' }))).toBeNull()
+    expect(stateOf(at('AXRow', { value: '1' }))).toBeNull()
+  })
+
+  it('clamps a long value rather than spending the list on one of them', () => {
+    const long = stateOf(at('AXTextField', { value: 'x'.repeat(200) }))
+    expect(long?.length).toBeLessThan(60)
+    expect(long).toContain('…')
+  })
+
+  it('puts all of it in the list', () => {
+    const rendered = renderTargets([
+      navTarget(0, 'Notify me', { role: 'AXCheckBox', value: '1' }),
+      navTarget(1, 'Repeat', { role: 'AXPopUpButton', value: 'Never' }),
+      navTarget(2, 'Title', { role: 'AXTextField', value: null, kind: 'type' })
+    ])
+    expect(rendered).toContain('  0 check  Notify me (on)')
+    expect(rendered).toContain('  1 menu   Repeat → Never')
+    expect(rendered).toContain('  2 field  Title (empty)')
+  })
+})
+
 describe('navigatePrompt', () => {
   it('numbers the targets so an index is the only thing to answer with', () => {
     const prompt = navigatePrompt({
@@ -170,8 +247,8 @@ describe('navigatePrompt', () => {
       history: [],
       stepsLeft: 6
     })
-    expect(prompt).toContain('  0 press Search')
-    expect(prompt).toContain('  1 press Anil Turaga')
+    expect(prompt).toContain('  0 row    Search')
+    expect(prompt).toContain('  1 row    Anil Turaga')
     // A control that cannot be pressed is still listed, marked — so the model
     // stops choosing it rather than choosing it and being refused each turn.
     expect(prompt).toContain('(greyed out)')
