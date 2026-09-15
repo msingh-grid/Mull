@@ -43,7 +43,13 @@ export interface HudView {
   thinking: { on: boolean } | null
   chips: HudChip[]
   card: HudCard | null
-  lastAction: { summary: string; when: string; undoable: boolean } | null
+  lastAction: {
+    summary: string
+    when: string
+    undoable: boolean
+    /** What it produced, when the lane produced something to read. */
+    result: string | null
+  } | null
   notice: string | null
   /**
    * Whether the panel needs mouse events. Main mirrors this into
@@ -81,7 +87,11 @@ export function hudView(state: HudState, now = Date.now()): HudView {
         ? {
             summary: state.lastAction.summary,
             when: relativeTime(state.lastAction.at, now),
-            undoable: state.lastAction.undoable
+            undoable: state.lastAction.undoable,
+            // Clamped here rather than in CSS alone: a thousand-character
+            // answer would still be a thousand characters crossing IPC and
+            // sitting in the DOM behind an ellipsis.
+            result: clampResult(state.lastAction.result ?? null)
           }
         : null,
     notice: state.notice,
@@ -195,3 +205,18 @@ export const WAVE_BARS: Array<{ height: number; amp: number; delay: number }> = 
   { height: 7, amp: 2.3, delay: 300 },
   { height: 4, amp: 3.2, delay: 180 }
 ]
+
+/**
+ * The answer, shortened to what a glance can use.
+ *
+ * The panel shows two lines; this bounds what reaches it. The whole text is in
+ * the journal, which is where someone who wants to read it properly goes.
+ */
+function clampResult(text: string | null): string | null {
+  if (!text) return null
+  const flat = text.replace(/\s+/gu, ' ').trim()
+  if (!flat) return null
+  return flat.length <= RESULT_CHARS ? flat : `${flat.slice(0, RESULT_CHARS).trimEnd()}…`
+}
+
+const RESULT_CHARS = 220

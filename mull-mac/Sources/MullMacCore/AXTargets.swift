@@ -1,3 +1,4 @@
+import AppKit
 import ApplicationServices
 import Foundation
 
@@ -91,11 +92,29 @@ public enum AXTargets {
         /// per node (see `actionNames`). Affordable because this runs between
         /// plan steps with a card already on screen, not during a hold with the
         /// user mid-sentence.
+        ///
+        /// ### Why these numbers grew
+        ///
+        /// The originals were measured against native apps, where Finder and
+        /// Notes return eleven targets and finish in 36–64ms. A browser is a
+        /// different order of thing. Measured against a live Chrome showing
+        /// Gmail, with its accessibility tree awake:
+        ///
+        ///     3836 nodes visited · 627 raw targets · ~550ms
+        ///
+        /// Every single bound was hit — `maxNodes` at 3000, `maxTargets` at
+        /// 120, `deadline` at 0.8s — and the walk stopped inside Chrome's own
+        /// toolbar, having never reached the page. The page is the only part a
+        /// user means when they say "click the Archive button".
+        ///
+        /// The deduplication below is what makes the larger numbers affordable:
+        /// those 627 targets are 254 distinct ones, so the list the model pays
+        /// tokens for grew by a third, not by five times.
         public init(
-            maxNodes: Int = 3000,
+            maxNodes: Int = 5000,
             maxDepth: Int = 40,
-            maxTargets: Int = 120,
-            deadline: TimeInterval = 0.8
+            maxTargets: Int = 300,
+            deadline: TimeInterval = 1.5
         ) {
             self.maxNodes = maxNodes
             self.maxDepth = maxDepth
@@ -171,6 +190,14 @@ public enum AXTargets {
         var stoppedBy = "complete"
         var stack: [(element: AXUIElement, depth: Int)] = [(root, 0)]
         let deadline = startedAt + budget.deadline
+        /// Identities already offered. See `identity(of:)`.
+        var seen = Set<String>()
+        var duplicates = 0
+        /// Did anything in this window belong to a web page? Browsers answer no
+        /// when their renderer accessibility is asleep, and that is worth
+        /// saying out loud rather than returning a toolbar and calling it a
+        /// window. See `webContent` and the `browser-cold` result below.
+        var webNodes = 0
 
         while let (element, depth) = stack.popLast() {
             if visited >= budget.maxNodes {
@@ -188,9 +215,20 @@ public enum AXTargets {
             visited += 1
 
             let node = read(element)
+            if webContent(element) { webNodes += 1 }
             if let target = target(from: node, index: targets.count, element: element) {
-                targets.append(target)
-                elements.append(element)
+                // Deduplicated *before* the cap, so `maxTargets` counts things
+                // the user could distinguish rather than times we saw the same
+                // button. Chrome publishes its toolbar and tab strip under two
+                // sibling groups, so more than half of what it offers is the
+                // same control twice — 627 raw, 254 distinct. Capping first
+                // would have spent the whole budget on the duplicate half.
+                if seen.insert(identity(of: target)).inserted {
+                    targets.append(target)
+                    elements.append(element)
+                } else {
+                    duplicates += 1
+                }
             }
 
             guard depth < budget.maxDepth else { continue }
@@ -209,6 +247,22 @@ public enum AXTargets {
             }
             return Scan(
                 harvestId: "", targets: [], truncated: true, stoppedBy: "tree-warming",
+                elapsedMs: AXHarvest.elapsed(since: startedAt))
+        }
+
+        // A browser whose renderer accessibility is asleep. It answers every
+        // query politely and returns its own furniture — Back, Reload, the tab
+        // strip — with not one element of the page in it. Reported rather than
+        // returned as an ordinary result, because "this page has no buttons"
+        // and "this browser is not showing me the page" look identical from
+        // here and mean completely different things to the person asking.
+        //
+        // Measured on Chrome 152: asleep it is 190 nodes and no web content;
+        // awake, 3836 nodes and 2999 of them from the page.
+        if webNodes == 0, isChromiumBrowser(pid: pid) {
+            return Scan(
+                harvestId: Store.shared.keep(elements: elements, pid: pid),
+                targets: targets, truncated: true, stoppedBy: "browser-cold",
                 elapsedMs: AXHarvest.elapsed(since: startedAt))
         }
 
@@ -314,6 +368,65 @@ public enum AXTargets {
             enabled: node.enabled,
             focused: node.focused,
             kind: kind)
+    }
+
+    /// What makes two targets the same target.
+    ///
+    /// Role, name and screen rectangle. The rectangle is the load-bearing part
+    /// and the reason this is not simply `role|title`: a list of eleven chat
+    /// rows all called "Priya Sharma" is eleven different conversations, and
+    /// collapsing them would be much worse than the duplication being fixed.
+    /// Two controls cannot occupy the same pixels, so same role + same name +
+    /// same rectangle is the same control reached by two paths through the
+    /// tree — which is exactly Chrome's toolbar, published once under the tab
+    /// strip's group and once under the window's.
+    ///
+    /// Rounded to whole points because AX returns Doubles and a half-pixel of
+    /// layout jitter between two reads of the same button would defeat it.
+    ///
+    /// An element with no frame keeps its own identity rather than being
+    /// deduped on `role|title` alone — an unplaceable control is exactly the
+    /// case where we cannot tell a copy from a namesake, and the safe mistake
+    /// is showing both.
+    private static func identity(of target: Target) -> String {
+        guard let frame = target.frame else { return "unplaced:\(target.index)" }
+        let box = [frame.origin.x, frame.origin.y, frame.size.width, frame.size.height]
+            .map { String(Int($0.rounded())) }
+            .joined(separator: ",")
+        return "\(target.role)|\(target.title)|\(box)"
+    }
+
+    /// Does this element come from a web page rather than the app's own UI?
+    ///
+    /// `AXDOMIdentifier` is Chromium's marker on nodes that came from the
+    /// renderer, and asking for it is a cheap way to answer "is the page
+    /// actually here" without knowing anything about the page. Only the
+    /// presence of the attribute matters, never its value.
+    private static func webContent(_ element: AXUIElement) -> Bool {
+        var value: CFTypeRef?
+        return AXUIElementCopyAttributeValue(element, "AXDOMIdentifier" as CFString, &value)
+            == .success
+    }
+
+    /// Browsers whose page content is a renderer away, and can be absent.
+    ///
+    /// A list rather than a capability probe because there is nothing to probe:
+    /// a browser with its accessibility asleep is indistinguishable from an
+    /// ordinary app with no web content in it. Being wrong here is cheap in one
+    /// direction only — an app wrongly on this list would occasionally be
+    /// described as a cold browser, so the list holds bundle ids and not
+    /// guesses about families.
+    private static let chromiumBrowsers: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.beta", "com.google.Chrome.dev",
+        "com.google.Chrome.canary", "com.microsoft.edgemac", "com.brave.Browser",
+        "com.vivaldi.Vivaldi", "com.operasoftware.Opera", "company.thebrowser.Browser",
+        "com.pushplaylabs.sidekick", "ru.yandex.desktop.yandex-browser"
+    ]
+
+    private static func isChromiumBrowser(pid: pid_t) -> Bool {
+        guard let bundleId = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier
+        else { return false }
+        return chromiumBrowsers.contains(bundleId)
     }
 
     private static func actionNames(_ element: AXUIElement) -> [String] {

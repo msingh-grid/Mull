@@ -127,9 +127,20 @@ body.window {
 }
 .journal-row .kind.edit,
 .journal-row .kind.command,
-.journal-row .kind.answer { background: var(--ins-wash); color: var(--ins); }
+.journal-row .kind.answer,
+/* An expedition reads as work Mull produced, like an edit or an answer. */
+.journal-row .kind.looked { background: var(--ins-wash); color: var(--ins); }
 .journal-row .kind.failed,
 .journal-row .kind.undone { background: var(--del-wash); color: var(--del); }
+/* The steps inside one are machinery, not outcomes — quieter than their plan,
+   so an expedition reads as one event with moving parts rather than five. */
+.journal-row .kind.pressed,
+.journal-row .kind.typed,
+.journal-row .kind.read,
+.journal-row .kind.key { background: var(--paper-recessed); color: var(--ink-3); }
+/* Sending is the one thing here that cannot be taken back. It gets the weight
+   that says so, rather than sharing a colour with a press. */
+.journal-row .kind.sent { background: var(--warn-wash); color: var(--warn); }
 
 .journal-row .app { color: var(--ink-2); flex: none; }
 .journal-row .time {
@@ -149,6 +160,70 @@ body.window {
   text-overflow: ellipsis;
 }
 .journal-row .changes { color: var(--ink-3); flex: none; }
+
+/* ── An expedition and its steps ─────────────────────────────────────────── */
+
+/* The steps are indented and hung off a rule, so the relationship is visible
+   without reading anything: these happened because of the row above them. */
+.journal-steps {
+  margin: 4px 0 0 22px;
+  padding-left: 12px;
+  border-left: 2px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.journal-steps .journal-row {
+  padding: 7px 12px;
+  box-shadow: none;
+  background: transparent;
+}
+.journal-steps .journal-row:hover { background: var(--paper-bright); }
+.journal-steps .journal-row .sum { font-size: 12px; color: var(--ink-2); }
+
+.journal-row .ordinal {
+  flex: none;
+  min-width: 16px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-label);
+  text-align: right;
+}
+
+/* ── Everything recorded ─────────────────────────────────────────────────── */
+
+.everything { margin-top: 10px; }
+.everything-head {
+  font-size: var(--fs-label);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+.everything dl { margin: 0; }
+.everything .fact {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 12px;
+}
+.everything dt {
+  flex: none;
+  width: 96px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.everything dd {
+  margin: 0;
+  color: var(--ink-2);
+  min-width: 0;
+  /* Long values wrap rather than stretching the window — a transcript and a
+     scan summary both end up here and neither is short. */
+  overflow-wrap: anywhere;
+}
 
 .journal-undo {
   border: 1px solid var(--hairline);
@@ -475,6 +550,21 @@ select:focus-visible {
 .page-note {
   margin: 12px 0 0;
   font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* The resting form, shown beside the panel on page 1 — the form a new user
+   will actually spend the day looking at (§6.1a). */
+.pet-note {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 18px 0 0;
+}
+.pet-note p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
   color: var(--ink-3);
 }
 

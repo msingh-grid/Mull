@@ -3,6 +3,7 @@ import type { ScreenContext } from '@shared/context'
 import type { PlanCard, PlanStep } from '@shared/hud'
 import { MAX_NAV_STEPS, type NavAttempt, type NavStep } from '@shared/nav'
 import type { SidecarApi, UiTarget } from '@shared/sidecar-api'
+import type { HudLastAction } from '@shared/ipc'
 import type { JournalDraft, JournalStatus } from '@shared/types'
 import type { Engine } from '../engine/types'
 import { describeStep } from '../engine/prompts'
@@ -71,6 +72,41 @@ const SCAN_SETTLE_MS = 250
 const TREE_ATTEMPTS = 3
 const TREE_POLL_MS = 350
 
+/**
+ * How much of a window one step is allowed to look at.
+ *
+ * 300 rather than 120 because a browser is not a Mail window. Chrome showing
+ * Gmail returns 254 distinct targets once its page is deduplicated, and at 120
+ * the list stopped inside Chrome's own toolbar — every page control, which is
+ * the only part anyone means, fell off the end. Native apps are unaffected:
+ * Notes still answers with eleven.
+ *
+ * The deadline moves with it. The same window takes ~500ms to walk, against a
+ * cap that was 1s; a scan that times out half way returns a prefix of the
+ * window and calls it the window.
+ */
+const SCAN_BUDGET = { maxTargets: 300, deadlineMs: 2_000 } as const
+
+/**
+ * How much budget a second attempt needs to be worth asking for.
+ *
+ * Two: one to take a different step, one to read what it found. With less than
+ * that the re-ask can only produce the same `done` a turn later, having spent
+ * three seconds to say it.
+ */
+const RETRY_MIN_STEPS = 2
+
+/**
+ * What to say when a browser will not show us the page.
+ *
+ * Names the app's own remedy rather than describing the mechanism. "Chromium
+ * builds its renderer accessibility tree lazily" is true and helps nobody;
+ * `chrome://accessibility` is a thing the reader can go and do.
+ */
+const BROWSER_COLD_NOTE =
+  'this browser isn’t sharing the page — only its own toolbar is visible. ' +
+  'Turning on “Native accessibility API support” at chrome://accessibility fixes it'
+
 export interface NavigateRequest {
   goal: string
   transcript: string
@@ -97,8 +133,17 @@ export interface NavigateDeps {
      * in when the plan started. The lane had no `announce` at all at first, and
      * the panel sat on THINKING after the plan had finished and the window had
      * been put back — work with no end, as far as anyone looking could tell.
+     *
+     * `lastAction` is what the idle panel shows afterwards. This lane used to
+     * omit it, so a finished expedition left the row describing whatever was
+     * dictated before it — the user asked a question and the panel answered
+     * with something they had said minutes ago.
      */
-    announce?(phase: 'applied' | 'error' | 'blocked', notice: string): void
+    announce?(
+      phase: 'applied' | 'error' | 'blocked',
+      notice: string,
+      lastAction?: HudLastAction
+    ): void
   }
   /**
    * One row per plan, carrying the picture.
@@ -213,6 +258,24 @@ export class NavigateLane {
     const steps: PlanStep[] = []
     const history: NavAttempt[] = []
     let scan: Scan = { harvestId: '', targets: [] }
+    /** The window as it looked before the last step. See `describeChange`. */
+    let before: Scan | null = null
+    /** How many steps actually moved the window. Told to the model each turn. */
+    let moved = 0
+    /**
+     * The expedition's own id, made before the first step rather than when the
+     * row is written at the end — a step cannot be stamped with an id that does
+     * not exist yet, and without the stamp the journal has five loose rows
+     * instead of one plan.
+     */
+    const groupId = randomUUID()
+    const startedAt = Date.now()
+    /** The row each step wrote, so its effect can be added once it is known. */
+    let lastEntryId: string | undefined
+    /** One second attempt per plan, and only after a `done(found:false)`. */
+    let retried = false
+    /** Set when the plan ended by giving up rather than by arriving. */
+    let gaveUp = false
     let note = 'read-only · nothing is written or sent'
     /** What was read, and then what was made of it. Both may stay null. */
     let found: ScreenContext | null = null
@@ -239,8 +302,54 @@ export class NavigateLane {
         targets: scan.targets.length,
         press: scan.targets.filter((t) => t.kind === 'press').length,
         type: scan.targets.filter((t) => t.kind === 'type').length,
+        stoppedBy: scan.stoppedBy,
         ms: scanMs()
       })
+
+      /**
+       * Did the last step actually do anything?
+       *
+       * Asked here rather than in the executor because here it is free: the
+       * loop scans at the top of every turn anyway, so the window before and
+       * the window after are both already in hand. The executor would have to
+       * buy a second scan — ~500ms in Chrome — to learn the same thing.
+       *
+       * It replaces a much weaker signal. The executor compares window
+       * *titles*, which is right when a press changes windows and silent when
+       * it opens an overlay, a pane, a modal, or navigates in place — most of
+       * what a press does. A Slack search box opening took the target list
+       * from 300 entries to 6 and left the title untouched, so history said
+       * "the window is still …", and the model, one step from the answer,
+       * concluded it could not get there and stopped.
+       */
+      const last = history.at(-1)
+      // `read` moves nothing, and a `done` entry here is the synthetic note the
+      // retry below pushes rather than a step anyone took — appending "the
+      // window did not change" to either would be describing work that never
+      // happened.
+      if (last && before && last.step.verb !== 'read' && last.step.verb !== 'done') {
+        const change = describeChange(before, scan)
+        if (change.moved) moved += 1
+        last.detail = `${last.detail} — ${change.detail}`
+        trace.step('step.effect', { n: history.length, moved: change.moved, what: change.detail })
+        // The same sentence the model just got, written onto the row that step
+        // already wrote. The journal used to record "the window is still …" —
+        // the weak title check — and nothing at all about what really happened.
+        if (lastEntryId) {
+          this.deps.journal?.amend(lastEntryId, { detail: { evidence: change.detail } })
+        }
+      }
+      before = scan
+
+      // The browser is not showing us the page. Stop rather than spend the
+      // budget pressing Reload and Back, and say which of the two problems
+      // this is — the model would otherwise report "no target matches", which
+      // is true, useless, and reads as Mull not understanding the request.
+      if (scan.stoppedBy === 'browser-cold') {
+        note = BROWSER_COLD_NOTE
+        trace.fail('scan.browser-cold', { step: taken + 1 })
+        break
+      }
       const context =
         taken === 0 && request.context ? request.context : await this.read(request)
 
@@ -253,8 +362,10 @@ export class NavigateLane {
           app: request.app,
           context,
           targets: scan.targets,
+          stoppedBy: scan.stoppedBy,
           history,
-          stepsLeft: this.maxSteps - taken
+          stepsLeft: this.maxSteps - taken,
+          progress: { taken, moved }
         })
       } catch (err) {
         // A step that did not parse, or an engine that refused. Either way the
@@ -265,15 +376,52 @@ export class NavigateLane {
         break
       }
 
+      // Read once and reused: `askMs` is a stopwatch, so calling it twice
+      // would put two different numbers on the same decision.
+      const chosenMs = askMs()
       trace.step('step.chosen', {
         n: taken + 1,
         what: describeStep(step),
-        askMs: askMs(),
+        askMs: chosenMs,
         screen: context?.chars ?? 0
       })
 
       if (step.verb === 'done') {
+        /**
+         * Giving up, with the budget to try again.
+         *
+         * The failure this exists for is not a step that errored — those
+         * already recover, because the reason lands in `<history>` and the next
+         * turn routes around it. It is a step that *succeeded* and was read as
+         * failure: a press that opened a search box while the window title
+         * stayed put, reported as "nothing moved", and a model that concluded
+         * it was stuck one step from the answer.
+         *
+         * §1 fixes the reading. This is the second line of defence for the
+         * times it is still wrong, and it is deliberately narrow — one re-ask
+         * per plan, only on `found:false`, only with steps to spare. A loop
+         * that argues with itself is worse than one that stops.
+         */
+        if (step.found === false && !retried && this.maxSteps - taken >= RETRY_MIN_STEPS) {
+          retried = true
+          note = step.because
+          history.push({
+            step,
+            ok: false,
+            detail:
+              `you answered done(found:false) — "${step.because}". Before that stands: ` +
+              'a window whose list of things to press has changed since you started is a window ' +
+              'you have already moved through, and a short list after a long one is usually a ' +
+              'search or dialog waiting for input. Look again and either take a step you have ' +
+              'not tried, or answer done(found:false) once more and it will be accepted.'
+          })
+          trace.step('plan.retry', { after: taken + 1, because: step.because })
+          stage('looking again')
+          draw()
+          continue
+        }
         note = step.because
+        gaveUp = step.found === false
         break
       }
 
@@ -284,8 +432,18 @@ export class NavigateLane {
       stage(describeStep(step))
       const result = await this.deps.executor.perform(step, scan, {
         app: request.app,
-        goal: request.goal
+        goal: request.goal,
+        groupId,
+        step: taken + 1,
+        scan: {
+          targets: scan.targets.length,
+          press: scan.targets.filter((t) => t.kind === 'press').length,
+          type: scan.targets.filter((t) => t.kind === 'type').length,
+          stoppedBy: scan.stoppedBy ?? 'complete'
+        },
+        askMs: chosenMs
       })
+      lastEntryId = result.entryId
       trace[result.ok ? 'step' : 'fail'](result.ok ? 'step.done' : 'step.refused', {
         n: taken + 1,
         what: describeStep(step),
@@ -354,19 +512,47 @@ export class NavigateLane {
       card({ steps: [...steps], running: false, note: closing, answer })
     )
 
+    // A plan that gave up did not succeed, whatever it read on the way. The
+    // old rule was "did we produce text", which called a graceful surrender
+    // `applied` and filed the excuse as the answer — so the journal recorded a
+    // run that pressed four things and found nothing as a success.
+    const arrived = answer !== null && !gaveUp
+
     // The receipt. One row for the whole plan, and the only one that can carry
     // the photograph — see `NavigateDeps.journal`.
-    this.record(request, {
-      status: answer ? 'applied' : 'failed',
+    const entry = this.record(request, {
+      id: groupId,
+      status: arrived ? 'applied' : 'failed',
       answer,
-      summary: answer ? `Looked · ${request.goal}` : `Looked · ${request.goal} · ${note}`,
-      steps: steps.length
+      summary: arrived ? `Looked · ${request.goal}` : `Looked · ${request.goal} · ${note}`,
+      steps: steps.length,
+      ms: Date.now() - startedAt,
+      because: note
     })
 
     // The plan is over. Say so, or the panel keeps the phase it started in
     // forever — there is nothing else in the pipeline still running that would
     // ever move it on.
-    this.deps.hud.announce?.('applied', answer ?? `${note} · ${back.detail}`)
+    //
+    // The `lastAction` is the part that was missing: this lane announced with
+    // two arguments, so the idle panel went on showing whatever the previous
+    // *dictation* had written. A user who had just asked a question saw a row
+    // about something they said minutes ago, and the answer — which had been on
+    // the card a moment earlier — was gone with no way back to it.
+    this.deps.hud.announce?.(
+      arrived ? 'applied' : 'error',
+      answer ?? `${note} · ${back.detail}`,
+      {
+        summary: `Looked · ${request.app?.name ?? 'this app'} · “${request.goal}”`,
+        at: Date.now(),
+        chars: answer?.length ?? 0,
+        entryId: entry?.id ?? null,
+        // Nothing was written anywhere, and the window has already been put
+        // back. There is nothing for ⌥Z to take.
+        undoable: false,
+        result: answer ?? note
+      }
+    )
   }
 
   /**
@@ -384,16 +570,24 @@ export class NavigateLane {
   private record(
     request: NavigateRequest,
     outcome: {
+      /**
+       * The id made before the first step, so this row and the steps stamped
+       * with it agree. Generated here only when a caller has none.
+       */
+      id?: string
       status: JournalStatus
       /** The prose the user read, when there was any. */
       answer: string | null
       summary: string
       steps: number
+      ms?: number
+      /** How the plan ended, in the model's own words where there are any. */
+      because?: string
     }
-  ): void {
-    if (!this.deps.journal) return
+  ): { id: string } | null {
+    if (!this.deps.journal) return null
     try {
-      const id = randomUUID()
+      const id = outcome.id ?? randomUUID()
       const draft: JournalDraft = {
         id,
         intent: {
@@ -416,12 +610,19 @@ export class NavigateLane {
         // Nothing to take back: no text was written anywhere, and the window
         // has already been put back where it was.
         undoable: false,
-        capture: this.deps.captures?.save(id, request.context) ?? null
+        capture: this.deps.captures?.save(id, request.context) ?? null,
+        // The plan is its own group: the steps point at this row's id, and this
+        // row points at itself, so grouping needs no special case for the head.
+        groupId: id,
+        ms: outcome.ms ?? null,
+        detail: outcome.because ? { because: outcome.because } : null
       }
       this.deps.journal.append(draft)
       this.deps.onJournalChanged?.()
+      return { id }
     } catch (err) {
       this.deps.log?.('error', 'navigate: journal write failed', err)
+      return null
     }
   }
 
@@ -449,12 +650,16 @@ export class NavigateLane {
    */
   private async scan(): Promise<Scan> {
     await this.sleep(SCAN_SETTLE_MS)
-    let seen = await this.deps.sidecar.uiTargets({ maxTargets: 120, deadlineMs: 1_000 })
+    let seen = await this.deps.sidecar.uiTargets(SCAN_BUDGET)
     for (let attempt = 0; seen.stoppedBy === 'tree-warming' && attempt < TREE_ATTEMPTS; attempt++) {
       await this.sleep(TREE_POLL_MS)
-      seen = await this.deps.sidecar.uiTargets({ maxTargets: 120, deadlineMs: 1_000 })
+      seen = await this.deps.sidecar.uiTargets(SCAN_BUDGET)
     }
-    return { harvestId: seen.harvestId, targets: seen.targets as UiTarget[] }
+    return {
+      harvestId: seen.harvestId,
+      targets: seen.targets as UiTarget[],
+      stoppedBy: seen.stoppedBy
+    }
   }
 
   /** The window's words, for the turn after we have moved. */
@@ -481,6 +686,62 @@ export class NavigateLane {
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * What changed between two looks at the window, in a sentence.
+ *
+ * The navigator's only honest answer to *did that press do anything*. It reads
+ * the set of things that can be pressed, because that set is what a user means
+ * by "the window changed": a search overlay, a switched conversation, an
+ * expanded folder and a modal all replace it, and none of them need touch the
+ * window title.
+ *
+ * ### The threshold, and why it is not zero
+ *
+ * Any difference at all is too sensitive. A Slack channel receiving a message
+ * while Mull is thinking gains a row, and calling that "the press worked" would
+ * be exactly the false confidence this is meant to remove. So movement means a
+ * *substantial* replacement — most of what was there is gone — measured by how
+ * much the two sets overlap.
+ *
+ * Compared by title rather than by index, because indices are positions in a
+ * list that was rebuilt and mean nothing across a step.
+ */
+export function describeChange(
+  before: Scan,
+  after: Scan
+): { moved: boolean; detail: string } {
+  const was = new Set(before.targets.map((target) => target.title))
+  const now = new Set(after.targets.map((target) => target.title))
+  if (was.size === 0 && now.size === 0) return { moved: false, detail: 'nothing to press either way' }
+
+  let shared = 0
+  for (const title of now) if (was.has(title)) shared += 1
+  // Against the smaller side: going from 300 things to 6 is a complete
+  // replacement even though 6 of the 300 survived, and measuring against the
+  // larger side would call that a 98% match.
+  const overlap = shared / Math.max(1, Math.min(was.size, now.size))
+
+  if (overlap >= CHANGE_OVERLAP) {
+    return {
+      moved: false,
+      detail: `the window did not change — the same ${now.size} things are still here, so pressing that again will do the same nothing`
+    }
+  }
+  return {
+    moved: true,
+    detail: `the window changed: ${was.size} things to press became ${now.size}, ${shared} in common`
+  }
+}
+
+/**
+ * How much overlap still counts as the same window.
+ *
+ * Two thirds. Generous on purpose — the cost of calling a real change "no
+ * change" is the model giving up one step early, which is the bug this exists
+ * to fix; the cost of the opposite is one wasted step.
+ */
+const CHANGE_OVERLAP = 0.67
 
 /** The left column of a plan row. One word, so the column reads as a column. */
 function verbOf(step: NavStep): string {

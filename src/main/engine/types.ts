@@ -104,6 +104,21 @@ export interface ClassifyRequest {
    * card is already open and filling in.
    */
   context?: ScreenContext | null
+  /**
+   * What can be pressed in this window — labels only, read during the hold.
+   *
+   * Here to answer one question the classifier previously had to guess at: the
+   * user named a place, and is that place *here* or *elsewhere*? Getting it
+   * wrong produces the two worst outcomes in the routing table — walking around
+   * someone's app to find a thing that was already on screen, or answering from
+   * the visible window when the answer was three clicks away.
+   *
+   * Labels, never authority. The indices are meaningless on this turn: the
+   * classifier cannot press anything, and `ClassifiedIntent` has no variant
+   * that could. See the note below it on why that absence is structural rather
+   * than a matter of instruction.
+   */
+  targets?: UiTarget[] | null
 }
 
 /**
@@ -186,10 +201,22 @@ export interface NavigateRequest {
    * into this, never with a name. See `@shared/nav`.
    */
   targets: UiTarget[]
+  /**
+   * Why the scan stopped. `'targets'` means the list is a prefix of the window
+   * rather than the whole of it, which the model must be told — otherwise "the
+   * row I want is not here" is a conclusion drawn from a list that stopped.
+   */
+  stoppedBy?: string
   /** Every step so far and how it went, so the model can stop repeating one. */
   history: NavAttempt[]
   /** How many more steps are allowed. Zero means: answer `done`. */
   stepsLeft: number
+  /**
+   * How the expedition is going: steps taken, and how many of them actually
+   * changed the window. Four presses that moved nothing is the signal that a
+   * route is not working, and it is invisible from `stepsLeft` alone.
+   */
+  progress?: { taken: number; moved: number }
 }
 
 export interface Engine {

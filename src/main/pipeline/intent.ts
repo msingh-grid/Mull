@@ -1,4 +1,5 @@
 import type { ScreenContext } from '@shared/context'
+import type { UiTarget } from '@shared/sidecar-api'
 import type { ClassifiedIntent, Engine } from '../engine/types'
 import { justSend, route, type Route, type RouteContext } from './router'
 
@@ -57,6 +58,8 @@ export interface IntentInput {
   fieldTruncated: boolean
   /** The window around the caret, when Mull was allowed to read it (M5a). */
   context?: ScreenContext | null
+  /** What can be pressed there, read in the same breath. */
+  targets?: UiTarget[] | null
 }
 
 export interface IntentRouterDeps {
@@ -200,6 +203,7 @@ export class IntentRouter {
     trace?.step('classify.ask', {
       model: 'haiku',
       screen: input.context?.chars ?? 0,
+      targets: input.targets?.length ?? 0,
       field: input.fieldText?.length ?? 0,
       selection: input.selection?.length ?? 0,
       budgetMs: this.timeoutMs
@@ -218,7 +222,8 @@ export class IntentRouter {
           // can watch arrive, not to the one they wait through blind — and a
           // rule that holds only because today's prompt builder happens not to
           // read the field is not a rule.
-          context: withoutImage(input.context)
+          context: withoutImage(input.context),
+          targets: input.targets ?? null
         }),
         this.timeoutMs
       )

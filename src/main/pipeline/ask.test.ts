@@ -5,6 +5,7 @@ import type { JournalDraft, JournalEntry } from '@shared/types'
 import type { AnswerRequest, Engine } from '../engine/types'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
+import type { HudLastAction } from '@shared/ipc'
 import { AskLane } from './ask'
 
 /**
@@ -49,6 +50,7 @@ function harness(
   const filed: Array<{ id: string; context: ScreenContext | null | undefined }> = []
   const notices: Array<{ phase: string; text: string }> = []
   const stages: Array<string | null> = []
+  const lastActions: Array<HudLastAction | null> = []
   let closed = 0
   let act: ((action: 'apply' | 'apply-send' | 'cancel') => void) | null = null
 
@@ -86,12 +88,16 @@ function harness(
       closeCard: () => {
         closed += 1
       },
-      update: (patch) => stages.push(patch.stage),
+      update: (patch) => {
+        if (patch.stage !== undefined) stages.push(patch.stage)
+        if (patch.lastAction !== undefined) lastActions.push(patch.lastAction)
+      },
       announce: (phase, text) => notices.push({ phase, text })
     }
   })
 
   return {
+    lastActions,
     lane,
     cards,
     rows,

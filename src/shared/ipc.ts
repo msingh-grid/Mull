@@ -44,6 +44,21 @@ export interface HudLastAction {
   entryId: string | null
   /** Whether ⌥Z can still take it back — the HUD only offers undo when true. */
   undoable: boolean
+  /**
+   * What the action actually produced, when it produced something to read.
+   *
+   * The answer from an `ask` or a plan, or the reason one could not be given.
+   * It exists because the summary alone describes the *request* — "Looked ·
+   * Slack · 'what did Anil say'" — and a user glancing at the panel afterwards
+   * got the question back rather than the answer. The answer had been on the
+   * card a moment earlier and then went nowhere, recoverable only by opening
+   * the journal.
+   *
+   * Null for the lanes whose product is text they already inserted: a
+   * dictation's result is on screen in the app, and repeating it here would be
+   * saying the same thing twice.
+   */
+  result?: string | null
 }
 
 export interface HudState {

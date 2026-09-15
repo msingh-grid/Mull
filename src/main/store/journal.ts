@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type {
   CaptureRecord,
+  EntryDetail,
   Intent,
   JournalDraft,
   JournalEntry,
@@ -49,7 +50,13 @@ CREATE TABLE IF NOT EXISTS entries (
   -- What Mull could see when it acted (M5a). A receipt: JSON, exactly what was
   -- sent, and null on rows that read nothing. The JPEG itself lives on disk —
   -- a quarter of a megabyte of base64 per row would be read by every list query.
-  capture       TEXT
+  capture       TEXT,
+  -- The expedition a row belongs to, its own elapsed time, and whatever else
+  -- the lane that wrote it thought worth keeping. group_id is a column rather
+  -- than part of detail because the journal window groups on it.
+  group_id      TEXT,
+  ms            INTEGER,
+  detail        TEXT
 );
 CREATE INDEX IF NOT EXISTS entries_at ON entries (at DESC);
 CREATE INDEX IF NOT EXISTS entries_undoable ON entries (undoable, at DESC);
@@ -72,6 +79,9 @@ interface Row {
   undone_at: number | null
   intent: string
   capture: string | null
+  group_id: string | null
+  ms: number | null
+  detail: string | null
 }
 
 export class JournalStore {
@@ -88,6 +98,16 @@ export class JournalStore {
     } catch {
       // Already there.
     }
+    // Same trick, same reason: these arrived after two months of rows existed,
+    // and every one of those rows has to keep loading. Each is nullable, so an
+    // old row simply reads back with nothing in it.
+    for (const column of ['group_id TEXT', 'ms INTEGER', 'detail TEXT']) {
+      try {
+        this.db.exec(`ALTER TABLE entries ADD COLUMN ${column}`)
+      } catch {
+        // Already there.
+      }
+    }
   }
 
   append(draft: JournalDraft): JournalEntry {
@@ -100,6 +120,9 @@ export class JournalStore {
       // the same shape `get` reads out. They drifted the moment this column was
       // added and the round-trip test caught it immediately.
       capture: draft.capture ?? null,
+      groupId: draft.groupId ?? null,
+      ms: draft.ms ?? null,
+      detail: clampDetail(draft.detail),
       // Belt and braces: a caller that asks for an undoable entry without the
       // evidence to support one does not get it.
       undoable: draft.undoable && draft.verified === true && draft.caret !== null
@@ -109,8 +132,9 @@ export class JournalStore {
       .prepare(
         `INSERT INTO entries
            (id, at, kind, status, summary, app_bundle_id, app_name, before_text, after_text,
-            strategy, verified, caret, undoable, undone_at, intent, capture)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+            strategy, verified, caret, undoable, undone_at, intent, capture,
+            group_id, ms, detail)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         entry.id,
@@ -128,10 +152,54 @@ export class JournalStore {
         entry.undoable ? 1 : 0,
         null,
         JSON.stringify(entry.intent),
-        entry.capture ? JSON.stringify(entry.capture) : null
+        entry.capture ? JSON.stringify(entry.capture) : null,
+        entry.groupId,
+        entry.ms,
+        entry.detail ? JSON.stringify(entry.detail) : null
       )
 
     return entry
+  }
+
+  /**
+   * Fill in what was not knowable when the row was written.
+   *
+   * Deliberately narrow: `detail` and `ms`, and nothing else. A press is
+   * journalled the moment it happens, but *whether it did anything* is only
+   * visible from the next look at the window — so the evidence arrives after
+   * the row does, and something has to be able to add it.
+   *
+   * What it must never touch is the part of a row that makes it a record:
+   * status, the text before and after, the capture, whether it is undoable.
+   * A journal whose verdicts can be rewritten afterwards is worth less than one
+   * that admits it learned something late, and every one of those fields is
+   * load-bearing for undo.
+   *
+   * Merges rather than replaces, so two amendments to the same row do not
+   * silently discard each other. Never throws: an entry that cannot be
+   * annotated is still a true entry.
+   */
+  amend(id: string, patch: { detail?: EntryDetail | null; ms?: number | null }): void {
+    try {
+      const existing = this.get(id)
+      if (!existing) return
+      const detail = clampDetail(
+        patch.detail === undefined
+          ? existing.detail
+          : patch.detail === null
+            ? null
+            : { ...(existing.detail ?? {}), ...patch.detail }
+      )
+      this.db
+        .prepare('UPDATE entries SET detail = ?, ms = ? WHERE id = ?')
+        .run(
+          detail ? JSON.stringify(detail) : null,
+          patch.ms === undefined ? (existing.ms ?? null) : patch.ms,
+          id
+        )
+    } catch {
+      // A row that would not take an annotation is still a row.
+    }
   }
 
   get(id: string): JournalEntry | null {
@@ -232,7 +300,10 @@ function toEntry(row: Row): JournalEntry {
     caret: row.caret,
     undoable: row.undoable === 1,
     undoneAt: row.undone_at,
-    capture: parseCapture(row.capture)
+    capture: parseCapture(row.capture),
+    groupId: row.group_id,
+    ms: row.ms,
+    detail: parseDetail(row.detail)
   }
 }
 
@@ -245,3 +316,36 @@ function parseCapture(raw: string | null): CaptureRecord | null {
     return null
   }
 }
+
+/** Same rule as `parseCapture`: an unreadable annotation loses the annotation. */
+function parseDetail(raw: string | null): EntryDetail | null {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw) as EntryDetail
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Bound the strings before they reach the database.
+ *
+ * `because` and `evidence` are written by the model, and a model asked for one
+ * clause occasionally supplies a paragraph. The journal keeps every row
+ * forever and reads all of them on every list query, so one runaway field is
+ * paid for on every open of the window — the same argument that keeps the JPEG
+ * out of the `capture` column.
+ */
+function clampDetail(detail: EntryDetail | null | undefined): EntryDetail | null {
+  if (!detail) return null
+  const clamp = (text: string | undefined): string | undefined =>
+    text === undefined ? undefined : text.length > DETAIL_CHARS
+      ? `${text.slice(0, DETAIL_CHARS)}…`
+      : text
+  const next: EntryDetail = { ...detail }
+  if (detail.because !== undefined) next.because = clamp(detail.because)
+  if (detail.evidence !== undefined) next.evidence = clamp(detail.evidence)
+  return next
+}
+
+const DETAIL_CHARS = 400

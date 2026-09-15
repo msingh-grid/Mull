@@ -1,5 +1,5 @@
 import type { ContextMode, ScreenContext } from '@shared/context'
-import type { SidecarApi } from '@shared/sidecar-api'
+import type { SidecarApi, UiTarget } from '@shared/sidecar-api'
 import { captureContext } from './context'
 
 /**
@@ -51,6 +51,21 @@ export interface FocusSnapshot {
    * targets an edit gets.
    */
   selection: { text: string; editable: boolean; source: string } | null
+  /**
+   * What can be pressed in this window — the labels, not the buttons.
+   *
+   * Read for the classifier, which had no way to tell "the place you named is
+   * right here" from "it is somewhere else". The reading harvest cannot answer
+   * that: it deny-lists every pressable role as furniture, which is correct
+   * when the job is reading a conversation and removes the entire vocabulary of
+   * navigation. So the sidebar rows, the tabs and the channel list were
+   * invisible to the one decision that turns on whether they exist.
+   *
+   * Null on ⌥Space, which never consults an engine, and null when the window
+   * was not read at all — the same gate `context` is behind, for the same
+   * reason.
+   */
+  targets: UiTarget[] | null
   /** The focused field itself, or null when nothing readable has focus. */
   field: {
     /** Absolute UTF-16 offset where `text` begins. */
@@ -106,6 +121,21 @@ export type TargetCheck =
 const CONTEXT_CHARS = 8_192
 
 /**
+ * How many targets the classifier is shown.
+ *
+ * Far below the navigator's 300. The navigator needs a complete list because it
+ * picks an index out of it and a missing row is an unreachable control; the
+ * classifier only needs enough to recognise a name the user said, and pays for
+ * every line in tokens on the one call that is on the critical path.
+ *
+ * Tree order puts a window's navigation first — the sidebar, the tabs, the
+ * search box — and the message rows after, so the head of the list is also the
+ * useful half. What is cut off is announced rather than dropped silently; see
+ * `renderTargets`.
+ */
+const CLASSIFIER_TARGETS = 60
+
+/**
  * Read what has focus, or return an empty snapshot.
  *
  * Called off the critical path during the hold, so every failure is simply
@@ -127,13 +157,19 @@ export async function captureFocus(
    */
   context?: { mode: ContextMode; excluded?: readonly string[] }
 ): Promise<FocusSnapshot> {
-  const empty: FocusSnapshot = { app: null, selection: null, field: null, context: null }
+  const empty: FocusSnapshot = {
+    app: null,
+    selection: null,
+    field: null,
+    context: null,
+    targets: null
+  }
 
-  // Three questions, and they are genuinely different: "what is the caret in",
-  // "what has the user highlighted", and "what is on this screen at all".
-  // Asked together and in parallel, all during the hold, so none of them costs
-  // the utterance anything.
-  const [focused, selected, screen] = await Promise.all([
+  // Four questions, and they are genuinely different: "what is the caret in",
+  // "what has the user highlighted", "what is on this screen at all", and
+  // "what could be pressed here". Asked together and in parallel, all during
+  // the hold, so none of them costs the utterance anything.
+  const [focused, selected, screen, targets] = await Promise.all([
     sidecar.focusedElement({ contextBytes: CONTEXT_CHARS }).catch((err: unknown) => {
       log?.('warn', 'focus: focusedElement failed', err)
       return null
@@ -149,6 +185,20 @@ export async function captureFocus(
             return null
           }
         )
+      : Promise.resolve(null),
+    // Behind the same gate as the screen read, and it must stay there: this is
+    // an enumeration of someone's window, and ⌥Space has no consumer for it.
+    //
+    // Cheaper than it looks — 37ms in Notes, 81ms in Slack, ~500ms in a Chrome
+    // showing Gmail — and all of it spent while the user is still speaking.
+    context
+      ? sidecar
+          .uiTargets({ maxTargets: CLASSIFIER_TARGETS, deadlineMs: 1_500 })
+          .then((seen) => seen.targets as UiTarget[])
+          .catch((err: unknown) => {
+            log?.('warn', 'focus: uiTargets failed', err)
+            return null
+          })
       : Promise.resolve(null)
   ])
 
@@ -156,6 +206,7 @@ export async function captureFocus(
   return {
     app: app ?? screen?.app ?? null,
     context: screen,
+    targets,
     selection:
       selected?.text && selected.text.trim()
         ? {
@@ -213,12 +264,14 @@ export function classifierContext(snapshot: FocusSnapshot): {
   fieldText: string | null
   fieldTruncated: boolean
   context: ScreenContext | null
+  targets: UiTarget[] | null
 } {
   return {
     selection: snapshot.selection?.text ?? null,
     fieldText: snapshot.field?.text ?? null,
     fieldTruncated: snapshot.field?.truncated ?? false,
-    context: snapshot.context
+    context: snapshot.context,
+    targets: snapshot.targets
   }
 }
 

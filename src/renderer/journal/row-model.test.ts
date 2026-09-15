@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import type { JournalEntryView } from '@shared/types'
-import { rowKind, rowMeasure, undoAffordance } from './row-model'
+import type { JournalGroup } from './row-model'
+import {
+  groupEntries,
+  groupView,
+  stepToggleTarget,
+  isPlan,
+  planMeasure,
+  rowElapsed,
+  rowKind,
+  rowMeasure,
+  undoAffordance
+} from './row-model'
 
 const entry = (patch: Partial<JournalEntryView> = {}): JournalEntryView => ({
   id: 'e1',
@@ -92,8 +103,11 @@ describe('a send row', () => {
       ...patch
     })
 
-  it('reads as a command', () => {
-    expect(rowKind(send())).toBe('command')
+  it('says what it was, not merely that it was a command', () => {
+    // "Command" was the badge on every navigation verb and on this — a whole
+    // expedition, each of its presses, and an irreversible send all wearing the
+    // same word on the part of the row the eye lands on first.
+    expect(rowKind(send())).toBe('sent')
   })
 
   /**
@@ -121,5 +135,141 @@ describe('a send row', () => {
     expect(undoAffordance(send({ status: 'failed' })).why).toBe(
       'Nothing was changed, so there is nothing to undo.'
     )
+  })
+})
+
+describe('a navigation row', () => {
+  const nav = (verb: string, patch: Partial<JournalEntryView> = {}): JournalEntryView =>
+    entry({
+      intent: { kind: 'command', verb, args: {}, transcript: 'open Anil’s DM' },
+      undoable: false,
+      ...patch
+    })
+
+  it('names the verb instead of calling everything a command', () => {
+    expect(rowKind(nav('nav.plan'))).toBe('looked')
+    expect(rowKind(nav('nav.press'))).toBe('pressed')
+    expect(rowKind(nav('nav.type'))).toBe('typed')
+    expect(rowKind(nav('nav.read'))).toBe('read')
+    expect(rowKind(nav('nav.navKey'))).toBe('key')
+  })
+
+  it('still says Failed first — what happened outranks what it was', () => {
+    expect(rowKind(nav('nav.press', { status: 'failed' }))).toBe('failed')
+  })
+
+  it('falls back to Command for a verb nobody has taught it', () => {
+    expect(rowKind(nav('nav.somethingNew'))).toBe('command')
+  })
+
+  it('knows an expedition from one of its steps', () => {
+    expect(isPlan(nav('nav.plan'))).toBe(true)
+    expect(isPlan(nav('nav.press'))).toBe(false)
+    expect(isPlan(entry())).toBe(false)
+  })
+
+  /**
+   * "441 characters" was the measure on a row whose entire point was the
+   * answer — the same mistake the navigation lane made when it reported "51
+   * blocks · 6023 chars" to somebody who had asked what a conversation said.
+   */
+  it('measures an expedition in work done, not characters returned', () => {
+    expect(planMeasure(nav('nav.plan', { ms: 17_795 }), 4)).toBe('4 steps · 17.8s')
+    expect(planMeasure(nav('nav.plan', { ms: 430 }), 1)).toBe('1 step · 430ms')
+    expect(planMeasure(nav('nav.plan', { ms: null }), 2)).toBe('2 steps')
+  })
+
+  it('says nothing about elapsed time when nobody measured it', () => {
+    expect(rowElapsed(null)).toBeNull()
+    expect(rowElapsed(undefined)).toBeNull()
+  })
+})
+
+const nav = (id: string, verb: string, groupId: string | null): JournalEntryView =>
+  entry({
+    id,
+    groupId,
+    intent: { kind: 'command', verb, args: {}, transcript: 'open Anil’s DM' },
+    undoable: false
+  })
+
+describe('groupEntries', () => {
+
+  /**
+   * The list arrives newest-first and the plan's own row is written *last*, so
+   * a plan sits above its own steps and cannot be grouped by adjacency.
+   */
+  it('gathers an expedition and its steps, whatever order they arrive in', () => {
+    const groups = groupEntries([
+      nav('plan', 'nav.plan', 'plan'),
+      nav('s3', 'nav.read', 'plan'),
+      nav('s2', 'nav.press', 'plan'),
+      nav('s1', 'nav.press', 'plan'),
+      entry({ id: 'dict' })
+    ])
+
+    expect(groups).toHaveLength(2)
+    expect(groups[0]?.head.id).toBe('plan')
+    // Read in the order it was walked, not the order it was listed.
+    expect(groups[0]?.steps.map((s) => s.id)).toEqual(['s1', 's2', 's3'])
+    expect(groups[1]?.head.id).toBe('dict')
+    expect(groups[1]?.steps).toEqual([])
+  })
+
+  it('lets the plan take the head even when it sorts below a step', () => {
+    // Two rows inside one millisecond order by rowid, and the plan can lose.
+    const groups = groupEntries([nav('s1', 'nav.press', 'plan'), nav('plan', 'nav.plan', 'plan')])
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.head.id).toBe('plan')
+    expect(groups[0]?.steps.map((s) => s.id)).toEqual(['s1'])
+  })
+
+  it('keeps an orphaned step visible rather than swallowing it', () => {
+    // A plan that threw before recording itself still pressed things, and the
+    // journal's promise is that everything Mull did is visible.
+    const groups = groupEntries([nav('s1', 'nav.press', 'gone')])
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.head.id).toBe('s1')
+  })
+
+  it('leaves every ungrouped row exactly as it was', () => {
+    const rows = [entry({ id: 'a' }), entry({ id: 'b' }), entry({ id: 'c' })]
+    expect(groupEntries(rows).map((g) => g.head.id)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+describe('opening a group', () => {
+  const group = (): JournalGroup => ({
+    head: nav('plan', 'nav.plan', 'plan'),
+    steps: [nav('s1', 'nav.press', 'plan'), nav('s2', 'nav.press', 'plan')]
+  })
+
+  it('shows nothing until the plan is opened', () => {
+    expect(groupView(group(), null)).toEqual({ open: false, headOpen: false })
+  })
+
+  it('lists the steps once the plan is open', () => {
+    expect(groupView(group(), 'plan')).toEqual({ open: true, headOpen: true })
+  })
+
+  /**
+   * The regression. Disclosure used to be derived from the head alone, so
+   * clicking a step moved the expansion off the head, closed the group, and
+   * unmounted the list the step was in — the row vanished under the cursor and
+   * the click looked dead.
+   */
+  it('stays open when a step is the thing expanded', () => {
+    expect(groupView(group(), 's2')).toEqual({ open: true, headOpen: false })
+  })
+
+  it('is unaffected by a row in some other group', () => {
+    expect(groupView(group(), 'somebody-else')).toEqual({ open: false, headOpen: false })
+  })
+
+  it('hands a closing step back to its plan, not to nothing', () => {
+    // Otherwise folding one step folds the whole expedition.
+    expect(stepToggleTarget(group(), 's1', 's1')).toBe('plan')
+    expect(stepToggleTarget(group(), 's2', 's1')).toBe('s2')
+    expect(stepToggleTarget(group(), 's1', 'plan')).toBe('s1')
   })
 })

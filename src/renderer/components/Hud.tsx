@@ -82,15 +82,23 @@ export function Hud({
 
       {view.lastAction ? (
         <div className="last-action">
-          <span>{view.lastAction.summary}</span>
-          <span className="sep">·</span>
-          <span>{view.lastAction.when}</span>
-          {/* Offered only when undo would actually work — the journal's
-              `undoable` flag, not a hopeful button (docs/DESIGN.md §7.2). */}
-          {view.lastAction.undoable ? (
-            <span className="undo">
-              <kbd>⌥Z</kbd> undo
-            </span>
+          <div className="last-action-meta">
+            <span>{view.lastAction.summary}</span>
+            <span className="sep">·</span>
+            <span>{view.lastAction.when}</span>
+            {/* Offered only when undo would actually work — the journal's
+                `undoable` flag, not a hopeful button (docs/DESIGN.md §7.2). */}
+            {view.lastAction.undoable ? (
+              <span className="undo">
+                <kbd>⌥Z</kbd> undo
+              </span>
+            ) : null}
+          </div>
+          {/* What it produced, for the lanes that produce something to read.
+              The line above names the request; without this the panel answers
+              a question by repeating it back. */}
+          {view.lastAction.result ? (
+            <div className="last-action-result">{view.lastAction.result}</div>
           ) : null}
         </div>
       ) : null}

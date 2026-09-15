@@ -124,9 +124,34 @@ describe('hudView', () => {
     expect(hudView(state({ lastAction }), 1_000_000).lastAction).toEqual({
       summary: 'Dictation · Mail',
       when: 'just now',
-      undoable: true
+      undoable: true,
+      // A dictation's product is already on screen in the app it was typed
+      // into. Repeating it here would be saying the same thing twice.
+      result: null
     })
     expect(hudView(state({ phase: 'listening', lastAction })).lastAction).toBeNull()
+  })
+
+  it('carries the answer through, flattened and clamped', () => {
+    const lastAction = {
+      summary: 'Answered · Notes · “what did they decide”',
+      at: 1_000_000,
+      chars: 40,
+      entryId: 'e2',
+      undoable: false,
+      result: '  They decided to ship\n\n   on Thursday.  '
+    }
+    const view = hudView(state({ lastAction }), 1_000_000)
+    expect(view.lastAction?.result).toBe('They decided to ship on Thursday.')
+
+    // Clamped here, not only in CSS: a thousand characters behind an ellipsis
+    // is still a thousand characters crossing IPC and sitting in the DOM.
+    const long = hudView(
+      state({ lastAction: { ...lastAction, result: 'x'.repeat(5_000) } }),
+      1_000_000
+    )
+    expect(long.lastAction?.result?.length).toBeLessThan(300)
+    expect(long.lastAction?.result?.endsWith('…')).toBe(true)
   })
 
   it('passes chips and notices straight through', () => {

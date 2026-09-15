@@ -126,4 +126,80 @@ describe('JournalStore', () => {
     const read = corrupted.get(entry.id)
     expect(read?.intent.kind).toBe('dictate')
   })
+
+  it('round-trips the group, the timing and the detail', () => {
+    const journal = store()
+    const written = journal.append(
+      draft({
+        groupId: 'plan-1',
+        ms: 430,
+        detail: { step: 2, because: 'the sidebar row', scan: { targets: 300, press: 299, type: 1, stoppedBy: 'targets' } }
+      })
+    )
+    expect(journal.get(written.id)).toEqual(written)
+    expect(journal.get(written.id)?.detail?.scan?.stoppedBy).toBe('targets')
+  })
+
+  it('leaves them null on a row that carries none', () => {
+    const journal = store()
+    const written = journal.append(draft())
+    expect(written.groupId).toBeNull()
+    expect(written.ms).toBeNull()
+    expect(written.detail).toBeNull()
+    expect(journal.get(written.id)).toEqual(written)
+  })
+
+  describe('amend', () => {
+    it('fills in what was not knowable when the row was written', () => {
+      // A press is journalled the moment it happens; whether it moved anything
+      // is only visible from the next look at the window.
+      const journal = store()
+      const entry = journal.append(draft({ detail: { step: 1 } }))
+      journal.amend(entry.id, { detail: { evidence: 'the window changed: 300 became 6' }, ms: 412 })
+
+      const read = journal.get(entry.id)
+      expect(read?.detail).toEqual({ step: 1, evidence: 'the window changed: 300 became 6' })
+      expect(read?.ms).toBe(412)
+    })
+
+    /**
+     * The line this must not cross. Every field below is what makes the row a
+     * record rather than a note, and `undoable`/`verified`/`after` are what
+     * undo reads before it removes someone's text.
+     */
+    it('cannot rewrite the verdict, the text, or the receipt', () => {
+      const journal = store()
+      const entry = journal.append(draft())
+      // Anything beyond detail/ms is not in the signature; this proves it is
+      // also ignored at runtime rather than merely unspeakable in TypeScript.
+      const smuggled = {
+        detail: { evidence: 'x' },
+        status: 'failed',
+        after: 'tampered',
+        undoable: false,
+        verified: false
+      } as unknown as Parameters<typeof journal.amend>[1]
+      journal.amend(entry.id, smuggled)
+
+      const read = journal.get(entry.id)
+      expect(read?.status).toBe('applied')
+      expect(read?.after).toBe('Send the deck today')
+      expect(read?.undoable).toBe(true)
+      expect(read?.verified).toBe(true)
+    })
+
+    it('is a no-op on a row that is not there', () => {
+      const journal = store()
+      expect(() => journal.amend('nobody', { ms: 1 })).not.toThrow()
+    })
+
+    it('clamps model-authored strings rather than storing a paragraph', () => {
+      const journal = store()
+      const entry = journal.append(draft())
+      journal.amend(entry.id, { detail: { because: 'x'.repeat(5_000) } })
+      const because = journal.get(entry.id)?.detail?.because ?? ''
+      expect(because.length).toBeLessThan(500)
+      expect(because.endsWith('…')).toBe(true)
+    })
+  })
 })

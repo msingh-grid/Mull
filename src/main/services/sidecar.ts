@@ -641,8 +641,17 @@ export class FakeSidecar implements SidecarApi {
     }
 
     this.targetActions.push({ verb, index: p.index })
+    // Let a test stage the consequence of the press, not just its acceptance.
+    // Pressing Slack's Search replaces the window's entire target list, and
+    // "the list is different now" is the only evidence the navigator has that
+    // anything happened — so a fake that never changes it cannot exercise the
+    // part that matters.
+    this.onTargetAction?.(verb, p.index)
     return { ok: true, reason: null, actualRole: target.role, actualTitle: target.title }
   }
+
+  /** Called after an accepted press or focus. See `retarget`. */
+  onTargetAction: ((verb: 'press' | 'focus', index: number) => void) | null = null
 
   async pressTarget(p: SidecarParams<'pressTarget'>) {
     return this.actOnTarget('press', p)

@@ -223,6 +223,7 @@ export class DictationPipeline {
       next.stage = null
       next.stageAt = null
     }
+    next.chips = withAppChip(next.chips, next.app)
     this.state = next
     this.deps.onState(this.state)
   }
@@ -782,9 +783,19 @@ export class DictationPipeline {
     if (!snapshot.selection) {
       snapshot = await probeSelectionByCopy(this.deps.sidecar, snapshot, this.log)
     }
+
+    // The hold's own `frontmostApp` write is guarded on still capturing, so a
+    // short utterance outruns it and leaves `state.app` null — which is
+    // precisely the utterance where the user just switched apps and most wants
+    // to see that Mull noticed. The snapshot has been waited for by now and
+    // carries the app everything below is about to route on, so the panel may
+    // as well say so.
+    const app = this.state.app ?? snapshot.app
+    if (!this.state.app && app) this.setState({ app })
+
     const decision = await this.deps.intent.decide({
       transcript: text,
-      app: this.state.app ?? snapshot.app,
+      app,
       ...classifierContext(snapshot)
     })
     if (decision.by !== 'fast-path') {
@@ -890,6 +901,39 @@ export class DictationPipeline {
   }
 }
 
+
+/**
+ * Which app Mull believes it is acting on, on every state that has one.
+ *
+ * Added centrally rather than at the call sites, and that is the whole design:
+ * every chip write in this codebase is a **whole-array replace** — five of them
+ * across this file and `sculpt.ts`, none of which merges. A chip appended at
+ * any one of them survives until the next lane runs and then vanishes, which
+ * for a chip whose job is continuous reassurance is worse than not having it.
+ * `setState` is the single writer of base HUD state, so this is the one place
+ * it cannot be dropped from.
+ *
+ * ### Why it earns the space
+ *
+ * The app was being reported wrongly — `NSWorkspace.frontmostApplication` is
+ * stale inside the sidecar, so Mull would read Slack while the user was in
+ * Chrome — and nothing on screen would have told you. The strategy, the send
+ * chord, the journal row and ⌥Z all key off this value; showing it makes the
+ * one input everything else depends on visible before the user commits to
+ * anything, instead of afterwards in a journal row.
+ *
+ * Prepended, because it is the subject of the sentence the other chips finish:
+ * *Slack · Reply · reading the window*.
+ *
+ * `id` is `app`, distinct from the `target` chip `sculpt.ts` puts on cards —
+ * they can be on screen together and they are not the same claim. One says
+ * where Mull is; the other says where this particular edit will land.
+ */
+function withAppChip(chips: HudChip[], app: HudState['app']): HudChip[] {
+  if (!app?.name) return chips
+  if (chips.some((chip) => chip.id === 'app')) return chips
+  return [{ kind: 'dict', id: 'app', label: app.name }, ...chips]
+}
 
 /**
  * The chip that says what Mull is looking at, shown while the user speaks.

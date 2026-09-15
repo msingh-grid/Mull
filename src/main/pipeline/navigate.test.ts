@@ -3,13 +3,14 @@ import type { ScreenContext } from '@shared/context'
 import type { HudCard, PlanCard } from '@shared/hud'
 import type { NavStep } from '@shared/nav'
 import type { UiTarget } from '@shared/sidecar-api'
+import type { HudLastAction } from '@shared/ipc'
 import type { JournalDraft, JournalEntry } from '@shared/types'
 import { FakeSidecar } from '../services/sidecar'
-import type { AnswerRequest, Engine } from '../engine/types'
+import type { AnswerRequest, Engine, NavigateRequest } from '../engine/types'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
 import { ActionExecutor } from './actions'
-import { NavigateLane } from './navigate'
+import { NavigateLane, describeChange } from './navigate'
 
 /**
  * The loop, and the two things about it that are not obvious.
@@ -48,6 +49,8 @@ function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil 
   const asked: number[] = []
   /** Every `answer` call, so a test can assert what the last turn was shown. */
   const answers: AnswerRequest[] = []
+  /** Every `navigate` call, so a test can assert what history said. */
+  const navRequests: NavigateRequest[] = []
   const engine = {
     name: 'test',
     model: null,
@@ -55,8 +58,9 @@ function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil 
     classify: async () => ({ kind: 'dictate' as const }),
     transform: async () => ({ text: '' }),
     compose: async () => ({ text: '' }),
-    navigate: async () => {
+    navigate: async (req: NavigateRequest) => {
       asked.push(asked.length)
+      navRequests.push(req)
       const next = steps[asked.length - 1]
       if (!next) throw new Error('the test ran out of steps')
       return next
@@ -69,23 +73,39 @@ function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil 
   } satisfies Engine
 
   const cards: PlanCard[] = []
-  /** Rows the *lane* wrote. The executor's per-step rows go to its own store. */
+  /** Every row written through this store — the lane's and the executor's. */
   const rows: JournalDraft[] = []
+  /** Annotations added after the fact, once a step's effect became visible. */
+  const amendments: Array<{ id: string; patch: { detail?: object; ms?: number } }> = []
   /** What the picture store was asked to file, and under which row id. */
   const filed: Array<{ id: string; context: ScreenContext | null | undefined }> = []
   const notices: string[] = []
+  /** The row the lane leaves for the idle panel. */
+  const lastActions: Array<HudLastAction | undefined> = []
   let act: ((action: 'apply' | 'apply-send' | 'cancel') => void) | null = null
+
+  // One store behind both writers, as in production: the executor files a row
+  // per step and the lane files one for the whole expedition, and the grouping
+  // only means anything if they land in the same place.
+  const journal = {
+    append: (draft: JournalDraft) => {
+      const entry = { ...draft, id: draft.id ?? `row-${rows.length}`, at: 0 }
+      rows.push(entry)
+      return entry as unknown as JournalEntry
+    },
+    amend: (id: string, patch: { detail?: object; ms?: number }) => {
+      amendments.push({ id, patch })
+      const row = rows.find((r) => r.id === id)
+      if (row) row.detail = { ...(row.detail ?? {}), ...(patch.detail ?? {}) }
+    }
+  }
+
   const lane = new NavigateLane({
     sidecar,
     engine,
-    executor: new ActionExecutor({ sidecar, sleep: async () => {} }),
+    executor: new ActionExecutor({ sidecar, sleep: async () => {}, journal }),
     sleep: async () => {},
-    journal: {
-      append: (draft: JournalDraft) => {
-        rows.push(draft)
-        return { ...draft, at: 0 } as unknown as JournalEntry
-      }
-    } as unknown as JournalStore,
+    journal: journal as unknown as JournalStore,
     captures: {
       save: (id: string, context: ScreenContext | null | undefined) => {
         filed.push({ id, context })
@@ -99,7 +119,10 @@ function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil 
       },
       updateCard: (card: HudCard) => cards.push(card as PlanCard),
       closeCard: () => {},
-      announce: (_phase, notice) => notices.push(notice)
+      announce: (_phase, notice, lastAction) => {
+        notices.push(notice)
+        lastActions.push(lastAction)
+      }
     }
   })
   return {
@@ -108,9 +131,23 @@ function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil 
     cards,
     asked,
     answers,
+    navRequests,
     rows,
     filed,
     notices,
+    amendments,
+    /** The expedition's own row, as opposed to the executor's per-step ones. */
+    planRow: () =>
+      rows.find(
+        (row) => row.intent.kind === 'command' && row.intent.verb === 'nav.plan'
+      ),
+    /** The rows the executor wrote, in the order the steps happened. */
+    stepRows: () =>
+      rows.filter(
+        (row) => row.intent.kind === 'command' && row.intent.verb.startsWith('nav.')
+          && row.intent.verb !== 'nav.plan'
+      ),
+    lastActions,
     run: () => act?.('apply'),
     cancel: () => act?.('cancel'),
     last: () => cards[cards.length - 1] as PlanCard
@@ -207,6 +244,197 @@ describe('Run', () => {
     expect(step?.state).toBe('failed')
     expect(step?.object).toContain('won’t press')
     expect(h.sidecar.targetActions).toEqual([])
+  })
+})
+
+/**
+ * The evidence a step leaves behind.
+ *
+ * This is the trace that prompted the work: a press opened Slack's search
+ * overlay, the target list went from 300 entries to 6, the window title did not
+ * move — and history said "the window is still …", so the model gave up one
+ * step from the answer.
+ */
+describe('did that step do anything', () => {
+  it('reads a replaced target list as movement, whatever the title says', () => {
+    const before = { harvestId: 'a', targets: targets(...Array.from({ length: 300 }, (_, i) => `row ${i}`)) }
+    const after = { harvestId: 'b', targets: targets('row 0', 'Cancel', 'Go', 'Recent', 'Filter', 'Clear') }
+    const change = describeChange(before, after)
+    expect(change.moved).toBe(true)
+    expect(change.detail).toContain('300 things to press became 6')
+  })
+
+  it('does not call a message arriving mid-plan a change', () => {
+    // The false-positive this threshold exists for: Slack gains a row on its
+    // own, and calling that "the press worked" is the confidence being removed.
+    const before = { harvestId: 'a', targets: targets(...Array.from({ length: 40 }, (_, i) => `row ${i}`)) }
+    const after = {
+      harvestId: 'b',
+      targets: targets(...Array.from({ length: 41 }, (_, i) => `row ${i}`))
+    }
+    const change = describeChange(before, after)
+    expect(change.moved).toBe(false)
+    expect(change.detail).toContain('did not change')
+  })
+
+  it('tells the next turn what the last press actually did', async () => {
+    const h = harness(
+      [
+        { verb: 'press', index: 0, label: 'Search' },
+        { verb: 'read' }
+      ],
+      targets('Search', 'Anil Turaga', 'Prahastha', 'General', 'Random')
+    )
+    // Pressing Search replaces the window, exactly as Slack does.
+    h.sidecar.onTargetAction = () => h.sidecar.retarget(['Cancel', 'Clear'])
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    const second = h.navRequests[1]
+    expect(second?.history[0]?.detail).toContain('the window changed')
+    expect(second?.history[0]?.detail).toContain('5 things to press became 2')
+  })
+})
+
+/**
+ * Giving up is a different outcome from arriving, and used to be recorded as
+ * the same one: a run that pressed four things and found nothing was filed as
+ * `applied` with the excuse as its answer.
+ */
+describe('giving up', () => {
+  it('tries once more when it surrenders with budget to spare', async () => {
+    const h = harness([
+      { verb: 'done', found: false, because: 'I cannot find that conversation' },
+      { verb: 'press', index: 1, label: 'Anil Turaga' },
+      { verb: 'read' }
+    ])
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    // It was asked again, and the surrender was fed back as something to
+    // answer for. (`history` is one array shared by reference across every
+    // request, so this asserts on content rather than on a position in it.)
+    expect(h.asked.length).toBeGreaterThanOrEqual(2)
+    const fedBack = h.navRequests[1]?.history.filter((a) =>
+      a.detail.includes('done(found:false)')
+    )
+    expect(fedBack).toHaveLength(1)
+    // And having tried again, it got there.
+    expect(h.last().answer).toContain('redlines')
+  })
+
+  it('accepts the second refusal rather than arguing with itself', async () => {
+    const h = harness([
+      { verb: 'done', found: false, because: 'not here' },
+      { verb: 'done', found: false, because: 'still not here' }
+    ])
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.asked.length).toBe(2)
+    expect(h.planRow()?.status).toBe('failed')
+  })
+
+  it('does not re-ask when there is no budget left to use', async () => {
+    const h = harness([{ verb: 'done', found: false, because: 'nope' }], targets('Search'))
+    // One step of budget: a retry could only produce the same answer again.
+    ;(h.lane as unknown as { maxSteps: number }).maxSteps = 1
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+    expect(h.asked.length).toBe(1)
+  })
+
+  it('files a surrender as failed, and hands the panel the reason', async () => {
+    const h = harness([
+      { verb: 'done', found: false, because: 'not here' },
+      { verb: 'done', found: false, because: 'still not here' }
+    ])
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.planRow()?.status).toBe('failed')
+    expect(h.lastActions.at(-1)?.result).toContain('still not here')
+  })
+})
+
+/**
+ * The panel used to go on showing the previous *dictation* after a plan, because
+ * this lane announced with two arguments and never passed a row of its own.
+ */
+describe('what the panel says afterwards', () => {
+  it('leaves behind the answer, not the question', async () => {
+    const h = harness([{ verb: 'press', index: 1, label: 'Anil Turaga' }, { verb: 'read' }])
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    const row = h.lastActions.at(-1)
+    expect(row?.result).toContain('redlines are with legal')
+    expect(row?.summary).toContain('Slack')
+    expect(row?.entryId).toBe(h.planRow()?.id)
+    // Nothing was written anywhere, so nothing is offered as undoable.
+    expect(row?.undoable).toBe(false)
+  })
+})
+
+/**
+ * The journal used to record an expedition as five unrelated COMMAND rows that
+ * happened to share a minute — a plan, and its presses, with nothing tying them
+ * together and no way to tell where seventeen seconds went.
+ */
+describe('what the journal keeps', () => {
+  it('ties every step to the expedition that took it', async () => {
+    const h = harness([
+      { verb: 'press', index: 1, label: 'Anil Turaga' },
+      { verb: 'read' }
+    ])
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    const plan = h.planRow()
+    expect(plan?.groupId).toBe(plan?.id)
+    // Every step points at the plan, including the ones written before the
+    // plan's own row existed — which is why the id is made up front.
+    expect(h.stepRows().map((row) => row.groupId)).toEqual([plan?.id, plan?.id])
+    expect(h.stepRows().map((row) => row.detail?.step)).toEqual([1, 2])
+  })
+
+  it('records how long each step took and what it was choosing from', async () => {
+    const h = harness(
+      [{ verb: 'press', index: 1, label: 'Anil Turaga' }, { verb: 'read' }],
+      targets('Search', 'Anil Turaga', 'Prahastha')
+    )
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    const [first] = h.stepRows()
+    expect(first?.ms).toBeGreaterThanOrEqual(0)
+    expect(first?.detail?.scan).toMatchObject({ targets: 3, press: 3, stoppedBy: 'complete' })
+    expect(h.planRow()?.ms).toBeGreaterThanOrEqual(0)
+  })
+
+  it('goes back and writes down what a press turned out to do', async () => {
+    // The evidence does not exist when the row is written — it takes the next
+    // look at the window to find out — so the row is annotated afterwards.
+    const h = harness(
+      [{ verb: 'press', index: 0, label: 'Search' }, { verb: 'read' }],
+      targets('Search', 'Anil Turaga', 'Prahastha', 'General', 'Random')
+    )
+    h.sidecar.onTargetAction = () => h.sidecar.retarget(['Cancel', 'Clear'])
+    await h.lane.propose(request)
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.amendments).toHaveLength(1)
+    expect(h.amendments[0]?.id).toBe(h.stepRows()[0]?.id)
+    expect(h.stepRows()[0]?.detail?.evidence).toContain('5 things to press became 2')
   })
 })
 
@@ -350,8 +578,9 @@ describe('the journal row', () => {
     h.run()
     await vi.waitFor(() => expect(h.last().running).toBe(false))
 
-    expect(h.rows).toHaveLength(1)
-    const [row] = h.rows
+    // One expedition row, plus the executor's row per step.
+    expect(h.stepRows()).toHaveLength(2)
+    const row = h.planRow()
     expect(row?.capture).not.toBeNull()
     expect(row?.after).toContain('redlines')
     expect(row?.status).toBe('applied')
@@ -372,8 +601,8 @@ describe('the journal row', () => {
     h.cancel()
 
     expect(h.rows).toHaveLength(1)
-    expect(h.rows[0]?.status).toBe('cancelled')
-    expect(h.rows[0]?.capture).not.toBeNull()
+    expect(h.planRow()?.status).toBe('cancelled')
+    expect(h.planRow()?.capture).not.toBeNull()
     expect(h.sidecar.targetActions).toEqual([])
   })
 
@@ -383,8 +612,8 @@ describe('the journal row', () => {
     h.run()
     await vi.waitFor(() => expect(h.last().running).toBe(false))
 
-    expect(h.rows[0]?.status).toBe('failed')
-    expect(h.rows[0]?.after ?? null).toBeNull()
-    expect(h.rows[0]?.verified).toBe(false)
+    expect(h.planRow()?.status).toBe('failed')
+    expect(h.planRow()?.after ?? null).toBeNull()
+    expect(h.planRow()?.verified).toBe(false)
   })
 })

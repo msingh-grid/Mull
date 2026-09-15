@@ -105,6 +105,49 @@ export interface JournalEntry {
    * that is what the model read.
    */
   capture?: CaptureRecord | null
+  /**
+   * The plan this row belongs to — the `nav.plan` row's own id.
+   *
+   * Null on everything that stands alone, which is most rows. It exists because
+   * an expedition writes one row per press plus one for itself, and without a
+   * thread between them the journal showed five unrelated `COMMAND` lines that
+   * happened to land in the same minute. Knowing that four presses *were* one
+   * request is most of what makes the record readable afterwards.
+   */
+  groupId?: string | null
+  /** How long this entry took, in ms. Null where nothing measured it. */
+  ms?: number | null
+  /** Everything worth keeping whose shape depends on which lane wrote it. */
+  detail?: EntryDetail | null
+}
+
+/**
+ * The parts of a row that vary by lane.
+ *
+ * One loose object rather than columns, because the renderer prints it rather
+ * than querying it, and because a lane that learns to record something new
+ * should not need a migration to do it.
+ *
+ * Every string here can be model-authored, so every string here is clamped
+ * before it is written — see `clampDetail` in `store/journal.ts`.
+ */
+export interface EntryDetail {
+  /** Position within its plan, 1-based. */
+  step?: number
+  /** The model's own words for why it did this. */
+  because?: string
+  /**
+   * What the step turned out to have done, learned one turn later.
+   *
+   * Written by `amend`, not by the row's author: whether a press moved anything
+   * is only knowable from the *next* look at the window, which happens after
+   * the row already exists.
+   */
+  evidence?: string
+  /** The list the model was choosing from at the moment it chose. */
+  scan?: { targets: number; press: number; type: number; stoppedBy: string }
+  /** How long the model took to answer. */
+  askMs?: number
 }
 
 /** The evidence behind one entry: what was read, and what was seen. */

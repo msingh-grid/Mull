@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { ScreenContext } from '@shared/context'
 import type { AnswerCard } from '@shared/hud'
+import type { HudLastAction } from '@shared/ipc'
 import type { JournalDraft } from '@shared/types'
 import type { Engine } from '../engine/types'
 import type { JournalStore } from '../store/journal'
@@ -53,8 +54,19 @@ export interface AskDeps {
     openCard(card: AnswerCard, onAction: (action: 'apply' | 'apply-send' | 'cancel') => void): void
     updateCard(card: AnswerCard): void
     closeCard(): void
-    /** The working line under the label, while the answer is still arriving. */
-    update?(patch: { stage: string | null; stageAt: number | null }): void
+    /**
+     * The working line under the label, and the row left behind afterwards.
+     *
+     * `lastAction` rides this port rather than `announce` because an answered
+     * question keeps its card open until the user dismisses it — there is no
+     * announcement to attach it to. Writing it into base state here means the
+     * row is already correct underneath by the time the card goes away.
+     */
+    update?(patch: {
+      stage?: string | null
+      stageAt?: number | null
+      lastAction?: HudLastAction | null
+    }): void
     announce?(phase: 'applied' | 'error' | 'blocked', notice: string): void
   }
   journal?: JournalStore
@@ -122,8 +134,23 @@ export class AskLane {
       }
 
       show(answer)
-      this.deps.hud.update?.({ stage: null, stageAt: null })
-      this.record(request, answer)
+      const entry = this.record(request, answer)
+      // The answer, kept where the idle panel can still show it. Without this
+      // the row underneath goes on describing whatever was dictated before the
+      // question, and the answer is gone the moment the card is dismissed.
+      this.deps.hud.update?.({
+        stage: null,
+        stageAt: null,
+        lastAction: {
+          summary: `Answered · ${request.app?.name ?? 'this app'} · “${request.question}”`,
+          at: Date.now(),
+          chars: answer.length,
+          entryId: entry?.id ?? null,
+          // An answer is read, never written. There is nothing to take back.
+          undoable: false,
+          result: answer
+        }
+      })
     } catch (err) {
       trace.fail('ask.failed', { ms: askMs() }, err)
       this.deps.log?.('warn', 'ask: the engine did not answer', err)
@@ -144,8 +171,8 @@ export class AskLane {
    * it owes the same receipt. Never throws: a question that was answered must
    * not fail after the fact because the journal would not take it.
    */
-  private record(request: AskRequest, answer: string | null): void {
-    if (!this.deps.journal) return
+  private record(request: AskRequest, answer: string | null): { id: string } | null {
+    if (!this.deps.journal) return null
     try {
       const id = randomUUID()
       const draft: JournalDraft = {
@@ -166,8 +193,10 @@ export class AskLane {
       }
       this.deps.journal.append(draft)
       this.deps.onJournalChanged?.()
+      return { id }
     } catch (err) {
       this.deps.log?.('error', 'ask: journal write failed', err)
+      return null
     }
   }
 }

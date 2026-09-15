@@ -10,34 +10,42 @@
    only opaque thing on it.
    ========================================================================== */
 
-/* The window is a bottom-anchored stage: the panel sits 24px above the screen
-   edge and grows upward as chips and cards appear, so the top row never moves. */
+/* The window is a bottom-anchored stage: the pet sits 24px above the screen
+   edge and the panel grows upward from it as chips and cards appear, so
+   neither the pet nor the panel's top row ever moves. */
 .hud-stage {
   position: fixed;
   inset: 0;
   display: flex;
-  align-items: flex-end;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
   padding: 0 0 24px;
-  pointer-events: none; /* only the panel takes clicks */
+  pointer-events: none; /* only the panel and the pet take clicks */
 }
 
 /**
- * The panel's handle.
+ * The handle, holding the panel and the pet.
  *
- * A flex child of the stage, so it shrink-wraps the panel exactly — it must not
- * be wider, or the window would hit-test a full-screen-wide strip and start
- * eating clicks meant for the app underneath. Within those bounds it is the
- * only thing that takes pointer events: hovering anywhere on the paper makes
- * the window clickable, and dragging from anywhere on it moves the HUD.
+ * A flex child of the stage, so it shrink-wraps its contents exactly — it must
+ * not be wider, or the window would hit-test a full-screen-wide strip and start
+ * eating clicks meant for the app underneath. Collapsed, that means the window
+ * is clickable across 60 pixels of cat and transparent everywhere else. Within
+ * those bounds it is the only thing that takes pointer events: hovering it
+ * makes the window clickable, and dragging from anywhere on it moves the HUD.
  *
  * Buttons and the scrollable diff body opt out of *dragging* in the handler
- * rather than here, because they still need their own hover and clicks.
+ * rather than here, because they still need their own hover and clicks. The
+ * pet is the exception among buttons: it is the only thing always on screen,
+ * so it has to stay draggable (see `onPointerDown` in App.tsx).
  */
 .hud-grip {
   pointer-events: auto;
   cursor: grab;
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
 }
 
 .hud-grip:active {
@@ -51,6 +59,129 @@
 
 .hud-grip button {
   cursor: pointer;
+}
+
+/* ── The pet (§6.1a) ─────────────────────────────────────────────────────────
+
+   Marmalade, at `assets/marmalade.webp`: an 8 × 9 sheet of 192×208 cells,
+   57 frames across nine animations. Scaled by 5/16, which is the largest scale
+   under half size that leaves both axes whole — 60×65 per frame, 480×585 for
+   the sheet — so no frame ever lands on a half pixel and bleeds its neighbour.
+
+   Frames per row, measured from the sheet's alpha rather than assumed:
+     0  6  idle, blinking          5  8  sad (frames 4–7 are the sitting ones)
+     1  8  run                     6  6  content idle
+     2  8  run, reversed           7  6  walk
+     3  4  wave                    8  6  paw to chin, arms folded
+     4  5  leap
+   Run and walk go unused. They are the makings of a pet that wanders the
+   screen when it is left alone, which is not this change.
+
+   Every row used here has its ink at y 5–202 within the cell, so the cat's feet
+   stay at one height and it never appears to jump as the mood changes. */
+.pet {
+  --pet-frame-w: 60px;
+  --pet-frame-h: 65px;
+  position: relative;
+  flex: none;
+  width: var(--pet-frame-w);
+  height: var(--pet-frame-h);
+  padding: 0;
+  border: 0;
+  background: none;
+  appearance: none;
+}
+
+/* It is the drag handle as much as it is a button, and `.hud-grip button`
+   above would otherwise make it claim to be only the latter. */
+.hud-grip .pet {
+  cursor: grab;
+}
+.hud-grip .pet:active {
+  cursor: grabbing;
+}
+
+.pet-sprite {
+  position: absolute;
+  inset: 0;
+  /* Set by the component from a bundler import — see Pet.tsx. */
+  background-image: var(--pet-sheet);
+  background-repeat: no-repeat;
+  /* Scaled here rather than in the file: the transparent pixels carry
+     undefined colour, and resampling the sheet would drag it into the edges
+     as a halo. Chromium scales with alpha in mind; an image editor would not. */
+  background-size: 480px 585px;
+}
+
+/* Grounds the cat against whatever window is behind it — without this it reads
+   as pasted on rather than standing there. Painted under the sprite, not baked
+   into it, so it is one shape in `--ink` that dark mode inverts for free. */
+.pet-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 34px;
+  height: 6px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: var(--ink);
+  opacity: 0.16;
+  filter: blur(1.5px);
+}
+
+/* One keyframe per frame count, reused: the row is a static
+   `background-position-y`, so only the length of the walk along x differs.
+   `steps(n)` shows frames 0…n-1 — the `to` value is the stop, not a frame,
+   which is why it is one cell past the last one. */
+@keyframes pet-4 { from { background-position-x: 0; } to { background-position-x: -240px; } }
+@keyframes pet-6 { from { background-position-x: 0; } to { background-position-x: -360px; } }
+/* The leap, which is the one animation that ends rather than loops — so the
+   stop *is* displayed, and with `jump-end` it would be the empty sixth cell of
+   a five-frame row: the cat would blink out of existence on landing.
+   `jump-none` spreads the five values across [0,1] inclusive instead, so the
+   last frame is reached exactly at the end and `forwards` holds it. */
+@keyframes pet-leap { from { background-position-x: 0; } to { background-position-x: -240px; } }
+/* Sad, from frame 4: the first four are a stand-sit-wipe-curl sequence whose
+   silhouettes are too different to loop without a pop. The last four are the
+   same sitting pose, and read as one unhappy little animation. */
+@keyframes pet-sad {
+  from { background-position-x: -240px; }
+  to   { background-position-x: -480px; }
+}
+
+.pet.is-rest .pet-sprite {
+  background-position-y: 0;
+  animation: pet-6 2.4s steps(6) infinite;
+}
+/* Dozing: held on the second frame of the content idle, eyes shut. There is no
+   sleeping pose on the sheet — the one curled-up frame is mid-cry, and a cat
+   that weeps because you stopped typing is not the note to end on. */
+.pet.is-asleep .pet-sprite {
+  background-position: -60px -390px;
+}
+.pet.is-listening .pet-sprite {
+  background-position-y: -195px;
+  animation: pet-4 0.72s steps(4) infinite;
+}
+.pet.is-working .pet-sprite {
+  background-position-y: -520px;
+  animation: pet-6 1.5s steps(6) infinite;
+}
+/* Calm on purpose. Something is owed a decision, and a fidgeting cat beside a
+   card the user is trying to read is asking for attention it does not need. */
+.pet.is-waiting .pet-sprite {
+  background-position-y: -390px;
+  animation: pet-6 2.2s steps(6) infinite;
+}
+/* Once, then held on the landing — `applied` is only 1 400ms, and a leap on a
+   loop would still be leaping after the thing it was pleased about was gone. */
+.pet.is-done .pet-sprite {
+  background-position-y: -260px;
+  animation: pet-leap 0.6s steps(5, jump-none) 1 forwards;
+}
+.pet.is-trouble .pet-sprite {
+  background-position-y: -325px;
+  animation: pet-sad 2.4s steps(4) infinite;
 }
 
 .hud {
@@ -248,11 +379,26 @@
   margin-top: 9px;
   padding-top: 8px;
   border-top: 1px solid var(--hairline-soft);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.last-action-meta {
   display: flex;
   align-items: center;
   gap: 7px;
-  font-size: 11px;
-  color: var(--ink-3);
+}
+/* What the action produced. A shade darker than the meta line above it —
+   the answer is the thing worth reading, and the provenance is the caption. */
+.last-action-result {
+  margin-top: 4px;
+  color: var(--ink-2);
+  line-height: 1.45;
+  /* Two lines, then an ellipsis. The full text lives in the journal; this is a
+     reminder of what came back, not a second place to read it. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 .last-action .sep { opacity: 0.6; }
 .last-action .undo { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
@@ -508,4 +654,7 @@ kbd {
     animation: none;
   }
   .hud.is-listening .wave i { transform: scaleY(2); }
+  /* The cat holds the first frame of its row — still the right pose for the
+     mood, just not moving through it. */
+  .pet-sprite { animation: none; }
 }

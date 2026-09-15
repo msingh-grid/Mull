@@ -54,8 +54,29 @@ export const NavStepSchema = z.discriminatedUnion('verb', [
   z.object({ verb: z.literal('navKey'), key: NavKeySchema }),
   /** Look at wherever we have arrived. Writes nothing. */
   z.object({ verb: z.literal('read') }),
-  /** Finished — with or without an answer. `because` goes on the card. */
-  z.object({ verb: z.literal('done'), because: z.string() })
+  /**
+   * Finished. `because` goes on the card.
+   *
+   * `found` splits the two very different things this verb used to mean.
+   * "I got there and here is what it says" and "I could not get there" were
+   * both recorded as a successful plan with the surrender as its answer, which
+   * is how a run that pressed four things and gave up appeared in the journal
+   * as `applied`.
+   *
+   * Separating them buys three things: an honest journal status, a card that
+   * says it failed instead of presenting defeat as a finding, and the one
+   * signal the loop needs to decide whether a second attempt is worth a step.
+   *
+   * Optional rather than required, and absent means *found*. A model that
+   * omits it has almost certainly finished normally, and failing the parse
+   * would turn a good answer into a dead plan. Read it as `found !== false`,
+   * never as `!found` — see `gaveUp` in `pipeline/navigate.ts`.
+   */
+  z.object({
+    verb: z.literal('done'),
+    found: z.boolean().optional(),
+    because: z.string()
+  })
 ])
 export type NavStep = z.infer<typeof NavStepSchema>
 

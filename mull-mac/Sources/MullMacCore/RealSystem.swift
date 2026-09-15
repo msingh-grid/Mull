@@ -80,15 +80,8 @@ public final class RealSystem: SystemActions {
     // MARK: - Context
 
     public func frontmostApp() -> (app: AppInfo?, windowTitle: String?) {
-        guard let running = NSWorkspace.shared.frontmostApplication else {
-            return (nil, nil)
-        }
-        let info = AppInfo(
-            bundleId: running.bundleIdentifier ?? "",
-            name: running.localizedName ?? "",
-            pid: Int(running.processIdentifier)
-        )
-        return (info, focusedWindowTitle(pid: running.processIdentifier))
+        guard let front = Frontmost.resolve() else { return (nil, nil) }
+        return (front.app, focusedWindowTitle(pid: front.pid))
     }
 
     private func focusedWindowTitle(pid: pid_t) -> String? {
@@ -445,7 +438,7 @@ public final class RealSystem: SystemActions {
     /// The pasteboard is saved and restored around the copy, the same way the
     /// paste strategy does, so the user's clipboard survives.
     private func frontmostPid() -> pid_t {
-        NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
+        Frontmost.resolve()?.pid ?? 0
     }
 
     public func selectedText(allowCopy: Bool) -> SelectionLookup {
@@ -591,6 +584,11 @@ public final class RealSystem: SystemActions {
         } else {
             activated = app.activate(options: [.activateIgnoringOtherApps])
         }
+        // We just moved the front ourselves, so the cached answer describes the
+        // app we left. Everything the navigator does after an activation — the
+        // settle, the scan, the press — would otherwise spend the TTL aimed at
+        // the wrong process.
+        if activated { Frontmost.invalidate() }
         return (activated, activated ? nil : "activate-failed")
     }
 

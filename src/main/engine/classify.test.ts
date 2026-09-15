@@ -1,5 +1,20 @@
 import { describe, expect, it } from 'vitest'
+import type { UiTarget } from '@shared/sidecar-api'
 import { CLASSIFIER_FIELD_CHARS, classifyPrompt, parseClassification } from './classify'
+
+const target = (index: number, title: string): UiTarget => ({
+  index,
+  role: 'AXRow',
+  subrole: null,
+  title,
+  help: null,
+  value: null,
+  frame: null,
+  actions: ['AXPress'],
+  enabled: true,
+  focused: false,
+  kind: 'press'
+})
 
 describe('classifyPrompt', () => {
   const base = {
@@ -14,7 +29,43 @@ describe('classifyPrompt', () => {
     const prompt = classifyPrompt({ ...base, fieldText: 'sorry I was late' })
     expect(prompt).toContain('<said>\nmake my last message less apologetic\n</said>')
     expect(prompt).toContain('<field>\nsorry I was late\n</field>')
-    expect(prompt).toContain('<app>Slack</app>')
+    expect(prompt).toContain('name="Slack"')
+    expect(prompt).toContain('bundle="com.tinyspeck.slackmacgap"')
+  })
+
+  it('names the window, so “is Priya already in front of me” is answerable', () => {
+    const prompt = classifyPrompt({
+      ...base,
+      context: {
+        app: base.app,
+        windowTitle: 'Anil Turaga (DM) - Grid Dynamics - Slack',
+        blocks: [{ role: 'AXStaticText', text: 'morning', label: null, focused: false, selected: false }],
+        truncated: false,
+        image: null,
+        imageReason: null,
+        chars: 7,
+        harvestMs: 4
+      }
+    })
+    expect(prompt).toContain('window="Anil Turaga (DM) - Grid Dynamics - Slack"')
+  })
+
+  it('lists what can be pressed, so “here” can be told from “elsewhere”', () => {
+    const prompt = classifyPrompt({ ...base, targets: [target(0, 'Direct Messages'), target(1, 'eng-platform')] })
+    expect(prompt).toContain('<targets>')
+    expect(prompt).toContain('eng-platform')
+  })
+
+  it('says how many targets it left out rather than silently truncating', () => {
+    // A cut-off list reads exactly like a complete one, and "the channel is not
+    // in this window" is the wrong conclusion to draw from a list that stopped.
+    const many = Array.from({ length: 80 }, (_, i) => target(i, `row ${i}`))
+    const prompt = classifyPrompt({ ...base, targets: many })
+    expect(prompt).toContain('and 20 more not listed')
+  })
+
+  it('sends no target block when the window was never scanned', () => {
+    expect(classifyPrompt(base)).not.toContain('<targets')
   })
 
   it('shows the selection instead of the field when there is one', () => {

@@ -3,7 +3,19 @@ import { createRoot } from 'react-dom/client'
 import type { DiffSegment } from '@shared/hud'
 import type { JournalEntryView } from '@shared/types'
 import { DiffBody } from './components/Cards'
-import { KIND_LABEL, rowKind, rowMeasure, rowTime, undoAffordance } from './journal/row-model'
+import {
+  KIND_LABEL,
+  groupEntries,
+  groupView,
+  planMeasure,
+  rowElapsed,
+  rowKind,
+  rowMeasure,
+  rowTime,
+  stepToggleTarget,
+  undoAffordance,
+  type JournalGroup
+} from './journal/row-model'
 import { applyTheme } from './theme'
 import './tokens.css'
 import './hud.css'
@@ -157,6 +169,7 @@ function Detail({ entry }: { entry: JournalEntryView }): JSX.Element {
       )}
       {affordance.why ? <div className="why">{affordance.why}</div> : null}
       <WhatMullSaw entry={entry} />
+      <Everything entry={entry} />
       <div className="meta">
         <span>{new Date(entry.at).toLocaleString()}</span>
         <span>strategy: {entry.strategyUsed ?? 'none'}</span>
@@ -169,27 +182,97 @@ function Detail({ entry }: { entry: JournalEntryView }): JSX.Element {
   )
 }
 
+/**
+ * The whole of what was recorded, summarised nowhere.
+ *
+ * The row above is a sentence and the sentence is a choice about what mattered.
+ * This is the rest: the verb and its arguments, what the user actually said,
+ * how long it took, what the model was choosing from, and what the step turned
+ * out to have done. A record you have to take on trust is not much of a record,
+ * and "press · DMs" told nobody why DMs.
+ */
+function Everything({ entry }: { entry: JournalEntryView }): JSX.Element | null {
+  const intent = entry.intent
+  const detail = entry.detail
+  const facts: Array<[string, string]> = []
+
+  const say = (label: string, value: string | number | null | undefined): void => {
+    if (value === null || value === undefined || value === '') return
+    facts.push([label, String(value)])
+  }
+
+  if (intent.kind === 'command') {
+    say('verb', intent.verb)
+    const args = Object.entries(intent.args ?? {})
+    for (const [key, value] of args) say(key, typeof value === 'object' ? JSON.stringify(value) : String(value))
+  }
+  say('said', 'transcript' in intent ? intent.transcript : undefined)
+  if (intent.kind === 'edit') say('instruction', intent.instruction)
+  if (intent.kind === 'ask') say('question', intent.question)
+  say('app', entry.app?.bundleId)
+  say('status', entry.status)
+  say('took', rowElapsed(entry.ms))
+  say('step', detail?.step)
+  say('decided in', rowElapsed(detail?.askMs))
+  say('because', detail?.because)
+  // The one thing the journal could never say before: whether the press did
+  // anything. It is written after the fact, once the next look at the window
+  // revealed it — see `JournalStore.amend`.
+  say('effect', detail?.evidence)
+  if (detail?.scan) {
+    say(
+      'chose from',
+      `${detail.scan.targets} targets (${detail.scan.press} press, ${detail.scan.type} type) · ${detail.scan.stoppedBy}`
+    )
+  }
+  say('group', entry.groupId)
+
+  if (facts.length === 0) return null
+  return (
+    <div className="everything">
+      <div className="everything-head">Everything recorded</div>
+      <dl>
+        {facts.map(([label, value]) => (
+          <div className="fact" key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  )
+}
+
 function Row({
   entry,
   expanded,
+  steps,
+  ordinal,
   onToggle,
   onUndo
 }: {
   entry: JournalEntryView
   expanded: boolean
+  /** How many steps hang off this row, when it heads an expedition. */
+  steps?: number
+  /** Its position within one, when it is a step. */
+  ordinal?: number
   onToggle: () => void
   onUndo: () => void
 }): JSX.Element {
   const kind = rowKind(entry)
-  const measure = rowMeasure(entry)
+  const measure =
+    steps !== undefined && steps > 0 ? planMeasure(entry, steps) : rowMeasure(entry)
   const affordance = undoAffordance(entry)
+  const elapsed = ordinal !== undefined ? rowElapsed(entry.ms) : null
 
   return (
     <div className="journal-entry">
       <div className="journal-row">
+        {ordinal !== undefined ? <span className="ordinal">{ordinal}</span> : null}
         <span className={`kind ${kind}`}>{KIND_LABEL[kind]}</span>
         <span className="app">{entry.app?.name ?? 'Unknown app'}</span>
-        <span className="time">{rowTime(entry.at)}</span>
+        <span className="time">{elapsed ?? rowTime(entry.at)}</span>
         <span className="sep">—</span>
         <button
           type="button"
@@ -212,6 +295,55 @@ function Row({
         </button>
       </div>
       {expanded ? <Detail entry={entry} /> : null}
+    </div>
+  )
+}
+
+/**
+ * An expedition and the steps it took, or a lone entry.
+ *
+ * The steps sit under the plan rather than beside it because they were one
+ * request, and the list used to show them as five unrelated rows. They are
+ * collapsed by default — but the plan's row says *how many* there are, so a
+ * closed group never looks like nothing happened. The journal's promise is
+ * that everything Mull did is visible; a disclosure is allowed to fold it, not
+ * to hide that it exists.
+ */
+function Group({
+  group,
+  expandedId,
+  onToggle,
+  onUndo
+}: {
+  group: JournalGroup
+  expandedId: string | null
+  onToggle: (id: string) => void
+  onUndo: (id: string) => void
+}): JSX.Element {
+  const { open, headOpen } = groupView(group, expandedId)
+  return (
+    <div className={group.steps.length > 0 ? 'journal-group' : undefined}>
+      <Row
+        entry={group.head}
+        steps={group.steps.length}
+        expanded={headOpen}
+        onToggle={() => onToggle(group.head.id)}
+        onUndo={() => onUndo(group.head.id)}
+      />
+      {open && group.steps.length > 0 ? (
+        <div className="journal-steps">
+          {group.steps.map((step, index) => (
+            <Row
+              key={step.id}
+              entry={step}
+              ordinal={step.detail?.step ?? index + 1}
+              expanded={expandedId === step.id}
+              onToggle={() => onToggle(stepToggleTarget(group, step.id, expandedId))}
+              onUndo={() => onUndo(step.id)}
+            />
+          ))}
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -280,13 +412,13 @@ function Journal(): JSX.Element {
           <div className="empty">Nothing yet. Hold ⌥Space and say something.</div>
         ) : (
           <div className="journal-list">
-            {entries.map((entry) => (
-              <Row
-                key={entry.id}
-                entry={entry}
-                expanded={expanded === entry.id}
-                onToggle={() => toggle(entry.id)}
-                onUndo={() => void undo(entry.id)}
+            {groupEntries(entries).map((group) => (
+              <Group
+                key={group.head.id}
+                group={group}
+                expandedId={expanded}
+                onToggle={toggle}
+                onUndo={(id) => void undo(id)}
               />
             ))}
           </div>

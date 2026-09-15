@@ -424,6 +424,7 @@ describe('DictationPipeline — routing', () => {
     await settle()
     const listening = h.states.filter((s) => s.phase === 'listening').at(-1)
     expect(listening?.chips).toEqual([
+      { kind: 'dict', id: 'app', label: 'TextEdit' },
       { kind: 'dict', id: 'focus', label: 'TextEdit — 4 words' }
     ])
     h.pipe.end()
@@ -563,12 +564,44 @@ describe('DictationPipeline — an instruction about the field in front of you',
     h.pipe.dispose()
   })
 
+  it('keeps naming the app when a lane replaces the whole chip array', async () => {
+    // The reason the chip is injected in setState rather than at the call
+    // sites: every chip write in the codebase replaces the array wholesale, so
+    // a chip added anywhere else lasts exactly until the next lane runs. The
+    // classifier fallback at `chips: [routing offline]` is one such replace.
+    const h = harness({ sidecar: withComposer(), sculpt: true, classifies: 'offline' })
+    // Fn, not ⌥Space: dictation never consults an engine, so it never falls
+    // back and never sets the chip this test is about.
+    h.pipe.begin('instruct')
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    const replaced = h.states.find((s) => s.chips.some((chip) => chip.id === 'routing'))
+    expect(replaced, 'the routing-offline chip should have been set').toBeDefined()
+    expect(replaced?.chips.map((chip) => chip.id)).toEqual(['app', 'routing'])
+    h.pipe.dispose()
+  })
+
+  it('says nothing about the app once there is no app — idle earns its silence', async () => {
+    const h = harness({ sidecar: withComposer(), sculpt: true, classifies: { kind: 'dictate' } })
+    h.pipe.begin()
+    await settle()
+    h.pipe.end()
+    await settle()
+    const idle = h.states.filter((s) => s.phase === 'idle').at(-1)
+    expect(idle?.chips.some((chip) => chip.id === 'app')).toBe(false)
+    h.pipe.dispose()
+  })
+
   it('names the field in the chip while you are still speaking', async () => {
     const h = harness({ sidecar: withComposer(), sculpt: true, classifies: { kind: 'dictate' } })
     h.pipe.begin()
     await settle()
 
     expect(h.states.filter((s) => s.phase === 'listening').at(-1)?.chips).toEqual([
+      { kind: 'dict', id: 'app', label: 'TextEdit' },
       { kind: 'dict', id: 'focus', label: 'TextEdit — this field' }
     ])
     h.pipe.end()

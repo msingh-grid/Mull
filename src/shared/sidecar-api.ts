@@ -276,8 +276,21 @@ export const UiTargetsResultSchema = z.object({
   harvestId: z.string(),
   targets: z.array(UiTargetSchema),
   truncated: z.boolean(),
-  /** 'complete' | 'nodes' | 'deadline' | 'targets' | 'no-window'
-   *  | 'no-accessibility' | 'secure-input' | 'tree-warming' */
+  /**
+   * 'complete' | 'nodes' | 'deadline' | 'targets' | 'no-window'
+   * | 'no-accessibility' | 'secure-input' | 'tree-warming' | 'browser-cold'
+   *
+   * `browser-cold` is the one that is not about budgets. A Chromium browser
+   * builds its page accessibility only once something wakes it, and until then
+   * it answers every query politely with its own furniture — Back, Reload, the
+   * tab strip — and nothing whatsoever from the page. The targets are real and
+   * pressable; they are simply not what anybody meant. Measured on Chrome 152:
+   * asleep, 190 nodes and no page; awake, 3836 nodes with 2999 from the page.
+   *
+   * Said out loud because "this page has no buttons" and "this browser is not
+   * showing me the page" are indistinguishable from the sidecar's side and
+   * want opposite responses from the user.
+   */
   stoppedBy: z.string(),
   scanMs: z.number().int().nonnegative()
 })
