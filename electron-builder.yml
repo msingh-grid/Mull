@@ -28,6 +28,11 @@ extraResources:
 
 mac:
   category: public.app-category.productivity
+  # Named rather than left to the `build/icon.icns` default, because what is
+  # there is a PNG: electron-builder makes the .icns from it, and a silent
+  # fallback to Electron's own icon is the kind of thing nobody notices until
+  # the DMG is open. Regenerate with `npm run icons` after editing `icons/`.
+  icon: build/icon.png
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist

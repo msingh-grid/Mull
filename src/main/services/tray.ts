@@ -1,5 +1,6 @@
 import { Menu, Tray, nativeImage } from 'electron'
 import type { HudPhase, MullWindow } from '@shared/ipc'
+import { TRAY_ICON_1X, TRAY_ICON_2X } from './tray-icon'
 
 /**
  * Menu-bar presence (docs/DESIGN.md §6.7).
@@ -8,12 +9,26 @@ import type { HudPhase, MullWindow } from '@shared/ipc'
  * reach the journal, settings and onboarding — and the only place that says
  * "Mull is running" when the HUD is idle and invisible.
  *
- * **M3 uses text glyphs, not template images.** §6.7 asks for a monochrome
- * template icon with an ochre attention badge; that needs real assets, which
- * arrive in M6 with the app icon. A glyph is an honest placeholder: it shows
- * the four states, it tints correctly with the menu bar, and it does not
- * pretend to be the finished mark. The attention state degrades to `!` rather
- * than the badge.
+ * ### The mark, at last
+ *
+ * This shipped with text glyphs — `◦` for idle — as an honest placeholder,
+ * because §6.7 asks for a monochrome template icon and there was no artwork.
+ * There is now. The glyph was doing its job badly in one specific way: at rest,
+ * which is nearly all of the time, Mull was a full stop in the menu bar and
+ * indistinguishable from a rendering artefact.
+ *
+ * It is a **template image**, which is the whole reason it works: macOS
+ * discards the colour and re-tints the alpha for light mode, dark mode and the
+ * highlighted state, so Mull never has to know which one it is in. The pixels
+ * are black-on-transparent for that reason, not by preference.
+ *
+ * ### Why a glyph survives beside it
+ *
+ * §6.7 wants an ochre badge for the attention state, and a badge is a second
+ * asset composited at runtime. Until there is one, the states are carried by a
+ * short suffix next to the mark — which is what the placeholder always did,
+ * and the part of it that was working. Idle carries nothing at all, so the
+ * common case is the icon alone.
  */
 
 export type TrayState = 'idle' | 'listening' | 'working' | 'attention'
@@ -36,11 +51,19 @@ export function trayStateFor(phase: HudPhase): TrayState {
   }
 }
 
+/**
+ * What sits beside the mark, per state.
+ *
+ * Idle is empty on purpose: at rest the icon says everything there is to say,
+ * and a glyph next to it would be Mull decorating someone's menu bar for no
+ * reason. The other three are a space and one character — enough to notice out
+ * of the corner of an eye, not enough to read as a second icon.
+ */
 const GLYPH: Record<TrayState, string> = {
-  idle: '◦', // hollow ring — resident, not listening
-  listening: '●', // filled
-  working: '● ⋯', // filled + trailing dot
-  attention: '● !'
+  idle: '',
+  listening: ' ●',
+  working: ' ⋯',
+  attention: ' !'
 }
 
 export interface TrayMenuHandlers {
@@ -57,6 +80,24 @@ export interface TrayMenuHandlers {
   quit: () => void
 }
 
+/**
+ * The mark, at both scale factors, as one image.
+ *
+ * Two representations rather than two files: macOS picks 1× or 2× per display,
+ * and a Mac with one of each attached wants both available at once. Built from
+ * data URLs because `TRAY_ICON_*` is a bundled module rather than a path — see
+ * `tray-icon.ts` for why that is not a shortcut.
+ */
+function trayIcon(): Electron.NativeImage {
+  const icon = nativeImage.createEmpty()
+  icon.addRepresentation({ scaleFactor: 1, dataURL: `data:image/png;base64,${TRAY_ICON_1X}` })
+  icon.addRepresentation({ scaleFactor: 2, dataURL: `data:image/png;base64,${TRAY_ICON_2X}` })
+  // The line that makes macOS own the colour. Without it the mark stays black
+  // and disappears into a dark menu bar.
+  icon.setTemplateImage(true)
+  return icon
+}
+
 export class TrayPresence {
   private tray: Tray | null = null
   private state: TrayState = 'idle'
@@ -66,9 +107,7 @@ export class TrayPresence {
 
   start(): void {
     if (this.tray) return
-    // An empty image plus a title: macOS renders the title in the menu bar and
-    // tints it for us, which is exactly the template behaviour we want.
-    this.tray = new Tray(nativeImage.createEmpty())
+    this.tray = new Tray(trayIcon())
     this.tray.setToolTip('Mull')
     this.apply()
   }

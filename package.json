@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "rebuild:native": "electron-rebuild -f -m .",
     "check:native": "electron scripts/native-check.cjs",
+    "icons": "electron scripts/make-icons.cjs",
     "fetch:model": "tsx scripts/fetch-model.ts",
     "smoke": "tsx scripts/smoke.ts",
     "bench:engine": "tsx scripts/bench-engine.ts",
