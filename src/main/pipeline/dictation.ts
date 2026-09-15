@@ -571,7 +571,7 @@ export class DictationPipeline {
           question: routed.route.question,
           screen: routed.snapshot.context?.chars ?? 0
         })
-        this.stage('reading this window')
+        this.stage('reading what it saw')
         await this.deps.ask.run({
           question: routed.route.question,
           transcript: text,

@@ -1,4 +1,4 @@
-import type { HudCard, HudChip } from '@shared/hud'
+import { cardFamily, type HudCard, type HudChip } from '@shared/hud'
 import type { HudState } from '@shared/ipc'
 
 /**
@@ -136,20 +136,36 @@ function stateClassFor(state: HudState): string {
   }
 }
 
+/**
+ * One slot, four kinds of thing — so each kind gets its own word and its own
+ * colour, and the *form* says which before the word is read.
+ *
+ *   activity   LISTENING · THINKING · WRITING     what Mull is doing
+ *   card       PREVIEW · PLAN · ANSWER            what is waiting on you
+ *   fault      PAUSED (ochre) · ERROR (red)       what stopped
+ *   outcome    APPLIED (green)                    what landed
+ *
+ * The card words name the three things Mull can do, because that is the one
+ * thing the card's shape says and its title does not: PREVIEW changes your
+ * document, PLAN presses things in another application, ANSWER changes nothing
+ * at all. A plan and a diff both saying "preview" made a proposal about
+ * behaviour indistinguishable from a proposal about text.
+ */
 function labelFor(state: HudState): string {
-  // Neither of these is a preview. A preview is a proposal about something
-  // that has not happened yet, and both of these have already happened — an
-  // answer card proposes nothing at all, and a finished read-only plan has no
-  // Apply and nothing waiting on the user. Labelling them PREVIEW invites a
-  // decision that does not exist.
-  if (state.card?.kind === 'answer') return 'ANSWER'
-  if (state.card?.kind === 'plan' && state.card.answer && !state.card.running) return 'FOUND'
-  // Otherwise a card on screen is a proposal waiting to be judged, whatever the
-  // phase says. Deciding this from `phase` alone meant every lane had to
-  // remember to announce one — and the navigator did not, so a plan card sat
-  // under the word THINKING and stayed there after the plan had finished. The
-  // card is the fact; the phase is a claim about it.
-  if (state.card) return 'PREVIEW'
+  const card = state.card
+  // A card on screen is the fact; the phase is a claim about it. Deciding this
+  // from `phase` alone meant every lane had to remember to announce one — and
+  // the navigator did not, so a plan card sat under the word THINKING and
+  // stayed there after the plan had finished and the window had been put back.
+  if (card) {
+    // Not a preview: a preview is a proposal about something that has not
+    // happened, and a `wont` card is a report on something that has. That
+    // covers an answer and a plan whose walk is over, which is why FOUND no
+    // longer needs to exist — a finished plan *is* an answer, and now looks
+    // like one.
+    if (cardFamily(card) === 'wont') return 'ANSWER'
+    return card.kind === 'plan' ? 'PLAN' : 'PREVIEW'
+  }
   switch (state.phase) {
     case 'idle':
       return 'IDLE'
@@ -157,19 +173,21 @@ function labelFor(state: HudState): string {
       return 'LISTENING'
     case 'thinking':
       return 'THINKING'
+    // "Inserting" is the implementation's word for it. The product's metaphor
+    // is an editor with a pencil, and a pencil writes.
     case 'inserting':
-      return 'INSERTING'
+      return 'WRITING'
     case 'applied':
       return 'APPLIED'
     case 'blocked':
       return 'PAUSED'
     case 'error':
       return 'ERROR'
-    // §6.1: THINKING while the card is still filling in, PREVIEW once it can
-    // actually be judged. Labelling a half-written diff PREVIEW invites the
-    // user to decide on evidence that has not finished arriving.
+    // §6.1: THINKING while the card is still filling in. Labelling a
+    // half-written diff PREVIEW invites the user to decide on evidence that
+    // has not finished arriving.
     case 'preview':
-      return state.card ? 'PREVIEW' : 'THINKING'
+      return 'THINKING'
   }
 }
 

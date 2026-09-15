@@ -74,9 +74,38 @@ Non-activating floating panel (`type:'panel'`, transparent window, `focusable:fa
 **States** (class on the panel root):
 - `is-idle` — orb hollow (inset 1.5px ring in `--ink-3`), waveform static low ticks in `--ink-3`, transcript shows ghost hint (*"Hold ⌥Space to dictate · Fn to ask"*, serif italic `--ink-3`), label `IDLE` in `--ink-3`. The hint names both keys because a key nobody knows about is a feature that does not exist. Optional `last-action` ghost row: hairline-top, 11px `--ink-3`, "Applied · summary · time" + `⌥Z undo` kbd right-aligned. Since §6.1a this state is reached only by asking for it or by having just finished something — the idle panel is no longer what is on screen by default.
 - `is-listening` — orb fills `--ink` + ping; bars animate in `--ink-2`; transcript streams live with `--ins` caret; label `LISTENING` in `--ink`; intent chip rises in as soon as the router decides.
-- `is-thinking` — same as listening but static waveform, label `THINKING`; used while the engine streams.
-- `is-preview` — diff or plan card open; label `THINKING` until card completes, then `PREVIEW`.
-- `is-applied` — label `APPLIED`, brief; then back to idle with the new last-action ghost.
+- `is-thinking` — same as listening but static waveform, label `THINKING`; used while the engine streams. Insertion shares the treatment and says `WRITING`.
+- `is-preview` — a card is open; the label names which of the three it is (below).
+- `is-applied` — label `APPLIED` in `--mem`, brief; then back to idle with the new last-action ghost.
+- `is-blocked` / `is-error` — `PAUSED` in `--warn`, `ERROR` in `--del`. Ochre is something the user can fix — secure input, a missing permission, a model that is not answering. Red pencil is something that failed. They shared ochre until the states board, which flattened a distinction §2 exists to make.
+
+**The label vocabulary.** One slot carrying four kinds of thing, so each kind takes its own word *and its own colour*, and the form says which before the word is read:
+
+| kind | labels | colour |
+|---|---|---|
+| activity | `LISTENING` · `THINKING` · `WRITING` | `--ink` / `--ink-3` |
+| card | `PREVIEW` · `PLAN` · `ANSWER` | `--ink` |
+| fault | `PAUSED` · `ERROR` | `--warn` / `--del` |
+| outcome | `APPLIED` | `--mem` |
+
+The three card words name the three things Mull can do, because that is the one thing the card's shape says and its title does not: `PREVIEW` changes your document, `PLAN` presses things in another application, `ANSWER` changes nothing at all. A plan and a diff both saying "preview" made a proposal about behaviour indistinguishable from a proposal about text. `INSERTING` became `WRITING` (the implementation's word for the product's metaphor), and `FOUND` is gone — a finished plan *is* an answer and now looks like one.
+
+### 6.2a Card families — what it costs to press the key
+*(Board: `design/hud-states.html`.)*
+
+The one question a user has before touching the keyboard, answered by the card's **ground** rather than by its words. Derived in `cardFamily` (`@shared/hud`) from the card itself; a lane cannot set it, and a new card kind stops compiling until it decides. Both halves read it — `services/hud.ts` for what ⏎ does, `components/Cards.tsx` for what the card is made of.
+
+| | `will` | `wont` |
+|---|---|---|
+| means | something can still happen | nothing more will |
+| ground | `--paper-bright` — fresh paper | `--paper-recessed` — pressed into the desk |
+| buttons | the one filled `--ins` button in the app | ghost only; **never** a filled button |
+| ⏎ | Apply / Run (except `send`, where it stays claimed and inert) | done |
+| cards | diff, send, plan before and during its walk | answer, plan once its walk is over |
+
+One rule, visible from across the room: **fresh paper means a key changes something; a pressed-in well means nothing will.** The Apply button that turned up under a summary of somebody's own notes could not survive it — an answer has no fresh paper to put it on. It also closes a live bug: `running` going false put **Run** straight back on a finished plan, so ⏎ started the whole walk again in somebody else's window.
+
+**The promise sits under the button it describes**, not at the right margin of the action row. Three hundred pixels of separation is how the only sentence naming what a key costs ended up far from the key that costs it.
 
 ### 6.1a Pet — the resting form
 The panel used to be on screen the whole time Mull was running, and almost all of that time it was idle: a hollow orb, a static waveform and a hint, holding 480px of somebody else's window to report that nothing was happening. At rest Mull is now a 60×65 pixel cat, bottom-centred on the same stage, and the panel grows upward from it. The pet never moves — it is the one fixed point, and it is the drag handle for the whole HUD.
@@ -116,7 +145,7 @@ Key hints inside chips: mono 11px at 70% opacity.
 `--paper-bright`, 1px `--hairline`, `--r-inner`, padding 10px 12px 11px, `rise-in` at `--t-med`. Title row: 11px label style, `--ink-3` — "EDIT PREVIEW · {app}" left, "{n} changes" right. Body: mono 12px/1.7 in `--ink-2`, `max-height: var(--diff-max-h)` scroll (thin scrollbar), **the only scrollable region in the HUD**.
 - `del`: `--del` text on `--del-wash`, 1.5px line-through in `--del-line`, radius 2px, padding 0 1px.
 - `ins`: `--ins` text 600 on `--ins-wash`, no text-decoration, 1px bottom border `--ins-line`.
-Actions row: `Apply ⏎` (filled `--ins`, text `--on-ins`, hover `--ins-hover`), `Cancel esc` (ghost, `--hairline` border), and right-aligned undo promise: "`⌥Z` undoes after apply" (11px `--ink-3`). The undo path is stated in the same breath as the action — always.
+Actions row: `Apply ⏎` (filled `--ins`, text `--on-ins`, hover `--ins-hover`) and `Cancel esc` (ghost, `--hairline` border); the undo promise — "`⌥Z` undoes this after you apply it", 11px `--ink-3` — sits on its own line **directly beneath them** (`.promise`, §6.2a). The undo path is stated in the same breath as the action, and now in the same place as it.
 
 **The second commit (M5a).** When the card carries a `commit`, a third button sits between Apply and Cancel: `Apply & send ⌘⏎`, outlined in ochre (`--warn` text, `--warn-wash` fill, `--warn-edge` border). Ochre because hue always means fact (§2) and this fact is *you cannot take this back* — not a louder Apply. It is never the filled button and never the default: ⏎ still applies and only applies, so a press out of habit lands text and sends nothing. The undo promise is replaced, not joined, by "sending can't be undone" in `--warn` — the old line is not true of the button beside it, and two promises is one too many to read at speed. The commit appears only when the user's own words asked to send *and* the app's send chord is known (`services/send-table.ts`); an app Mull has not been told about gets no button, because a guessed keystroke in someone else's window is the one mistake here that has no undo.
 
@@ -126,7 +155,11 @@ For "send the message" — a composer the user has already filled, and a request
 **No Apply, and ⏎ does nothing.** There is nothing to apply. Return stays globally claimed while the card is open and is swallowed — releasing it would let a stray press reach Slack and send the very message the card is still asking about. The text is re-read immediately before the keystroke and the send is refused if it changed, the same rule `stillMatches` applies to an edit.
 
 ### 6.4 Plan card (commands)
-Same card shell and title style as the diff card ("PLAN · {n} steps" left; verb chip context right). Steps: mono 12px/1.7 rows, each `{index}. {verb} {object}` in `--ink-2`, with a right-aligned per-step state cell (mono, min-width 18px): pending `·` in `--ink-3` → running `…` in `--ins` → done `✓` in `--mem` → failed `✕` in `--del`. Running step's text lifts to `--ink`. Actions: `Run ⏎` (filled `--ins`), `Cancel esc`, undo promise right ("each step journaled"). Steps never auto-run; the card is a proposal until Run.
+Same card shell and title style as the diff card ("PLAN · {n} steps" left; verb chip context right). Steps: mono 12px/1.7 rows, each `{index}. {verb} {object}` in `--ink-2`, with a right-aligned per-step state cell (mono, min-width 18px): pending `·` in `--ink-3` → running `…` in `--ins` → done `✓` in `--mem` → failed `✕` in `--del`. Running step's text lifts to `--ink`. Actions while it is a proposal or is walking: `Run ⏎` (filled `--ins`), `Cancel esc` / `Stop esc`, promise beneath ("read-only · nothing is written or sent"). Steps never auto-run; the card is a proposal until Run.
+
+**Then it settles.** When the walk ends the card crosses to the `wont` family (§6.2a): the ground recesses, the title becomes "Answer · {app}", the goal row drops away, Run is replaced by a ghost `Done ⏎`, and the promise becomes a flat statement of fact ("Nothing was written · back in {window}"). The steps stay — they are how the answer was come by — but the answer itself is rendered **outside** the scrolling step body, in serif, so six steps cannot push the thing the user actually asked for out of sight beneath the thing that fetched it.
+
+A press prints where it landed rather than the label the model chose: "press Anil Turaga → Anil Turaga (DM) · Slack", or that the window is still the one it started in. `AXPress` reports that an action was accepted, not that it did anything.
 
 ### 6.5 Journal row
 Flex row: `--paper` ground, `--hairline` border, `--r-inner`, padding 11px 14px, `--shadow-row`. Cells: kind tag (11px/700 uppercase on `--ins-wash`/`--ins` — Edit; Dictation uses neutral `--paper-recessed`/`--ink-2`; Command uses `--ins-wash`; failed/undone uses `--del-wash`/`--del`) · app (`--ink-2`) · time (`--ink-3`, tabular) · — · summary (serif 13px `--ink`, quoted, ellipsized) · change count (`--ink-3`) · `Undo` ghost button. Row expands on click to before/after (diff-card styling reused). The list virtualizes past ~50 rows (`content-visibility: auto` at minimum); expanded state is reflected in the window's route/query so entries deep-link.

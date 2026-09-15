@@ -488,3 +488,45 @@ describe('HudController — a run', () => {
     expect(h.shortcuts.size).toBe(0)
   })
 })
+
+/**
+ * A finished plan, and the bug the card family closes.
+ *
+ * `running` going false put the **Run** button straight back on a card that had
+ * already walked, so ⏎ on a finished navigation started the whole thing again —
+ * in somebody else's window. The family says the card is a report now, and both
+ * the button and the key follow it.
+ */
+describe('HudController — a plan that has finished walking', () => {
+  const walked = {
+    kind: 'plan' as const,
+    steps: [{ id: 'a', verb: 'press', object: 'Anil Turaga', state: 'done' as const }],
+    context: null,
+    goal: 'open the conversation with Anil Turaga',
+    app: 'Slack',
+    limit: 6,
+    running: false,
+    answer: 'The redlines are with legal.'
+  }
+
+  it('never runs it a second time', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(walked, onAction)
+
+    h.fire('Return')
+    expect(onAction).not.toHaveBeenCalledWith('apply')
+    expect(onAction).toHaveBeenCalledWith('cancel')
+    expect(h.controller.hasCard).toBe(false)
+  })
+
+  /** A plan still waiting on Run is untouched: ⏎ is how you start it. */
+  it('leaves an unrun plan alone', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard({ ...walked, steps: [], answer: null }, onAction)
+
+    h.fire('Return')
+    expect(onAction).toHaveBeenCalledWith('apply')
+  })
+})

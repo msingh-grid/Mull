@@ -290,12 +290,21 @@
 }
 .hud.is-listening .state-label,
 .hud.is-preview .state-label { color: var(--ink); }
-.hud.is-blocked .state-label,
-.hud.is-error .state-label { color: var(--warn); }
+/* Ochre is something the user can fix — secure input, a missing permission, a
+   model that is not answering. Red pencil is something that failed. They wore
+   the same colour, which flattened a distinction the hue system exists to make
+   (§2: hue always means fact). Green is the one outcome that went entirely
+   right, and it had no colour at all. */
+.hud.is-blocked .state-label { color: var(--warn); }
+.hud.is-error .state-label { color: var(--del); }
+.hud.is-applied .state-label { color: var(--mem); }
 /* Not bold, not tracked: the seconds are a reassurance, not a deadline. */
 .state-elapsed {
   font-weight: 500;
   letter-spacing: 0;
+  /* Not inherited from the label: "6s" is a measurement, and "6S" is a label
+     pretending to be one. */
+  text-transform: none;
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
 }
@@ -446,6 +455,18 @@
 }
 
 /* ── Cards (§6.3, §6.4) ──────────────────────────────────────────────────── */
+/* The card's ground says what it costs to press a key, before a word is read.
+
+   `is-will` — something can still happen: an edit to apply, a message to send,
+   a plan to run. Fresh paper, and the one filled button in the app sits on it.
+   `is-wont` — nothing more will. The card is pressed into the desk instead, and
+   carries no filled button at all, because a filled accent button is this app's
+   word for *this commits*.
+
+   Derived in `cardFamily` (@shared/hud) rather than set per lane, so a new lane
+   cannot forget and a new card kind stops compiling until it decides. The
+   transition is visible: a plan settles from one to the other the moment its
+   walk is over. */
 .card {
   margin-top: 11px;
   background: var(--paper-bright);
@@ -453,6 +474,13 @@
   border-radius: var(--r-inner);
   padding: 10px 12px 11px;
   animation: rise-in var(--t-med) var(--ease-out) both;
+  transition:
+    background var(--t-med) var(--ease-out),
+    border-color var(--t-med) var(--ease-out);
+}
+.card.is-wont {
+  background: var(--paper-recessed);
+  border-color: var(--hairline-soft);
 }
 .card-title {
   display: flex;
@@ -527,8 +555,13 @@
   margin-top: 10px;
   padding-top: 9px;
   border-top: 1px solid var(--hairline-soft);
+  /* The same voice as `.card-body.is-answer`, because it is the same thing:
+     prose Mull wrote for the human to read back. Two surfaces carrying one
+     kind of writing must not be set in two faces. */
+  font-family: var(--serif);
+  font-size: var(--fs-transcript);
+  line-height: 1.58;
   color: var(--ink);
-  line-height: 1.5;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 190px;
@@ -596,26 +629,41 @@
   white-space: pre-wrap;
 }
 
-/* An answer is prose to be read, not a diff to be inspected — so it drops the
-   monospace the other bodies use for character-level comparison, and takes the
-   reading measure and full ink instead. */
+/* An answer is prose to be read, not a diff to be inspected, so it drops the
+   monospace the other bodies use for character-level comparison.
+
+   Serif, not sans, and the design system decides that rather than taste: §1
+   casts serif for *anything the human said or is reading back*, and an answer
+   is exactly something being read back. It shipped as sans, which quietly
+   filed Mull's answer with the instrument's own labels — the voice reserved
+   for the machine talking about itself. */
 .card-body.is-answer {
-  font-family: var(--sans);
-  font-size: var(--fs-body);
-  line-height: 1.55;
+  font-family: var(--serif);
+  font-size: var(--fs-transcript);
+  line-height: 1.58;
   color: var(--ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
 /* Every destructive-ish action states its undo path in the same breath (§7.2). */
-.undo-promise {
-  margin-left: auto;
+/* The promise, directly under the button it describes.
+
+   It used to be `margin-left: auto` at the far right of the action row, which
+   put the one sentence naming what a key costs about three hundred pixels from
+   the key that costs it — and that distance is how an **Apply** came to sit
+   under a summary of somebody's own notes with nothing nearby to contradict it.
+
+   A caption, so it reads as belonging to the buttons rather than trailing
+   them. */
+.promise {
+  margin-top: 7px;
   font-size: 11px;
+  line-height: 1.45;
   color: var(--ink-3);
 }
-/* "sending can’t be undone" is a fact about the button beside it, not a hint. */
-.undo-promise.is-warning { color: var(--warn); }
+/* "sending can’t be undone" is a fact about the button above it, not a hint. */
+.promise.is-warning { color: var(--warn); }
 
 kbd {
   font-family: var(--mono);

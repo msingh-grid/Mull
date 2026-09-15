@@ -87,7 +87,7 @@ export class AskLane {
       screen: request.context?.chars ?? 0,
       image: request.context?.image ? `${Math.round(request.context.image.bytes / 1024)}KB` : undefined
     })
-    this.deps.hud.update?.({ stage: 'reading this window', stageAt: Date.now() })
+    this.deps.hud.update?.({ stage: 'reading what it saw', stageAt: Date.now() })
 
     const card = (text: string): AnswerCard => ({
       kind: 'answer',

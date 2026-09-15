@@ -205,3 +205,45 @@ export type HudCard = DiffCard | PlanCard | SendCard | AnswerCard
  * always done here; they have not sent a message.
  */
 export type HudAction = 'apply' | 'apply-send' | 'cancel'
+
+/**
+ * Will pressing a key on this card make anything happen?
+ *
+ * The one question a user has before touching the keyboard, and until now the
+ * answer was spread across four card types with four different action
+ * grammars: the button in the first position was sometimes the thing that
+ * writes (Apply), sometimes the thing that starts a process (Run), sometimes
+ * the thing that closes (Done), and sometimes absent. ⏎ therefore meant four
+ * things, which is exactly how an **Apply** ended up under a summary of
+ * somebody's own notes, one reflexive Return from pasting it back in.
+ *
+ * So it is derived here, from the card itself, and both halves of the app read
+ * it: `services/hud.ts` decides what ⏎ does, `components/Cards.tsx` decides
+ * what the card is made of. A lane cannot set it, and a new card kind cannot
+ * forget to — the switch below stops compiling instead.
+ *
+ *   `will`  something can still happen. Fresh paper (`--paper-bright`), the
+ *           one filled button in the app, and a promise naming the cost.
+ *   `wont`  nothing more will. Pressed into the desk (`--paper-recessed`),
+ *           no filled button anywhere, and ⏎ means done.
+ *
+ * A plan crosses from one to the other: a proposal while it waits for Run and
+ * while it walks, a report the moment the walk is over. That transition is
+ * visible, and it is the same moment the card stops offering to run again.
+ */
+export type CardFamily = 'will' | 'wont'
+
+export function cardFamily(card: HudCard): CardFamily {
+  switch (card.kind) {
+    case 'diff':
+    case 'send':
+      return 'will'
+    case 'answer':
+      return 'wont'
+    case 'plan':
+      // Still running: something is happening. Never run at all: Run is still
+      // on offer. Anything else means it has been and come back.
+      if (card.running) return 'will'
+      return card.steps.length > 0 || card.answer ? 'wont' : 'will'
+  }
+}

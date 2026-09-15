@@ -1,5 +1,5 @@
 import { IDLE_HUD_STATE, type HudAction, type HudState } from '@shared/ipc'
-import type { HudCard } from '@shared/hud'
+import { cardFamily, type HudCard } from '@shared/hud'
 import type { ChordScope } from './chords'
 
 /**
@@ -137,12 +137,13 @@ export class HudController {
       this.options.log?.('info', 'hud: ⏎ while a run is in flight — claimed and inert')
       return
     }
-    // An answer card proposes nothing, so there is no "yes" for ⏎ to be —
-    // but there is also nothing at stake in closing it, and a Done button
-    // whose ⏎ hint did nothing would be a lie printed on the card. Return
-    // means done here, and it can only ever mean done: this card has no text,
-    // no target and no commit to reach.
-    if (action === 'apply' && this.card?.kind === 'answer') action = 'cancel'
+    // A card nothing more can happen on has no "yes" for ⏎ to be — but there
+    // is also nothing at stake in closing it, and a Done button whose ⏎ hint
+    // did nothing would be a lie printed on the card. Return means done there,
+    // and it can only ever mean done: a `wont` card has no text, no target and
+    // no commit to reach. This is also what stops a finished plan from
+    // offering to walk the whole thing again.
+    if (action === 'apply' && this.card && cardFamily(this.card) === 'wont') action = 'cancel'
     // …and the other way round. Swallowed rather than downgraded to a cancel:
     // a card that vanished because the user brushed ⏎ is a card they have to
     // ask for again, and this one is one keystroke from an irreversible act.
@@ -245,16 +246,17 @@ function offersCommit(card: HudCard | null): boolean {
 /**
  * Does ⏎ mean Apply on this card?
  *
- * On most cards it does. Two do not, and for opposite reasons:
+ * Only on a card something can still happen on, and only when that something
+ * is not a send. Two exclusions, for opposite reasons:
  *
  *   send    has nothing to apply, and ⏎ must stay *claimed and inert* — Mull
  *           holds Return globally while a card is open, and letting it through
  *           to Slack would send the very message the card is asking about.
- *   answer  has nothing to apply either, but nothing is at risk, so ⏎ is
- *           translated to a cancel in `act` before it reaches here. That is
- *           the whole difference between a card that proposes an irreversible
- *           act and one that proposes nothing at all.
+ *   `wont`  has nothing to apply either, but nothing is at risk, so ⏎ was
+ *           already translated to a cancel in `act` before it reached here.
+ *           That is the whole difference between a card that proposes an
+ *           irreversible act and one that proposes nothing at all.
  */
 function acceptsApply(card: HudCard | null): boolean {
-  return card !== null && card.kind !== 'send' && card.kind !== 'answer'
+  return card !== null && card.kind !== 'send' && cardFamily(card) === 'will'
 }

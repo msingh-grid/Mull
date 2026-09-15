@@ -332,7 +332,11 @@ export class AgentLane {
     stage(null)
     trace.step('agent.restore', { ok: back.ok, detail: back.detail })
 
-    const closing = answer ? back.detail : `${note_} · ${back.detail}`
+    // The card has settled into the `wont` family by now, so the promise
+    // under it is a flat statement of fact rather than an undo path.
+    const closing = answer
+      ? `Nothing was written · ${back.detail}`
+      : `${note_} · ${back.detail}`
     this.deps.hud.updateCard(
       card({ steps: [...steps], running: false, note: closing, answer })
     )

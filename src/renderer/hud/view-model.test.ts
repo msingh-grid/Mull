@@ -80,31 +80,47 @@ describe('hudView', () => {
   })
 
   /**
-   * A finished read-only plan has no Apply and nothing pending on it. Calling
-   * that a PREVIEW invites a decision that does not exist — the answer on the
-   * card is the thing the user asked for, not a proposal about it.
+   * Three card words for the three things Mull can do, because that is what the
+   * card's shape says and its title does not: PREVIEW changes your document,
+   * PLAN presses things in another application, ANSWER changes nothing.
+   *
+   * A plan and a diff both saying "preview" made a proposal about behaviour
+   * indistinguishable from a proposal about text.
    */
-  it('says FOUND once a plan has an answer and has stopped running', () => {
-    const walked = { ...planCard, running: true, answer: 'The redlines are with legal.' }
-    expect(hudView(state({ phase: 'thinking', card: walked })).label).toBe('PREVIEW')
-    expect(hudView(state({ phase: 'applied', card: { ...walked, running: false } })).label).toBe(
-      'FOUND'
-    )
-    // A plan still deciding its first step is a preview like any other.
-    expect(hudView(state({ phase: 'thinking', card: planCard })).label).toBe('PREVIEW')
-  })
-
-  /** An answer proposes nothing, so calling it a preview is simply wrong. */
-  it('says ANSWER for the card with nothing to apply', () => {
+  it('names the three things a card can cost', () => {
+    expect(hudView(state({ phase: 'preview', card: diffCard })).label).toBe('PREVIEW')
+    expect(hudView(state({ phase: 'thinking', card: planCard })).label).toBe('PLAN')
     const answer = { kind: 'answer' as const, app: 'Notes', text: 'Three tasks remain.' }
     expect(hudView(state({ phase: 'thinking', card: answer })).label).toBe('ANSWER')
-    expect(hudView(state({ phase: 'preview', card: answer })).label).toBe('ANSWER')
   })
 
-  it('treats inserting as thinking visually, but says INSERTING', () => {
+  /**
+   * FOUND is gone because a finished plan *is* an answer and now looks like
+   * one — the card settles into the `wont` family, and the label follows it
+   * rather than needing a tenth word of its own.
+   */
+  it('calls a finished plan an answer, not a preview and not a plan', () => {
+    const walked = {
+      ...planCard,
+      steps: [{ id: 'a', verb: 'press', object: 'Anil Turaga', state: 'done' as const }],
+      answer: 'The redlines are with legal.'
+    }
+    expect(hudView(state({ phase: 'thinking', card: { ...walked, running: true } })).label)
+      .toBe('PLAN')
+    expect(hudView(state({ phase: 'applied', card: { ...walked, running: false } })).label)
+      .toBe('ANSWER')
+    // Proposed and never run: still a plan, and Run is still on offer.
+    expect(hudView(state({ phase: 'thinking', card: planCard })).label).toBe('PLAN')
+  })
+
+  /**
+   * "Inserting" is the implementation's word. The product's metaphor is an
+   * editor with a pencil, and a pencil writes.
+   */
+  it('treats inserting as thinking visually, but says WRITING', () => {
     const view = hudView(state({ phase: 'inserting' }))
     expect(view.stateClass).toBe('is-thinking')
-    expect(view.label).toBe('INSERTING')
+    expect(view.label).toBe('WRITING')
   })
 
   it('takes mouse events only while a card is open', () => {

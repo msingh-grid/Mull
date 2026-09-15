@@ -508,7 +508,14 @@ export class NavigateLane {
       const shown = steps.find((candidate) => candidate.id === id)
       if (shown) {
         shown.state = result.ok ? 'done' : 'failed'
+        // What happened, not the label the model chose. A press reports the
+        // window it landed in — "Anil Turaga → Anil Turaga (DM) · Slack", or
+        // that the window is still the one we started in — which is the whole
+        // difference between a step that worked and one that was merely
+        // accepted. The executor has returned this since the navigator was
+        // caught pressing the same row twice; only the card ignored it.
         if (!result.ok) shown.object = `${shown.object} — ${result.detail}`
+        else if (result.detail) shown.object = result.detail
       }
       history.push({ step, ok: result.ok, detail: result.detail })
       draw()
@@ -570,7 +577,11 @@ export class NavigateLane {
     // The answer is the note once there is one: "51 blocks · 6023 chars · back
     // in Prahastha" under a card that has just printed three paragraphs about
     // Anil would be Mull talking about itself over its own answer.
-    const closing = answer ? back.detail : `${note} · ${back.detail}`
+    // The card has settled into the `wont` family by now, so the promise
+    // under it is a flat statement of fact rather than an undo path.
+    const closing = answer
+      ? `Nothing was written · ${back.detail}`
+      : `${note} · ${back.detail}`
     this.deps.hud.updateCard(
       card({ steps: [...steps], running: false, note: closing, answer })
     )
