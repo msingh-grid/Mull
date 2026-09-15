@@ -541,7 +541,14 @@ async function bootstrap(): Promise<void> {
       updateCard: (card) => hud?.updateCard(card),
       closeCard: () => hud?.closeCard(),
       update: (patch) => void pipeline?.patchState(patch),
-      announce: (phase, notice) => void pipeline?.announce(phase, notice)
+      // All three arguments. The third was dropped here for as long as this
+      // lane has existed, so a finished expedition left the idle panel showing
+      // whatever had been *dictated* before it — the user asked a question and
+      // the row underneath answered with something they said minutes ago. The
+      // lane builds a full `HudLastAction` for exactly this (`navigate.ts`), and
+      // the sculpt adapter above has always forwarded it.
+      announce: (phase, notice, lastAction) =>
+        void pipeline?.announce(phase, notice, lastAction)
     },
     trace: () => pipeline?.currentTrace() ?? new Trace(),
     log: logFn

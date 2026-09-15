@@ -10,6 +10,8 @@ import type { AnswerRequest, Engine, NavigateRequest } from '../engine/types'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
 import { ActionExecutor } from './actions'
+import { ChordScope } from '../services/chords'
+import { HudController } from '../services/hud'
 import { NavigateLane, describeChange } from './navigate'
 
 /**
@@ -82,7 +84,43 @@ function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil 
   const notices: string[] = []
   /** The row the lane leaves for the idle panel. */
   const lastActions: Array<HudLastAction | undefined> = []
-  let act: ((action: 'apply' | 'apply-send' | 'cancel') => void) | null = null
+
+  /**
+   * A real `HudController`, not a stub.
+   *
+   * The stub it replaces had a no-op `closeCard` and an `updateCard` that always
+   * appended, which meant no test in this file could observe the card's actual
+   * lifetime — and the card was in fact being closed the instant Run was
+   * pressed, so every later `draw()` was swallowed and Escape went back to the
+   * app being driven. A fake that cannot fail is worse than no fake, because it
+   * is budgeted for.
+   *
+   * `cards` is collected from the port rather than from the calls, so it holds
+   * what the renderer would actually have been sent.
+   */
+  const shortcuts = new Set<string>()
+  const handlers = new Map<string, () => void>()
+  const controller = new HudController({
+    port: {
+      send: (state) => {
+        if (state.card) cards.push(state.card as PlanCard)
+      },
+      setInteractive: () => {}
+    },
+    chords: new ChordScope({
+      globalShortcut: {
+        register: (accelerator, callback) => {
+          shortcuts.add(accelerator)
+          handlers.set(accelerator, callback)
+          return true
+        },
+        unregister: (accelerator) => {
+          shortcuts.delete(accelerator)
+          handlers.delete(accelerator)
+        }
+      }
+    })
+  })
 
   // One store behind both writers, as in production: the executor files a row
   // per step and the lane files one for the whole expedition, and the grouping
@@ -113,12 +151,9 @@ function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil 
       }
     } as unknown as CaptureStore,
     hud: {
-      openCard: (card: HudCard, onAction) => {
-        cards.push(card as PlanCard)
-        act = onAction
-      },
-      updateCard: (card: HudCard) => cards.push(card as PlanCard),
-      closeCard: () => {},
+      openCard: (card: HudCard, onAction) => controller.openCard(card, onAction),
+      updateCard: (card: HudCard) => controller.updateCard(card),
+      closeCard: () => controller.closeCard(),
       announce: (_phase, notice, lastAction) => {
         notices.push(notice)
         lastActions.push(lastAction)
@@ -148,8 +183,13 @@ function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil 
           && row.intent.verb !== 'nav.plan'
       ),
     lastActions,
-    run: () => act?.('apply'),
-    cancel: () => act?.('cancel'),
+    controller,
+    /** Which global chords the card is holding right now. */
+    shortcuts,
+    /** Press one, exactly as `globalShortcut` would. */
+    fire: (accelerator: string) => handlers.get(accelerator)?.(),
+    run: () => controller.act('apply'),
+    cancel: () => controller.act('cancel'),
     last: () => cards[cards.length - 1] as PlanCard
   }
 }
@@ -445,6 +485,72 @@ describe('Escape', () => {
     h.cancel()
     expect(h.sidecar.targetActions).toEqual([])
     expect(h.asked).toEqual([])
+  })
+
+  /**
+   * The other Escape, which until now could not happen at all: the card was
+   * closed the instant Run was pressed, so the chord was released and nothing
+   * could deliver a cancel to a walk in flight.
+   */
+  it('stops a walk that has started, and still puts the window back', async () => {
+    const h = harness([
+      { verb: 'press', index: 1, label: 'Anil Turaga' },
+      { verb: 'press', index: 0, label: 'Search' },
+      { verb: 'read' }
+    ])
+    await h.lane.propose(request)
+    // The card is holding the chords for the whole run — that is the stop.
+    expect(h.shortcuts).toEqual(new Set(['Return', 'Escape']))
+    // As soon as the first press lands, the user hits esc.
+    h.sidecar.onTargetAction = () => h.fire('Escape')
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    // One press, not three: the loop checked between steps and stopped.
+    expect(h.sidecar.targetActions.filter((a) => a.verb === 'press')).toHaveLength(1)
+    expect(h.sidecar.activated).toContain('com.tinyspeck.slackmacgap')
+  })
+
+  /**
+   * A stop is not a decline, and the difference is the whole reason this has
+   * its own branch. Declining files "nothing was pressed"; said after a press
+   * has landed that is the journal lying about the one thing it exists to
+   * record, because a press already dispatched cannot be un-pressed.
+   */
+  it('files a stop as the plan’s own row, never as a decline', async () => {
+    const h = harness([
+      { verb: 'press', index: 1, label: 'Anil Turaga' },
+      { verb: 'read' }
+    ])
+    await h.lane.propose(request)
+    h.sidecar.onTargetAction = () => h.fire('Escape')
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.rows.some((row) => row.summary.startsWith('Declined ·'))).toBe(false)
+    const plan = h.planRow()
+    expect(plan?.status).toBe('failed')
+    expect(h.stepRows().length).toBeGreaterThan(0)
+    // And the card says so, rather than implying nothing happened.
+    expect(h.last().note).toMatch(/stays pressed/)
+    expect(h.notices.join(' ')).not.toMatch(/nothing was pressed/)
+  })
+
+  it('leaves ⏎ claimed and inert while the walk is running', async () => {
+    const h = harness([
+      { verb: 'press', index: 1, label: 'Anil Turaga' },
+      { verb: 'read' }
+    ])
+    await h.lane.propose(request)
+    // Mull holds Return globally, and the window underneath is Slack — a press
+    // that got through would land in whatever the walk has just opened.
+    h.sidecar.onTargetAction = () => h.fire('Return')
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    // The walk was neither restarted nor cut short: it read, and it answered.
+    expect(h.answers).toHaveLength(1)
+    expect(h.last().answer).toMatch(/redlines/)
   })
 })
 

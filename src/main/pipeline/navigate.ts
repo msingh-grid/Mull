@@ -210,12 +210,38 @@ export class NavigateLane {
       // — because here the reassurance is the true one.
       note: 'read-only · nothing is written or sent',
       running: false,
+      // Run does not answer this card, it starts something that reports back
+      // onto it. See `HudController.act` — without this the card closes on the
+      // press, every `draw` below becomes a no-op, and Escape goes back to the
+      // app being driven.
+      startsRun: true,
       ...patch
     })
+
+    /** Has Run been pressed? What a cancel means depends entirely on it. */
+    let started = false
 
     this.deps.hud.openCard(card(), (action) => {
       if (action === 'cancel') {
         this.stopped = true
+        if (started) {
+          /**
+           * A stop, not a decline — and they are not the same row.
+           *
+           * Every cancel used to be filed as `Declined · …` with `steps: 0` and
+           * announced as "nothing was pressed". Fired mid-walk that is three
+           * false statements at once, and the last is the one that matters: a
+           * press already dispatched cannot be un-pressed, so a stop that
+           * claimed otherwise would be the journal lying about the thing it
+           * exists to record.
+           *
+           * Nothing is written here. `walk` is still running, it still has a
+           * window to put back, and the row it files at the end covers the
+           * steps that did happen.
+           */
+          parent.step('plan.stopped', { byUser: true })
+          return
+        }
         parent.step('plan.cancelled', { beforeRunning: true })
         this.deps.hud.closeCard()
         // Journalled even though nothing was pressed. The window was still read
@@ -232,7 +258,11 @@ export class NavigateLane {
         this.deps.hud.announce?.('applied', 'Cancelled — nothing was pressed.')
         return
       }
-      if (action !== 'apply') return
+      // `started` is belt and braces — `HudController` will not deliver a second
+      // apply once a run is in flight — but it costs nothing here and every
+      // future lane copying this shape gets it free.
+      if (action !== 'apply' || started) return
+      started = true
       // Run. From here the card belongs to the loop, and Escape means stop.
       const trace = parent.fork()
       trace.step('plan.run', { goal: request.goal })
@@ -289,14 +319,29 @@ export class NavigateLane {
 
     for (let taken = 0; taken < this.maxSteps; taken += 1) {
       if (this.stopped) {
-        note = 'stopped'
+        // Says what was already done, because "stopped" on its own reads as
+        // "nothing happened" — and that is the one thing a stop must never be
+        // mistaken for. A press already dispatched cannot be un-pressed.
+        note = steps.length === 0
+          ? 'stopped before anything was pressed'
+          : `stopped after ${steps.length} ${steps.length === 1 ? 'step' : 'steps'} — what was pressed stays pressed`
         trace.step('plan.stopped', { afterSteps: taken })
         break
       }
 
       const scanMs = trace.mark()
       stage(`looking · step ${taken + 1}`)
-      scan = await this.scan()
+      // Guarded rather than left to the caller's catch: a throw out of `walk`
+      // skips the restore, the journal row and the announce below, so the
+      // window stays wherever the plan left it and nothing records that it
+      // went. Every exit has to reach the tail.
+      try {
+        scan = await this.scan()
+      } catch (err) {
+        trace.fail('scan.threw', { step: taken + 1 }, err)
+        note = 'could not read the window'
+        break
+      }
       trace.step('scan', {
         step: taken + 1,
         targets: scan.targets.length,
@@ -430,19 +475,29 @@ export class NavigateLane {
       draw()
 
       stage(describeStep(step))
-      const result = await this.deps.executor.perform(step, scan, {
-        app: request.app,
-        goal: request.goal,
-        groupId,
-        step: taken + 1,
-        scan: {
-          targets: scan.targets.length,
-          press: scan.targets.filter((t) => t.kind === 'press').length,
-          type: scan.targets.filter((t) => t.kind === 'type').length,
-          stoppedBy: scan.stoppedBy ?? 'complete'
-        },
-        askMs: chosenMs
-      })
+      let result: Awaited<ReturnType<typeof this.deps.executor.perform>>
+      try {
+        result = await this.deps.executor.perform(step, scan, {
+          app: request.app,
+          goal: request.goal,
+          groupId,
+          step: taken + 1,
+          scan: {
+            targets: scan.targets.length,
+            press: scan.targets.filter((t) => t.kind === 'press').length,
+            type: scan.targets.filter((t) => t.kind === 'type').length,
+            stoppedBy: scan.stoppedBy ?? 'complete'
+          },
+          askMs: chosenMs
+        })
+      } catch (err) {
+        // Same reason as the scan above: the tail has to be reached.
+        trace.fail('step.threw', { n: taken + 1, what: describeStep(step) }, err)
+        const shown = steps.find((candidate) => candidate.id === id)
+        if (shown) shown.state = 'failed'
+        note = `the step could not be carried out: ${err instanceof Error ? err.message : String(err)}`
+        break
+      }
       lastEntryId = result.entryId
       trace[result.ok ? 'step' : 'fail'](result.ok ? 'step.done' : 'step.refused', {
         n: taken + 1,
@@ -500,7 +555,15 @@ export class NavigateLane {
     // leaving someone's Slack on a stranger's DM is rude in a way no amount of
     // correctness elsewhere makes up for.
     stage('putting the window back')
-    const back = await this.deps.executor.restore(origin, await this.scan())
+    // Never allowed to throw: the row and the announce below are how the run
+    // ends, and a failed restore is a sentence to print rather than a reason to
+    // leave the panel showing a plan that never finished.
+    const back = await this.deps.executor
+      .restore(origin, await this.scan().catch(() => null))
+      .catch((err) => {
+        trace.fail('plan.restore.threw', {}, err)
+        return { ok: false, detail: 'could not put the window back' }
+      })
     stage(null)
     trace.step('plan.restore', { ok: back.ok, detail: back.detail, note })
 

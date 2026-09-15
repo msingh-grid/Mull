@@ -112,6 +112,22 @@ export interface PlanCard {
    * is what is true: nothing is written and nothing is sent.
    */
   note?: string | null
+  /**
+   * Run starts a loop that reports back onto this card, rather than answering
+   * it and dismissing it.
+   *
+   * Read by `HudController` at the instant Run is delivered — which is why it
+   * cannot be `running` below: at that instant nothing is running yet. The two
+   * are a pair. This one is the card's promise, made before the press; that one
+   * is the loop's own report, made after it.
+   *
+   * Closing a card that is about to become a transcript is what made every
+   * later `updateCard` a silent no-op and handed esc back to the app being
+   * driven — so the live step list never appeared and Stop could not be
+   * pressed. Absent on the tray's demo plan, which runs nothing and must close
+   * like any other card.
+   */
+  startsRun?: boolean
   /** True once the loop is running; Run becomes unavailable and esc stops it. */
   running?: boolean
   /**

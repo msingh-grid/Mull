@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { IDLE_HUD_STATE, type HudState } from '@shared/ipc'
-import type { DiffCard } from '@shared/hud'
+import type { DiffCard, HudCard, PlanCard } from '@shared/hud'
 import { ChordScope, type GlobalShortcutLike } from './chords'
 import { HudController, type HudPort } from './hud'
 
@@ -281,5 +281,210 @@ describe('HudController — the answer card', () => {
     h.controller.act('apply-send')
     expect(onAction).toHaveBeenCalledWith('cancel')
     expect(onAction).not.toHaveBeenCalledWith('apply-send')
+  })
+})
+
+/**
+ * The card that outlives its own Apply.
+ *
+ * Every other card is a question: the press is the answer and the card is done.
+ * A plan's Run is not an answer, it is a start — the card becomes the transcript
+ * of what the run is doing, and esc becomes the only way to stop it. Closing it
+ * on the press, as `act` did for every card alike, made every later
+ * `updateCard` a silent no-op and gave Escape back to the app being driven, so
+ * the step list never appeared and Stop could not be pressed.
+ */
+describe('HudController — a run', () => {
+  const plan: PlanCard = {
+    kind: 'plan',
+    steps: [],
+    context: null,
+    goal: 'what did Anil say about the terms doc',
+    app: 'Slack',
+    limit: 40,
+    running: false,
+    startsRun: true
+  }
+  /** The tray's demo: a plan card that proposes nothing and runs nothing. */
+  const demoPlan: PlanCard = { kind: 'plan', steps: [], context: 'demo — nothing runs' }
+  const walking: PlanCard = {
+    ...plan,
+    running: true,
+    steps: [{ id: 'nav-0', verb: 'press', object: '“Search”', state: 'running' }]
+  }
+
+  it('keeps the card, and the chords, when Run starts something', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(plan, onAction)
+
+    h.fire('Return')
+    expect(onAction).toHaveBeenCalledWith('apply')
+    expect(h.controller.hasCard).toBe(true)
+    expect(h.shortcuts).toEqual(new Set(['Return', 'Escape']))
+    // No close-and-reopen: the window flag must not thrash under the user.
+    expect(h.interactive).toEqual([true])
+  })
+
+  // The regression test. On the old `act` this card was already gone, so the
+  // update was swallowed by `updateCard`'s `if (!this.card) return`.
+  it('lets the run write onto the card that started it', () => {
+    const h = harness()
+    h.controller.openCard(plan, () => {})
+    h.controller.act('apply')
+
+    h.controller.updateCard(walking)
+    expect(h.sent.at(-1)?.card).toBe(walking)
+  })
+
+  it('closes anyway when the handler throws on its way to starting', () => {
+    const h = harness()
+    h.controller.openCard(plan, () => {
+      throw new Error('the run never began')
+    })
+
+    expect(() => h.controller.act('apply')).toThrow('the run never began')
+    expect(h.controller.hasCard).toBe(false)
+    expect(h.shortcuts.size).toBe(0)
+  })
+
+  it('closes when the handler starts nothing and shuts the card itself', () => {
+    const h = harness()
+    const onAction = vi.fn(() => h.controller.closeCard())
+    h.controller.openCard(plan, onAction)
+
+    h.controller.act('apply')
+    expect(h.controller.hasCard).toBe(false)
+    expect(h.shortcuts.size).toBe(0)
+
+    h.controller.act('apply')
+    expect(onAction).toHaveBeenCalledTimes(1)
+  })
+
+  it('swallows ⏎ once the run is under way', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(plan, onAction)
+    h.controller.act('apply')
+    h.controller.updateCard(walking)
+
+    h.fire('Return')
+    h.controller.act('apply-send')
+    expect(onAction).toHaveBeenCalledTimes(1)
+    expect(h.controller.hasCard).toBe(true)
+    // Claimed, not released — the app underneath is one the run is driving.
+    expect(h.shortcuts.has('Return')).toBe(true)
+  })
+
+  /**
+   * The gap this exists for: between Run being delivered and the lane's first
+   * draw, the card still says `running: false`. A lane that starts a subprocess
+   * spends several hundred milliseconds there, and Return auto-repeats.
+   */
+  it('swallows ⏎ before the run has drawn its first frame', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(plan, onAction)
+
+    h.fire('Return')
+    h.fire('Return')
+    expect(onAction).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps the card up when esc stops a run, so the stop is readable', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(plan, onAction)
+    h.controller.act('apply')
+    h.controller.updateCard(walking)
+
+    h.fire('Escape')
+    expect(onAction).toHaveBeenCalledWith('cancel')
+    expect(h.controller.hasCard).toBe(true)
+  })
+
+  it('answers esc normally again once the run says it is over', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(plan, onAction)
+    h.controller.act('apply')
+    h.controller.updateCard(walking)
+    h.controller.updateCard({ ...walking, running: false })
+
+    h.fire('Escape')
+    expect(onAction).toHaveBeenLastCalledWith('cancel')
+    expect(h.controller.hasCard).toBe(false)
+    expect(h.shortcuts.size).toBe(0)
+  })
+
+  /**
+   * A new utterance takes the panel. Escape can afford to wait for the run's
+   * ending to appear on the card; this cannot — the user is already speaking.
+   */
+  it('hands the panel over when a new utterance arrives mid-run', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(plan, onAction)
+    h.controller.act('apply')
+    h.controller.updateCard(walking)
+
+    h.controller.cancelOpen()
+    expect(onAction).toHaveBeenLastCalledWith('cancel')
+    expect(h.controller.hasCard).toBe(false)
+    expect(h.shortcuts.size).toBe(0)
+  })
+
+  /**
+   * Keyed on the card's own field rather than on `kind`, so the tray's demo —
+   * whose handler only logs — closes like anything else instead of holding ⏎
+   * and esc for the rest of the session.
+   */
+  it('a plan that runs nothing closes like any other card', () => {
+    const h = harness()
+    h.controller.openCard(demoPlan, () => {})
+
+    h.fire('Return')
+    expect(h.controller.hasCard).toBe(false)
+    expect(h.shortcuts.size).toBe(0)
+  })
+
+  /**
+   * The blast radius, asserted directly.
+   *
+   * `startsRun` is declared on `PlanCard` alone, so no other kind can reach the
+   * keep-open branch even in principle — but that is a fact about the types, and
+   * this is the behaviour anyone changing `act` will actually break.
+   */
+  it.each([
+    ['a diff card', card],
+    [
+      'a diff card with a commit',
+      {
+        kind: 'diff',
+        app: 'Slack',
+        segments: [],
+        changes: 1,
+        commit: { label: 'Apply & send', hint: '⌘⏎', warning: 'sending can’t be undone' }
+      } satisfies HudCard
+    ],
+    [
+      'a send card',
+      {
+        kind: 'send',
+        app: 'Slack',
+        text: 'on my way',
+        commit: { label: 'Send', hint: '⏎', warning: 'sending can’t be undone' }
+      } satisfies HudCard
+    ],
+    ['an answer card', { kind: 'answer', app: 'Notes', text: 'three tasks' } satisfies HudCard],
+    ['a plan card that runs nothing', demoPlan]
+  ])('still answers %s once and gives the chords straight back', (_name, subject) => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(subject, onAction)
+
+    h.controller.act(subject.kind === 'send' ? 'apply-send' : 'apply')
+    expect(h.controller.hasCard).toBe(false)
+    expect(h.shortcuts.size).toBe(0)
   })
 })

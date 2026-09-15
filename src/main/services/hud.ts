@@ -39,6 +39,18 @@ export class HudController {
   private onAction: ((action: HudAction) => void) | null = null
   private releaseChords: (() => void) | null = null
   private interactive = false
+  /**
+   * Is a run in flight on the open card?
+   *
+   * Separate from `PlanCard.running` because the two flip at different moments
+   * and the gap between them is reachable. This one is set synchronously the
+   * instant Run is delivered; the card's is set whenever the lane next draws,
+   * which for a lane that starts a subprocess is several hundred milliseconds
+   * later. Return auto-repeats, so a user leaning on the key can press into
+   * that gap — and this flag is what makes ⏎ inert for strictly longer than the
+   * card *looks* running, which is the side to be wrong on.
+   */
+  private running = false
 
   constructor(private readonly options: HudControllerOptions) {}
 
@@ -73,6 +85,10 @@ export class HudController {
   updateCard(card: HudCard): void {
     if (!this.card) return
     this.card = card
+    // Where a run ends. Set by `act` before the lane has drawn anything and
+    // cleared here once the lane draws the ending, so the card is answerable
+    // again the moment it stops claiming to be running — and not before.
+    if (this.running && !(card.kind === 'plan' && card.running === true)) this.running = false
     this.emit()
   }
 
@@ -81,6 +97,7 @@ export class HudController {
     if (!this.card) return
     this.card = null
     this.onAction = null
+    this.running = false
     this.releaseChords?.()
     this.releaseChords = null
     this.emit()
@@ -90,6 +107,15 @@ export class HudController {
    * Deliver the user's answer, then close. Closing first would release the
    * chords before the handler ran, which is harmless — but delivering first
    * means a handler that throws still cannot leave ⏎ claimed.
+   *
+   * ### Except for the one card whose Apply is a beginning
+   *
+   * Every other card is a question: the press is the answer and the card is
+   * done. A plan's Run is not an answer — it starts a loop that reports back
+   * onto this same card, and esc becomes the only way to stop it. Closing on
+   * the press, as this did for every card alike, made every later `updateCard`
+   * a silent no-op and handed Escape back to the very app the run was driving:
+   * the step list never appeared, and Stop could not be pressed.
    */
   act(action: HudAction): void {
     const handler = this.onAction
@@ -100,6 +126,16 @@ export class HudController {
     if (action === 'apply-send' && !offersCommit(this.card)) {
       this.options.log?.('warn', 'hud: apply-send on a card with no commit — applying only')
       action = 'apply'
+    }
+    // ⏎ while a run is in flight: claimed and inert, for the send card's reason
+    // and a sharper version of it. Mull holds Return globally for as long as a
+    // card is open, and the window underneath is one this very run is driving —
+    // letting the press through would hand Return to a composer Mull may have
+    // just typed into. There is nothing for it to mean here either: the Run it
+    // used to press has been pressed.
+    if (action !== 'cancel' && this.running) {
+      this.options.log?.('info', 'hud: ⏎ while a run is in flight — claimed and inert')
+      return
     }
     // An answer card proposes nothing, so there is no "yes" for ⏎ to be —
     // but there is also nothing at stake in closing it, and a Done button
@@ -114,10 +150,33 @@ export class HudController {
       this.options.log?.('info', 'hud: ⏎ has no meaning on this card — ignored')
       return
     }
+    // Does this press leave the card up? Two do, and they are the two ends of
+    // the same run:
+    //
+    //   the Run that starts it   the card is where the run reports back, so
+    //                            closing it blinds the user to everything that
+    //                            follows and takes the stop away with it.
+    //   the esc that stops it    stopping is not finishing. The lane still has a
+    //                            window to put back and an ending to write, and
+    //                            a stop that blanked the card would read as
+    //                            "nothing happened" — the one thing a stop must
+    //                            never be mistaken for, because a press already
+    //                            dispatched cannot be un-pressed.
+    //
+    // Everything else is an answer, and an answered card is finished.
+    const keeps = this.running ? action === 'cancel' : action === 'apply' && startsRun(this.card)
+
+    let kept = false
     try {
       handler(action)
+      // Only from a handler that *returned*. One that threw never started
+      // anything, and must not leave ⏎ claimed on a card with nobody behind it
+      // — that is the rule above, unchanged. And only while the card is still
+      // here: a handler may have closed it itself.
+      kept = keeps && this.card !== null
     } finally {
-      this.closeCard()
+      if (kept) this.running = true
+      else this.closeCard()
     }
   }
 
@@ -131,7 +190,16 @@ export class HudController {
    * question this app exists to never provoke.
    */
   cancelOpen(): void {
-    if (this.card) this.act('cancel')
+    if (!this.card) return
+    this.act('cancel')
+    // …and then go, whatever `act` decided. A run answers a cancel by stopping,
+    // and stopping takes as long as it takes to put the window back; Escape can
+    // afford to wait for that ending to appear on the card, but this cannot —
+    // the panel has just been claimed by a new utterance. The run still
+    // restores, still files its row, and still reports through `announce`, so
+    // the ending is on the ghost row and in the journal instead. Idempotent for
+    // every other card, which `act` has already closed.
+    this.closeCard()
   }
 
   get hasCard(): boolean {
@@ -154,6 +222,18 @@ export class HudController {
     }
     this.options.port.send(state)
   }
+}
+
+/**
+ * Does Apply on this card *start* something rather than answer it?
+ *
+ * Keyed on the card's own field rather than on `kind`, because a plan card is
+ * not always a running one: the tray's demo plan proposes nothing and runs
+ * nothing, and a rule that read `kind === 'plan'` would leave it holding ⏎ and
+ * esc for the rest of the session with no handler behind them.
+ */
+function startsRun(card: HudCard | null): boolean {
+  return card?.kind === 'plan' && card.startsRun === true
 }
 
 /** Does this card offer the heavier commit — Apply & send, or a bare Send? */
