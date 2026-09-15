@@ -184,9 +184,23 @@
   animation: pet-sad 2.4s steps(4) infinite;
 }
 
+/* The panel is bounded by the stage it stands on, and its scrolling regions
+   absorb the difference.
+
+   Nothing bounded it before, so a tall card simply grew past the top of the
+   window and was clipped by it — the card title, the first steps and the whole
+   top row (orb, transcript, label) went missing, with no scrollbar anywhere,
+   because the overflow was the *window's* and a window does not scroll.
+
+   `100vh` is the window; the stage keeps 24px of padding below the panel, the
+   pet is 65px and sits 8px under it. What is left is the panel's. */
 .hud {
   width: var(--hud-w);
   max-width: 94vw;
+  max-height: calc(100vh - 97px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: var(--paper);
   border-radius: var(--r-panel);
   box-shadow: var(--shadow-hud);
@@ -469,6 +483,12 @@
    walk is over. */
 .card {
   margin-top: 11px;
+  /* The only child of the panel allowed to shrink — the top row and the chips
+     are one line each and there is nothing in them to give. */
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   background: var(--paper-bright);
   border: 1px solid var(--hairline);
   border-radius: var(--r-inner);
@@ -551,7 +571,16 @@
    because it is the one part of a plan card that is prose to be read rather
    than a ledger to be scanned. Scrolls on its own past a few lines: a long
    answer must not push Run and Cancel off the panel. */
+/* The answer, and the priority it is given.
+
+   Everything else on this card is *how* the answer was come by. So the steps
+   are capped short and scroll (below), and the answer takes whatever room is
+   left — `flex: 1 1 auto` against a bounded panel — scrolling only when it
+   genuinely cannot fit. A user who asked a question should not have to scroll
+   to reach the reply, and should never have it cut off mid-sentence. */
 .plan-answer {
+  flex: 1 1 auto;
+  min-height: 0;
   margin-top: 10px;
   padding-top: 9px;
   border-top: 1px solid var(--hairline-soft);
@@ -564,8 +593,19 @@
   color: var(--ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  max-height: 190px;
   overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-3) transparent;
+}
+.plan-answer::-webkit-scrollbar { width: 5px; }
+.plan-answer::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 3px; }
+
+/* The steps on a finished plan are the working, not the result. Capped tight
+   so the answer above is never the thing that gets squeezed, and scrollable so
+   a six-step walk is still all there for anyone who wants to check it. */
+.card.is-wont .card-body {
+  flex: 0 1 auto;
+  max-height: 108px;
 }
 
 /* The goal sits above the steps and reads as the thing they are serving, so it
@@ -644,6 +684,12 @@
   color: var(--ink);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  /* The whole card, so it takes the panel's remaining height rather than the
+     150px a diff body is capped at — an answer is what was asked for, and a
+     diff is something to inspect a line at a time. */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
 }
 
 /* Every destructive-ish action states its undo path in the same breath (§7.2). */

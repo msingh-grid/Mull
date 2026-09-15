@@ -155,8 +155,21 @@ function load(win: BrowserWindow, page: string): void {
   else if (entry.file) void win.loadFile(entry.file)
 }
 
-/** The HUD stage. Fixed, so the panel never jitters as a card arrives. */
-const HUD_SIZE = { width: 520, height: 420 }
+/**
+ * The HUD stage. Fixed, so the panel never jitters as a card arrives.
+ *
+ * 420 was sized for a diff card and nothing else. A finished navigation carries
+ * its steps *and* the answer they found, and at 420 the panel it needed was
+ * taller than the window holding it — so the top of the card was simply cut off
+ * by the window edge, with no scrollbar anywhere, because the overflow belonged
+ * to a window and a window does not scroll.
+ *
+ * The stage is transparent and click-through everywhere the panel is not, so
+ * height costs nothing but the room it leaves on screen. The panel is bounded
+ * to it in CSS (`.hud`, max-height) and can no longer be clipped whatever the
+ * card holds.
+ */
+const HUD_SIZE = { width: 520, height: 640 }
 
 /**
  * Why the panel takes mouse events, if it does.

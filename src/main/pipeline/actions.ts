@@ -357,7 +357,7 @@ export class ActionExecutor {
     const row = scan.targets.find(
       (target) => target.kind === 'press' && titlesMatch(target.title, wanted)
     )
-    if (!row) return { ok: true, detail: `left in ${wanted}` }
+    if (!row) return { ok: true, detail: `left in ${place(wanted)}` }
 
     const pressed = await this.deps.sidecar.pressTarget({
       harvestId: scan.harvestId,
@@ -366,8 +366,8 @@ export class ActionExecutor {
       expectTitle: row.title
     })
     return pressed.ok
-      ? { ok: true, detail: `back in ${row.title}` }
-      : { ok: true, detail: `left in ${wanted}` }
+      ? { ok: true, detail: `back in ${place(row.title)}` }
+      : { ok: true, detail: `left in ${place(wanted)}` }
   }
 
   /** What the front window is called, or null if it will not say. Never throws. */
@@ -444,6 +444,21 @@ function navArgs(step: NavStep): Record<string, unknown> {
     default:
       return {}
   }
+}
+
+/**
+ * A window title, in the length a sentence can carry.
+ *
+ * Window titles are written for a title bar, not for a clause: Mail's is
+ * "Inbox (837) - msingh@griddynamics.com - Grid Dynamics Mail - Memory usage -
+ * 781 MB", and printed whole under a card it took two lines away from the
+ * answer it was sitting beneath. The first segment is the part that names the
+ * place; everything after the first separator is the application telling you
+ * about itself.
+ */
+export function place(title: string): string {
+  const head = title.split(/\s+[-–—|·]\s+/u)[0]?.trim() || title.trim()
+  return head.length > 48 ? `${head.slice(0, 47)}…` : head
 }
 
 /**

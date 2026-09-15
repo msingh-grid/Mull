@@ -3,7 +3,7 @@ import type { UiTarget } from '@shared/sidecar-api'
 import { FakeSidecar } from '../services/sidecar'
 import { NavStepSchema, type NavStep } from '@shared/nav'
 import { NavKeySchema } from '@shared/sidecar-api'
-import { ActionExecutor, type Scan } from './actions'
+import { ActionExecutor, place, type Scan } from './actions'
 
 /**
  * What these tests are actually protecting.
@@ -349,5 +349,34 @@ describe('restore', () => {
     )
     expect(result.ok).toBe(true)
     expect(result.detail).toBe('left in #eng-platform')
+  })
+})
+
+/**
+ * A window title is written for a title bar, not for a clause.
+ *
+ * Mail's is "Inbox (837) - msingh@griddynamics.com - Grid Dynamics Mail -
+ * Memory usage - 781 MB". Printed whole under a finished plan it took two lines
+ * away from the answer it was sitting beneath — an application talking about
+ * itself, over the top of the thing the user asked for.
+ */
+describe('place', () => {
+  it('keeps the part that names the place', () => {
+    expect(place('Inbox (837) - msingh@griddynamics.com - Grid Dynamics Mail - Memory usage - 781 MB'))
+      .toBe('Inbox (837)')
+    expect(place('Anil Turaga (DM) - Grid Dynamics - Slack')).toBe('Anil Turaga (DM)')
+    expect(place('Tasks — Notes')).toBe('Tasks')
+  })
+
+  it('leaves a title that is already one thing alone', () => {
+    expect(place('Untitled')).toBe('Untitled')
+    // A hyphen inside a word is not a separator; only a spaced one is.
+    expect(place('eng-platform')).toBe('eng-platform')
+  })
+
+  it('truncates a single segment that is a paragraph', () => {
+    const long = 'x'.repeat(120)
+    expect(place(long)).toHaveLength(48)
+    expect(place(long).endsWith('…')).toBe(true)
   })
 })
