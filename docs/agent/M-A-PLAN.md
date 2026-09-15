@@ -3,6 +3,12 @@
 *Implementation plan. Milestone M-A of [`AGENT-V2.md`](./AGENT-V2.md) §9.
 Written 2026-09-15 against the engine at `af0f132`.*
 
+> **Built.** §0 landed in `9519380`, the lane in `0680e7a`. 649 tests, both
+> typechecks and the build are green. What has **not** happened is the part that
+> decides whether any of it was worth it: `scripts/probe-agent.ts` has been
+> written but never run against a live window, so the pass bar in
+> *Verification* below is still an open question rather than a result.
+
 ## Context
 
 Mull's navigation lane is not an agent. Every session is built with
