@@ -6,6 +6,7 @@ import type { PermissionsSnapshot } from '@shared/permissions'
 import { IDLE_HUD_STATE, type HudState } from '@shared/ipc'
 import { CardView } from './components/Cards'
 import { Hud } from './components/Hud'
+import { Pet } from './components/Pet'
 import { PermissionRows } from './components/PermissionRows'
 import { applyTheme } from './theme'
 import './tokens.css'
@@ -97,6 +98,16 @@ function PageWhat(): JSX.Element {
       <div className="stage-label">This is Mull, waiting</div>
       {/* The real panel, not a screenshot: the instrument at rest. */}
       <Hud state={idle} now={0} />
+
+      {/* …and what it folds into. Worth showing here, because the resting form
+          is the one a new user will actually spend their day looking at. */}
+      <div className="pet-note">
+        <Pet mood="rest" label="Mull at rest" expanded={false} decorative />
+        <p>
+          The rest of the time, this is all of it. The panel comes back by itself whenever Mull is
+          listening, working or waiting on you — and a click on the cat opens it any time.
+        </p>
+      </div>
     </>
   )
 }

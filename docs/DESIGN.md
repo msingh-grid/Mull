@@ -72,11 +72,32 @@ Minimum text size anywhere: 11px, and only for `--fs-label`/`--fs-chip`/`--fs-kb
 Non-activating floating panel (`type:'panel'`, transparent window, `focusable:false`). The panel paints `--paper`, `--r-panel`, `--shadow-hud`. Never translucent over wallpaper — the paper is opaque; legibility is never borrowed. Layout: `hud-top` row (orb 13px · waveform · transcript flex-1 · state label), then optional chips row (margin-top 10px), then optional card (margin-top 11px).
 
 **States** (class on the panel root):
-- `is-idle` — orb hollow (inset 1.5px ring in `--ink-3`), waveform static low ticks in `--ink-3`, transcript shows ghost hint (*"Hold ⌥Space to dictate · Fn to ask"*, serif italic `--ink-3`), label `IDLE` in `--ink-3`. The hint names both keys because a key nobody knows about is a feature that does not exist. Optional `last-action` ghost row: hairline-top, 11px `--ink-3`, "Applied · summary · time" + `⌥Z undo` kbd right-aligned.
+- `is-idle` — orb hollow (inset 1.5px ring in `--ink-3`), waveform static low ticks in `--ink-3`, transcript shows ghost hint (*"Hold ⌥Space to dictate · Fn to ask"*, serif italic `--ink-3`), label `IDLE` in `--ink-3`. The hint names both keys because a key nobody knows about is a feature that does not exist. Optional `last-action` ghost row: hairline-top, 11px `--ink-3`, "Applied · summary · time" + `⌥Z undo` kbd right-aligned. Since §6.1a this state is reached only by asking for it or by having just finished something — the idle panel is no longer what is on screen by default.
 - `is-listening` — orb fills `--ink` + ping; bars animate in `--ink-2`; transcript streams live with `--ins` caret; label `LISTENING` in `--ink`; intent chip rises in as soon as the router decides.
 - `is-thinking` — same as listening but static waveform, label `THINKING`; used while the engine streams.
 - `is-preview` — diff or plan card open; label `THINKING` until card completes, then `PREVIEW`.
 - `is-applied` — label `APPLIED`, brief; then back to idle with the new last-action ghost.
+
+### 6.1a Pet — the resting form
+The panel used to be on screen the whole time Mull was running, and almost all of that time it was idle: a hollow orb, a static waveform and a hint, holding 480px of somebody else's window to report that nothing was happening. At rest Mull is now a 60×65 pixel cat, bottom-centred on the same stage, and the panel grows upward from it. The pet never moves — it is the one fixed point, and it is the drag handle for the whole HUD.
+
+**When the panel is up.** `demands || (wanted ?? linger)`, where `demands` is anything that is not plain idle — a card, a notice, or any phase but `idle`. A card waiting on ⏎ is never behind a click: a proposal nobody can see is a proposal nobody answers. `wanted` is the user's own click, which outranks the rules and is null until they make one; `linger` holds the panel for **4s after `lastAction.at`**, because `applied` itself lasts only 1 400ms and without it the last-action row and its `⌥Z undo` hint would appear and vanish inside a second and a half. A click can only fold a panel nothing else is holding open, and the accessible name says so rather than offering a "hide" that would not hide.
+
+**Clicks.** Decided on pointer-up by distance (≤4px travel, `isTap`), not by `onClick`: the pet is a button *and* the drag handle, and dragging the HUD across the screen must not fold the panel. 4px rather than 0 because a trackpad click drifts.
+
+**The sprite.** `assets/marmalade.webp` — an 8 × 9 sheet of 192×208 cells, 57 frames, scaled 5/16 (the largest scale under half size leaving both axes whole: 60×65 per frame, 480×585 for the sheet). Never resampled offline; the transparent pixels carry undefined colour and a resample would drag it into the edges as a halo. The shadow is a CSS ellipse in `--ink`, not part of the art, so dark mode gets it for free. Every row used has its ink at y 5–202 within the cell, so the cat's feet hold one height across every mood.
+
+| mood | when | row · frames | motion |
+|---|---|---|---|
+| `rest` | idle | 0 · 0–5 | loop 2.4s |
+| `asleep` | idle, untouched 90s | 6 · 1 | held |
+| `listening` | `listening` | 3 · 0–3 (wave) | loop 0.72s |
+| `working` | `thinking` / `inserting` / `preview` | 8 · 0–5 (paw to chin) | loop 1.5s |
+| `waiting` | a card is open | 6 · 0–5 | loop 2.2s — calm; it is owed a decision, it should not fidget |
+| `done` | `applied` | 4 · 0–4 (leap) | once, `jump-none`, held on the landing |
+| `trouble` | `blocked` / `error` / a notice | 5 · 4–7 | loop 2.4s |
+
+Frames 0–3 of the sad row (stand, sit, wipe, curl) are skipped: their silhouettes are too different to loop without a pop. The one curled-up frame is mid-cry, which is why `asleep` is a held content-idle frame instead — a cat that weeps because you stopped typing is the wrong note. Walk and run go unused; they are the makings of a pet that wanders the screen, which is not built. `prefers-reduced-motion` freezes each mood on the first frame of its row.
 
 ### 6.2 Chips
 11px/600, padding 3px 9px, `--r-chip`, 1px border, `rise-in` entrance. Vocabulary:
