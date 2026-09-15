@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { ScreenContext } from '@shared/context'
 import type { HudCard, PlanCard } from '@shared/hud'
-import type { NavStep } from '@shared/nav'
+import { MAX_NAV_STEPS, type NavStep } from '@shared/nav'
 import type { UiTarget } from '@shared/sidecar-api'
 import type { HudLastAction } from '@shared/ipc'
 import type { JournalDraft, JournalEntry } from '@shared/types'
@@ -243,8 +243,11 @@ describe('Run', () => {
    * conversation is lost, and the honest end to being lost is a sentence on a
    * card rather than another press.
    */
+  // Against the constant rather than a copy of it: this was written with 6
+  // spelled out and a script of exactly 20, so raising the budget turned a
+  // budget test into a test that the model runs out of moves.
   it('stops at the step budget rather than pressing on', async () => {
-    const many: NavStep[] = Array.from({ length: 20 }, (_, i) => ({
+    const many: NavStep[] = Array.from({ length: MAX_NAV_STEPS + 5 }, (_, i) => ({
       verb: 'press' as const,
       index: i % 2,
       label: 'Anil Turaga'
@@ -253,7 +256,7 @@ describe('Run', () => {
     await h.lane.propose(request)
     h.run()
     await vi.waitFor(() => expect(h.last().running).toBe(false))
-    expect(h.last().steps.length).toBeLessThanOrEqual(6)
+    expect(h.last().steps.length).toBe(MAX_NAV_STEPS)
   })
 
   /**

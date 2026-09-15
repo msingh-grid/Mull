@@ -17,6 +17,7 @@
  * Nothing in src/main/pipeline/dictation.ts calls an Engine.
  */
 import type { AgentGoal, AgentRunResult } from './agent-loop'
+import type { RecentTurn } from '../services/turns'
 import type { ScreenContext } from '@shared/context'
 import type { NavAttempt, NavStep } from '@shared/nav'
 import type { UiTarget } from '@shared/sidecar-api'
@@ -120,6 +121,20 @@ export interface ClassifyRequest {
    * than a matter of instruction.
    */
   targets?: UiTarget[] | null
+  /**
+   * The last few things the user said, and what came of each.
+   *
+   * The evidence for one question the classifier previously had no way to
+   * answer: *is this sentence a follow-up?* "And what about Priya" is not a
+   * question about anything on screen and not an instruction about any text, so
+   * every rule here read it as a message to type — which is the right reading of
+   * that sentence alone and the wrong one of that sentence after "what did Anil
+   * say about the terms doc".
+   *
+   * Bounded and short-lived by construction; see `services/turns.ts` for what is
+   * kept and why each bound is where it is.
+   */
+  recent?: RecentTurn[] | null
 }
 
 /**

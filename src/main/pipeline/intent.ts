@@ -1,6 +1,7 @@
 import type { ScreenContext } from '@shared/context'
 import type { UiTarget } from '@shared/sidecar-api'
 import type { ClassifiedIntent, Engine } from '../engine/types'
+import type { RecentTurn } from '../services/turns'
 import { justSend, route, type Route, type RouteContext } from './router'
 
 /**
@@ -68,6 +69,12 @@ export interface IntentRouterDeps {
   trace?: () => { step: (name: string, fields?: Record<string, unknown>) => void }
   /** False puts Mull on rules only — nothing about the field leaves the Mac. */
   useModel?: () => boolean
+  /**
+   * The last few things the user said, for the classifier to read follow-ups
+   * against. Read per utterance, so it is always the conversation as it stands
+   * rather than as it stood when the router was built.
+   */
+  recent?: () => RecentTurn[]
   /** Budget for the classifier. Past this, the rules answer. */
   timeoutMs?: number
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
@@ -223,7 +230,8 @@ export class IntentRouter {
           // rule that holds only because today's prompt builder happens not to
           // read the field is not a rule.
           context: withoutImage(input.context),
-          targets: input.targets ?? null
+          targets: input.targets ?? null,
+          recent: this.deps.recent?.() ?? null
         }),
         this.timeoutMs
       )

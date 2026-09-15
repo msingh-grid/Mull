@@ -91,8 +91,18 @@ export interface NavAttempt {
 /**
  * How many steps a plan may take before Mull stops and says so.
  *
- * Small deliberately. A navigator that needs eleven presses to find a
- * conversation is lost, and the honest end to being lost is a sentence on a
- * card rather than another press.
+ * Six, at first, on the reasoning that a navigator needing eleven presses to
+ * find a conversation is lost and the honest end to being lost is a sentence on
+ * a card rather than another press. That is still true of *wandering*, and it is
+ * not what six was actually stopping.
+ *
+ * A real request spends its budget before it starts looking. Orienting is a
+ * step; opening a search is a step; typing the query is a step; pressing the
+ * result is a step; reading is a step. That is five, and the sixth is the only
+ * one left for anything going wrong — so a plan that took one wrong turn had no
+ * way back, and the card said "ran out of steps" for what was really "needed a
+ * second try". Twenty leaves room to recover without leaving room to wander:
+ * the honest stop is still `done(found:false)`, which the model reaches on its
+ * own long before a budget has to.
  */
-export const MAX_NAV_STEPS = 6
+export const MAX_NAV_STEPS = 20

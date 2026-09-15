@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { UiTarget } from '@shared/sidecar-api'
-import { CLASSIFIER_FIELD_CHARS, classifyPrompt, parseClassification } from './classify'
+import {
+  CLASSIFIER_FIELD_CHARS,
+  classifyPrompt,
+  parseClassification,
+  renderRecent
+} from './classify'
 
 const target = (index: number, title: string): UiTarget => ({
   index,
@@ -137,5 +142,84 @@ describe('parseClassification', () => {
       '{"intent":"edit","target":"selection","instruction":"  tighten this up \\n"}'
     )
     expect(parsed).toEqual({ kind: 'edit', target: 'selection', instruction: 'tighten this up' })
+  })
+})
+
+/**
+ * The conversation, for reading follow-ups against.
+ *
+ * "And what about Priya" is not a question about anything on screen and not an
+ * instruction about any text, so every rule in this file read it as a message
+ * to type — the right reading of that sentence alone, and the wrong one of that
+ * sentence after "what did Anil say about the terms doc".
+ */
+describe('renderRecent', () => {
+  it('says what was asked, where, and what came back', () => {
+    const block = renderRecent([
+      {
+        said: 'what did Anil say about the terms doc',
+        route: 'navigate',
+        app: 'Slack',
+        outcome: 'The redlines are with legal.',
+        at: 0
+      }
+    ])
+    expect(block).toContain('<recent>')
+    expect(block).toContain('“what did Anil say about the terms doc”')
+    expect(block).toContain('in Slack')
+    expect(block).toContain('navigate')
+    expect(block).toContain('The redlines are with legal.')
+  })
+
+  /**
+   * A turn the user has already spoken over. Said rather than dropped, because
+   * "I asked this and it has not come back" is exactly the situation a
+   * follow-up arrives in.
+   */
+  it('marks a turn that has not finished', () => {
+    const block = renderRecent([
+      { said: 'what did Anil say', route: 'navigate', app: 'Slack', outcome: null, at: 0 }
+    ])
+    expect(block).toContain('still going')
+  })
+
+  it('renders nothing at all when there is nothing to say', () => {
+    expect(renderRecent([])).toBeNull()
+    expect(renderRecent(null)).toBeNull()
+    expect(renderRecent(undefined)).toBeNull()
+  })
+
+  // Before the screen and the field: "is this a follow-up?" is answered from the
+  // conversation, and only if the answer is no does the window become evidence.
+  it('goes into the prompt ahead of the window', () => {
+    const prompt = classifyPrompt({
+      transcript: 'and what about Priya',
+      app: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack' },
+      selection: null,
+      fieldText: 'sorry I was late',
+      fieldTruncated: false,
+      recent: [
+        {
+          said: 'what did Anil say about the terms doc',
+          route: 'navigate',
+          app: 'Slack',
+          outcome: 'The redlines are with legal.',
+          at: 0
+        }
+      ]
+    })
+    expect(prompt.indexOf('<recent>')).toBeGreaterThan(prompt.indexOf('<said>'))
+    expect(prompt.indexOf('<recent>')).toBeLessThan(prompt.indexOf('<field'))
+  })
+
+  it('is absent from a prompt with no history, so nothing changes for the first thing said', () => {
+    const prompt = classifyPrompt({
+      transcript: 'make this crisp',
+      app: null,
+      selection: null,
+      fieldText: 'sorry I was late',
+      fieldTruncated: false
+    })
+    expect(prompt).not.toContain('<recent>')
   })
 })

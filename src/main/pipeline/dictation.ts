@@ -147,6 +147,15 @@ export interface DictationDeps {
   now?: () => number
   /** How long 'applied' stays on screen before returning to idle. */
   appliedLingerMs?: number
+  /**
+   * The last few things the user said. Opened when an utterance is routed and
+   * closed when it ends, so the classifier can read the next one as a follow-up
+   * — see `services/turns.ts`.
+   */
+  turns?: {
+    open(turn: { said: string; route: string; app: string | null }): void
+    close(outcome: string | null): void
+  }
 }
 
 /** Below this peak the recording is room tone; don't pay for ASR. */
@@ -504,6 +513,20 @@ export class DictationPipeline {
         // ⌥Space, or no router at all. Neither asks anything; both type.
         this.trace.step('route', { kind: 'dictate', by: 'key' })
       }
+      /**
+       * Remember what this was, before it has happened.
+       *
+       * Opened here rather than on completion because a run can take half a
+       * minute, and the user may well say the next thing before it lands — a
+       * memory that only recorded finished work would be missing precisely the
+       * turn they are following up on. `close` fills in the outcome when it
+       * arrives; see `announce` and the applied branch below.
+       */
+      this.deps.turns?.open({
+        said: text,
+        route: routed?.route.kind ?? 'dictate',
+        app: this.state.app?.name ?? null
+      })
       let hint: string | null = null
 
       // A bare send writes nothing at all, so it never reaches the insertion
@@ -688,6 +711,11 @@ export class DictationPipeline {
         undoable: inserted.verified === true && inserted.caret !== null
       })
 
+      // Dictation does not go through `announce`, so it closes its own turn.
+      // The words themselves are the outcome — there is nothing else to say
+      // about typing, and "I said this and it was typed" is what a follow-up
+      // needs to know.
+      this.deps.turns?.close(`typed: ${text}`)
       this.setState({
         phase: 'applied',
         partial: false,
@@ -840,6 +868,10 @@ export class DictationPipeline {
     lastAction?: HudState['lastAction']
   ): boolean {
     if (this.phase !== 'idle') return false
+    // The single funnel every lane's ending passes through, which is what makes
+    // it the right place to close the turn: sculpt, ask, navigate and the agent
+    // all arrive here, and none of them has to know that a memory exists.
+    this.deps.turns?.close(lastAction?.result ?? notice)
     if (this.lingerTimer) {
       clearTimeout(this.lingerTimer)
       this.lingerTimer = null

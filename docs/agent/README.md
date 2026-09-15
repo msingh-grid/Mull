@@ -130,6 +130,10 @@ saved and restored around it (`probeSelectionByCopy`, `selection.ts:241`).
 summarize what anil said about the terms doc
 </said>
 
+<recent>                         ← only when there is a conversation to carry
+said “what did priya say about tuesday” in Slack → ask → answered: “She asked whether…”
+</recent>
+
 <app name="Slack" bundle="com.tinyspeck.slackmacgap" window="Priya Sharma (DM) - Grid Dynamics - Slack" />
 
 <screen app="Slack" window="Priya Sharma (DM) — Slack" truncated="true">
@@ -155,6 +159,15 @@ Rules of that assembly:
 
 - **`<said>` is the only thing that comes from the user.** The prompt says so
   three times, because everything else is other people's writing.
+- `<recent>` is the last few turns — what was said, where, and what came back
+  (`services/turns.ts`). It exists for one judgement: *is this sentence a
+  follow-up?* "And what about Priya" is not a question about anything visible
+  and not an instruction about any text, so every other rule read it as a
+  message to type. Bounded hard and expiring at **15 minutes**, because the
+  failure it can cause is worse than the one it fixes — a stale turn makes an
+  ordinary sentence look like a follow-up and sends somebody's message off on an
+  expedition. Placed before `<screen>`: the conversation is read first, and only
+  if the sentence stands alone does the window become the evidence.
 - `<screen>` is clamped to **1 500 chars** from the *end* — the newest lines and
   the caret are what an instruction is about (`CLASSIFIER_CONTEXT_CHARS`,
   `classify.ts:179`; trimming in `renderContext`, `prompts.ts:432`).
@@ -267,7 +280,7 @@ termination — is TypeScript in `NavigateLane` (`pipeline/navigate.ts`).
   propose() ─ card on screen, nothing has moved ───── user presses Run
             │                                          (or Cancel → journalled)
             ▼
-  ┌──── walk(), up to MAX_NAV_STEPS = 6 ─────────────────────────────┐
+  ┌──── walk(), up to MAX_NAV_STEPS = 20 ────────────────────────────┐
   │                                                                   │
   │   scan     uiTargets: 300 targets, 2 000ms, after 250ms settle    │
   │   observe  describeChange(before, after) → amend the last step    │
@@ -701,7 +714,7 @@ the terms doc".*
 | | |
 |---|---|
 | model | the writing model (`sonnet` by default) |
-| steps per plan | 6 (`MAX_NAV_STEPS`) |
+| steps per plan | 20 (`MAX_NAV_STEPS`) |
 | retries | 1, only on `done(found:false)`, only with ≥2 steps left |
 | scan | 300 targets, 2 000ms, 250ms settle |
 | settle after a press | 420ms |
@@ -710,6 +723,18 @@ the terms doc".*
 | `read` capture | 6 000 chars |
 | image | turn 1 only |
 | "the window moved" | target-title overlap < 0.67 |
+
+**Agent loop** (`settings.agentLoop`, off by default — subscription lane only)
+
+| | |
+|---|---|
+| model | `claude-opus-5`, pinned (`AGENT_MODEL`) — not the writing model |
+| turns | 40 (`MAX_AGENT_TURNS`) |
+| cost ceiling | $1.50 (`AGENT_BUDGET_USD`) |
+| wall-clock ceiling | 180s (`AGENT_DEADLINE_MS`) |
+| tools | `look`, `find`, `press`, `note`, `done` — and nothing else |
+| `find` results | 10 (`FIND_LIMIT`) |
+| the stop | `canUseTool` → deny + interrupt, before any handler runs |
 | max output (API-key lane) | 256 tokens |
 
 **Every turn**

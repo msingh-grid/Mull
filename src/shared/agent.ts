@@ -127,8 +127,30 @@ export function toolName(tool: AgentToolName): string {
  */
 export const MAX_AGENT_TURNS = 40
 
-/** What one run may cost before the SDK ends it. An estimate, not a bill. */
-export const AGENT_BUDGET_USD = 0.5
+/**
+ * Which model drives the loop — and why it is not the one in Settings.
+ *
+ * `editModel` chooses between Sonnet and Haiku for rewriting a paragraph, where
+ * the work is one call, the result is shown as a diff, and being wrong costs a
+ * glance. None of that describes this. A run is twenty decisions taken against a
+ * window that changes underneath it, each one committing the next, with no diff
+ * in front of any of them — the compounding is the whole difficulty, and it is
+ * exactly what a stronger model is for.
+ *
+ * So the loop is pinned rather than inherited. It is the most expensive thing
+ * Mull does and the one where a cheaper model does not merely produce a worse
+ * answer, it produces a longer, more expensive run that ends up somewhere else.
+ */
+export const AGENT_MODEL = 'claude-opus-5'
+
+/**
+ * What one run may cost before the SDK ends it. An estimate, not a bill.
+ *
+ * Raised with the model above: Opus at forty turns can reach fifty cents well
+ * before it has run out of turns, and a budget that binds first would turn a
+ * model choice into a step limit by accident.
+ */
+export const AGENT_BUDGET_USD = 1.5
 
 /**
  * How long a run may take in wall-clock before Mull ends it.

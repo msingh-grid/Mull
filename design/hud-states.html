@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mull HUD — every state</title>
+<style>
+/* ============================================================================
+   Tokens — copied verbatim from src/renderer/tokens.css so this board is
+   standalone and can be opened from disk. If they drift, tokens.css wins.
+   ========================================================================== */
+:root {
+  color-scheme: light;
+  --paper:#faf7ef; --paper-bright:#fffdf6; --paper-recessed:#f1ecdf;
+  --ink:#2b2418; --ink-2:#5b523f; --ink-3:#766c55;
+  --hairline:rgba(43,36,24,.18); --hairline-soft:rgba(43,36,24,.10);
+  --selection:rgba(39,79,142,.20);
+  --del:#b23a2e; --del-wash:rgba(178,58,46,.10); --del-line:rgba(178,58,46,.72);
+  --ins:#274f8e; --ins-wash:rgba(39,79,142,.09); --ins-line:rgba(39,79,142,.42);
+  --warn:#9a6410; --warn-wash:rgba(154,100,16,.11); --warn-edge:rgba(154,100,16,.42);
+  --mem:#4f6b33; --mem-wash:rgba(79,107,51,.10); --mem-edge:rgba(79,107,51,.42);
+  --orb-ping:rgba(43,36,24,.32);
+  --on-ink:#fffdf6; --on-ins:#fffdf6; --ins-hover:#1f4177;
+  --serif:ui-serif,"New York","Iowan Old Style",Palatino,Charter,Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --fs-transcript:13px; --fs-diff:12px; --fs-chip:11px; --fs-journal:12px;
+  --fs-label:11px; --fs-kbd:11px; --fs-body:13.5px; --fs-title:21px;
+  --track-label:.10em; --lh-transcript:1.45; --lh-diff:1.7; --lh-body:1.55;
+  --r-panel:10px; --r-inner:7px; --r-chip:5px; --r-kbd:3px;
+  --hud-w:480px; --hud-pad:13px 15px 12px; --diff-max-h:150px;
+  --shadow-hud:0 0 0 .5px rgba(43,36,24,.38),0 18px 44px rgba(35,26,12,.32),0 4px 12px rgba(35,26,12,.16);
+  --shadow-row:0 2px 8px rgba(35,26,12,.07);
+  --t-fast:140ms; --t-med:220ms; --ease-out:cubic-bezier(.22,.7,.3,1);
+  --pulse-period:1.6s; --wave-period:.95s;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark;
+  --paper:#211c13; --paper-bright:#2a2418; --paper-recessed:#1a1610;
+  --ink:#ece5d3; --ink-2:#bfb397; --ink-3:#96896c;
+  --hairline:rgba(236,229,211,.20); --hairline-soft:rgba(236,229,211,.11);
+  --selection:rgba(143,176,232,.28);
+  --del:#e0796b; --del-wash:rgba(224,121,107,.13); --del-line:rgba(224,121,107,.72);
+  --ins:#8fb0e8; --ins-wash:rgba(143,176,232,.12); --ins-line:rgba(143,176,232,.48);
+  --warn:#d2a04f; --warn-wash:rgba(210,160,79,.13); --warn-edge:rgba(210,160,79,.45);
+  --mem:#a3bf7d; --mem-wash:rgba(163,191,125,.12); --mem-edge:rgba(163,191,125,.45);
+  --orb-ping:rgba(236,229,211,.34);
+  --on-ink:#211c13; --on-ins:#211c13; --ins-hover:#a3bfef;
+  --shadow-hud:0 0 0 .5px rgba(0,0,0,.6),0 20px 50px rgba(0,0,0,.55),0 4px 14px rgba(0,0,0,.4);
+  --shadow-row:0 2px 8px rgba(0,0,0,.3);
+} }
+:root[data-theme="dark"] { color-scheme: dark;
+  --paper:#211c13; --paper-bright:#2a2418; --paper-recessed:#1a1610;
+  --ink:#ece5d3; --ink-2:#bfb397; --ink-3:#96896c;
+  --hairline:rgba(236,229,211,.20); --hairline-soft:rgba(236,229,211,.11);
+  --selection:rgba(143,176,232,.28);
+  --del:#e0796b; --del-wash:rgba(224,121,107,.13); --del-line:rgba(224,121,107,.72);
+  --ins:#8fb0e8; --ins-wash:rgba(143,176,232,.12); --ins-line:rgba(143,176,232,.48);
+  --warn:#d2a04f; --warn-wash:rgba(210,160,79,.13); --warn-edge:rgba(210,160,79,.45);
+  --mem:#a3bf7d; --mem-wash:rgba(163,191,125,.12); --mem-edge:rgba(163,191,125,.45);
+  --orb-ping:rgba(236,229,211,.34);
+  --on-ink:#211c13; --on-ins:#211c13; --ins-hover:#a3bfef;
+  --shadow-hud:0 0 0 .5px rgba(0,0,0,.6),0 20px 50px rgba(0,0,0,.55),0 4px 14px rgba(0,0,0,.4);
+  --shadow-row:0 2px 8px rgba(0,0,0,.3);
+}
+
+/* ============================================================================
+   Page chrome — the board itself, in the same design system.
+   ========================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+::selection { background: var(--selection); }
+html { -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper-recessed);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+:focus-visible { outline: 2px solid var(--ins); outline-offset: 2px; border-radius: 3px; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 5px; border: 3px solid var(--paper-recessed); }
+::-webkit-scrollbar-track { background: transparent; }
+
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px 140px; }
+
+/* — masthead ————————————————————————————————————————————————————————— */
+.masthead { padding: 96px 0 0; }
+.masthead h1 {
+  font-family: var(--serif); font-weight: 600;
+  font-size: clamp(34px, 5.2vw, 56px); line-height: 1.06;
+  letter-spacing: -.022em; margin: 0; max-width: 16ch; text-wrap: balance;
+}
+.lede {
+  margin: 22px 0 0; max-width: 62ch;
+  font-size: 16px; line-height: 1.62; color: var(--ink-2);
+}
+.lede strong { color: var(--ink); font-weight: 600; }
+.masthead-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+  margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--hairline);
+  font-family: var(--mono); font-size: var(--fs-kbd); color: var(--ink-3);
+}
+.masthead-meta span { display: inline-flex; align-items: center; gap: 7px; }
+
+.themeswitch {
+  margin-left: auto; display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--paper); border: 1px solid var(--hairline); border-radius: var(--r-chip);
+}
+.themeswitch button {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  font-family: var(--sans); font-size: var(--fs-chip); font-weight: 600;
+  letter-spacing: .01em; color: var(--ink-3); padding: 4px 11px; border-radius: 3px;
+  transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+.themeswitch button[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); }
+
+/* — sections ————————————————————————————————————————————————————————— */
+section { margin-top: 104px; scroll-margin-top: 28px; }
+section > h2 {
+  font-family: var(--serif); font-weight: 600;
+  font-size: clamp(25px, 3vw, 33px); line-height: 1.16; letter-spacing: -.016em;
+  margin: 0 0 16px; max-width: 22ch; text-wrap: balance;
+}
+section > .say { margin: 0 0 40px; max-width: 66ch; color: var(--ink-2); }
+section > .say + .say { margin-top: -26px; }
+.say strong { color: var(--ink); font-weight: 600; }
+.say code, .inline {
+  font-family: var(--mono); font-size: .88em;
+  background: var(--paper); border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-kbd); padding: .5px 5px; color: var(--ink);
+}
+
+/* — specimen ————————————————————————————————————————————————————————— */
+.specs { display: grid; gap: 34px; }
+.specs.two { grid-template-columns: repeat(auto-fit, minmax(512px, 1fr)); }
+.spec { min-width: 0; }
+.spec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 13px; }
+.spec-name {
+  font-family: var(--mono); font-size: var(--fs-kbd); font-weight: 500;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3);
+  white-space: nowrap;
+}
+.spec-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.spec-note b { color: var(--ink); font-weight: 600; }
+.stage {
+  background: var(--paper-recessed);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-panel);
+  padding: 30px 26px;
+  display: flex; justify-content: center;
+  overflow-x: auto;
+}
+.stage.tall { padding: 44px 26px; }
+
+/* — rule block ——————————————————————————————————————————————————————— */
+.rules { display: grid; gap: 1px; background: var(--hairline-soft); border: 1px solid var(--hairline); border-radius: var(--r-inner); overflow: hidden; }
+.rule { background: var(--paper); padding: 20px 22px; display: grid; grid-template-columns: 132px 1fr; gap: 20px; align-items: start; }
+.rule-k { font-family: var(--sans); font-size: var(--fs-label); font-weight: 700; letter-spacing: var(--track-label); text-transform: uppercase; padding-top: 2px; }
+.rule-k.marks { color: var(--ins); }
+.rule-k.acts  { color: var(--ins); }
+.rule-k.reads { color: var(--ink-3); }
+.rule-v { font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+.rule-v b { color: var(--ink); font-weight: 600; }
+.rule-v em { font-style: normal; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+
+/* — table ———————————————————————————————————————————————————————————— */
+table.vocab { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.vocab th {
+  text-align: left; font-family: var(--sans); font-size: var(--fs-label); font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-3);
+  padding: 0 16px 10px 0; border-bottom: 1px solid var(--hairline);
+}
+table.vocab td { padding: 11px 16px 11px 0; border-bottom: 1px solid var(--hairline-soft); color: var(--ink-2); vertical-align: top; }
+table.vocab td:first-child { font-family: var(--sans); font-size: var(--fs-label); font-weight: 700; letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink); white-space: nowrap; }
+table.vocab td.gone { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--del-line); }
+table.vocab td.new::after { content: "new"; font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ins); margin-left: 8px; }
+
+/* — change list —————————————————————————————————————————————————————— */
+ol.changes { list-style: none; counter-reset: c; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--hairline-soft); border: 1px solid var(--hairline); border-radius: var(--r-inner); overflow: hidden; }
+ol.changes li { counter-increment: c; background: var(--paper); padding: 18px 22px 18px 58px; position: relative; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+ol.changes li::before { content: counter(c); position: absolute; left: 22px; top: 18px; font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+ol.changes b { color: var(--ink); font-weight: 600; }
+ol.changes .where { font-family: var(--mono); font-size: 11px; color: var(--ink-3); display: block; margin-top: 5px; }

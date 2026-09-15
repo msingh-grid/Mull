@@ -1,5 +1,6 @@
 import { query, type Options, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { NavStep } from '@shared/nav'
+import { AGENT_MODEL } from '@shared/agent'
 import { runAgent, type AgentGoal, type AgentRunResult } from './agent-loop'
 import type {
   AnswerRequest,
@@ -286,7 +287,11 @@ export class AgentEngine implements Engine {
   async runAgent(request: AgentGoal): Promise<AgentRunResult> {
     return runAgent({
       ...request,
-      model: this.model,
+      // `AGENT_MODEL`, not `this.model`: the loop is pinned to the strongest
+      // model rather than inheriting the one chosen for rewriting paragraphs.
+      // See the note on the constant — the two jobs fail in different ways and
+      // only one of them is checked by a human before it takes effect.
+      model: AGENT_MODEL,
       oauthToken: this.oauthToken,
       log: this.log
     })

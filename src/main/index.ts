@@ -58,6 +58,7 @@ import { SculptLane } from './pipeline/sculpt'
 import { NavigateLane } from './pipeline/navigate'
 import { AgentLane, type AgentRequest } from './pipeline/agent'
 import type { NavigateLaneLike } from './pipeline/dictation'
+import { TurnMemory } from './services/turns'
 import { AskLane } from './pipeline/ask'
 import { ActionExecutor } from './pipeline/actions'
 import { IntentRouter } from './pipeline/intent'
@@ -100,6 +101,13 @@ let captures: CaptureStore | null = null
 let sculpt: SculptLane | null = null
 let navigate: NavigateLane | null = null
 let agent: AgentLane | null = null
+/**
+ * The last few things the user said, for reading follow-ups against.
+ *
+ * In memory and bounded, unlike the journal — this is the conversation Mull is
+ * in, not the record of what it did. See `services/turns.ts`.
+ */
+const turns = new TurnMemory()
 /** Whichever of the two lanes this utterance belongs to. See `bootstrap`. */
 let navigateRouter: NavigateLaneLike | null = null
 let ask: AskLane | null = null
@@ -633,6 +641,9 @@ async function bootstrap(): Promise<void> {
   intent = new IntentRouter({
     engine,
     useModel: () => settings?.get().routing !== 'rules',
+    // Read per utterance, so "and what about Priya" is judged against the
+    // conversation as it stands rather than as it stood at launch.
+    recent: () => turns.recent(),
     // The classifier is usually the longest step in the utterance, so its
     // lines belong in the utterance's own trace rather than in a log of their
     // own — "where did the eleven seconds go" is unanswerable otherwise.
@@ -652,6 +663,7 @@ async function bootstrap(): Promise<void> {
       navigate: navigateRouter,
       ask: ask ?? undefined,
       intent,
+      turns,
       // Read per utterance, so changing it in Settings takes effect on the
       // next thing you say rather than the next launch.
       screenContext: () => ({
