@@ -16,6 +16,7 @@
  * Invariant this seam protects: plain dictation NEVER waits on any of this.
  * Nothing in src/main/pipeline/dictation.ts calls an Engine.
  */
+import type { AgentGoal, AgentRunResult } from './agent-loop'
 import type { ScreenContext } from '@shared/context'
 import type { NavAttempt, NavStep } from '@shared/nav'
 import type { UiTarget } from '@shared/sidecar-api'
@@ -265,5 +266,19 @@ export interface Engine {
    * dismissed, which is why `AnswerRequest` has no app and no target.
    */
   answer(request: AnswerRequest, onPartial?: (text: string) => void): Promise<TransformResult>
+  /**
+   * Run a goal to completion, with the model calling tools rather than
+   * answering a questionnaire — see `engine/agent-loop.ts`.
+   *
+   * **Optional, and the only optional capability on this interface.** `navigate`
+   * above is a single model call and every engine can make one; a tool loop is
+   * a property of the harness, and only the Agent SDK lane has one. An engine
+   * without this is not broken — `index.ts` gives its utterances to
+   * `NavigateLane` instead, which is what every engine did until now.
+   *
+   * Widening this to the API-key lane means writing the same loop over the
+   * Messages API, which is ordinary work and simply has not been done yet.
+   */
+  runAgent?(request: AgentGoal): Promise<AgentRunResult>
   dispose?(): Promise<void>
 }

@@ -247,6 +247,21 @@ function EnginePane({
         </select>
       </Row>
 
+      <Row label="Going and looking" hint="experimental — subscription lane only">
+        <select
+          value={settings.agentLoop ? 'loop' : 'steps'}
+          onChange={(event) => void update({ agentLoop: event.target.value === 'loop' })}
+        >
+          <option value="steps">One step at a time</option>
+          <option value="loop">Let the model drive</option>
+        </select>
+      </Row>
+      <p>
+        {settings.agentLoop
+          ? 'Mull gives the model tools — look, find, press — and it decides what to do next after seeing what each one returns. It can take up to 40 turns instead of 6, so it can do more than fetch one thing. Escape stops it at the next action; what has already been pressed stays pressed. Needs the Claude subscription lane.'
+          : 'Mull runs the loop and asks the model for one step at a time, up to six, re-reading the window before each one. Reliable for “open this conversation and tell me what it says”, and not much more — it remembers nothing between steps.'}
+      </p>
+
       <Row label="Connection">
         <button type="button" className="btn ghost" disabled={testing} onClick={() => void test()}>
           {testing ? 'Testing…' : 'Test'}

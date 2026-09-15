@@ -98,6 +98,23 @@ export const SettingsSchema = z.object({
    */
   thinking: z.boolean().default(false),
   /**
+   * Let the model drive the navigation lane, instead of answering a
+   * questionnaire.
+   *
+   * With this off, "go and look somewhere else" works the way it always has:
+   * Mull runs the loop, re-renders the window every turn, and the model replies
+   * with one line of JSON, six times at most. With it on, the model calls tools
+   * — look, find, press — reads what comes back, and decides what to do next,
+   * which is the only shape that can do anything more than fetch one thing.
+   *
+   * **Off by default, and the two lanes are kept side by side on purpose.** This
+   * is the switch the measurement is taken across: same goals, both ways, and
+   * the loop has to earn the default rather than be given it. Only the Claude
+   * subscription lane can run it — the API-key lane has no tool loop yet — and
+   * with that engine selected this setting does nothing.
+   */
+  agentLoop: z.boolean().default(false),
+  /**
    * Where the user dragged the HUD, in screen coordinates. Null means the
    * default bottom-centre. Clamped back onto a real display at launch, because
    * a position saved on a monitor that has since been unplugged would leave the

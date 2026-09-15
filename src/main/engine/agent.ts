@@ -1,5 +1,6 @@
 import { query, type Options, type Query, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { NavStep } from '@shared/nav'
+import { runAgent, type AgentGoal, type AgentRunResult } from './agent-loop'
 import type {
   AnswerRequest,
   ClassifiedIntent,
@@ -91,6 +92,9 @@ export class AgentEngine implements Engine {
   readonly name = 'agent'
   readonly model: string
   private readonly health: EngineHealth
+  /** Kept for `runAgent`, which builds its own query rather than using one. */
+  private readonly oauthToken: string | null
+  private readonly log: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   private readonly edit: AgentSession
   private readonly classifier: AgentSession
   private readonly composer: AgentSession
@@ -100,6 +104,8 @@ export class AgentEngine implements Engine {
   constructor(options: AgentEngineOptions) {
     this.model = options.model
     this.health = new EngineHealth({ now: options.now })
+    this.oauthToken = options.oauthToken ?? null
+    this.log = options.log ?? ((): void => {})
 
     const shared = {
       oauthToken: options.oauthToken ?? null,
@@ -261,6 +267,29 @@ export class AgentEngine implements Engine {
       this.answerer.reset()
       throw err
     }
+  }
+
+  /**
+   * Run a goal to completion, with the model calling tools.
+   *
+   * The one method here that is not an `AgentSession` turn, and the one place
+   * in Mull where a session is allowed to be an agent. It gets its own query
+   * per run rather than a warm session, because here the conversation *is* the
+   * memory and reusing it would mean the next run inheriting the last one's
+   * beliefs about a window that has since changed. See `engine/agent-loop.ts`.
+   *
+   * Not wrapped in `health.degrade`/`recover` like the turns above: a run that
+   * ends because the user stopped it, or because it hit a budget, says nothing
+   * whatever about whether the engine is reachable, and marking the engine
+   * unhealthy for those would take dictation's fallback with it.
+   */
+  async runAgent(request: AgentGoal): Promise<AgentRunResult> {
+    return runAgent({
+      ...request,
+      model: this.model,
+      oauthToken: this.oauthToken,
+      log: this.log
+    })
   }
 
   async dispose(): Promise<void> {

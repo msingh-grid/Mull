@@ -3,6 +3,7 @@ import type { EngineCredentials, EngineKind, EngineStatus } from '@shared/engine
 import type { Settings } from '@shared/settings'
 import { AgentEngine } from './agent'
 import { ApiKeyEngine } from './api-key'
+import type { AgentGoal, AgentRunResult } from './agent-loop'
 import type { NavStep } from '@shared/nav'
 import type {
   AnswerRequest,
@@ -189,6 +190,24 @@ export class EngineHolder implements Engine {
 
   answer(request: AnswerRequest, onPartial?: (text: string) => void): Promise<TransformResult> {
     return this.inner.answer(request, onPartial)
+  }
+
+  /**
+   * Can the engine behind this holder run a tool loop?
+   *
+   * Asked per utterance rather than once at boot, because `swap` replaces the
+   * engine under everything — signing in, signing out, or changing the model
+   * mid-session all go through it, and a lane chosen at startup would be
+   * answering for an engine that is no longer there.
+   */
+  get canRunAgent(): boolean {
+    return typeof this.inner.runAgent === 'function'
+  }
+
+  runAgent(request: AgentGoal): Promise<AgentRunResult> {
+    const run = this.inner.runAgent
+    if (!run) throw new Error('this engine cannot run an agent loop')
+    return run.call(this.inner, request)
   }
 
   async dispose(): Promise<void> {

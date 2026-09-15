@@ -56,6 +56,8 @@ import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
 import { SculptLane } from './pipeline/sculpt'
 import { NavigateLane } from './pipeline/navigate'
+import { AgentLane, type AgentRequest } from './pipeline/agent'
+import type { NavigateLaneLike } from './pipeline/dictation'
 import { AskLane } from './pipeline/ask'
 import { ActionExecutor } from './pipeline/actions'
 import { IntentRouter } from './pipeline/intent'
@@ -97,6 +99,9 @@ let detectedLogin = false
 let captures: CaptureStore | null = null
 let sculpt: SculptLane | null = null
 let navigate: NavigateLane | null = null
+let agent: AgentLane | null = null
+/** Whichever of the two lanes this utterance belongs to. See `bootstrap`. */
+let navigateRouter: NavigateLaneLike | null = null
 let ask: AskLane | null = null
 let intent: IntentRouter | null = null
 let settings: SettingsStore | null = null
@@ -554,6 +559,55 @@ async function bootstrap(): Promise<void> {
     log: logFn
   })
 
+  /**
+   * The same job, with the model driving instead of Mull.
+   *
+   * Built alongside `navigate` rather than instead of it, because the two are
+   * deliberately kept side by side while the loop earns its keep. It gets the
+   * same ports — the same card, the same journal, the same executor, the same
+   * trace — so the only variable between them is who runs the loop.
+   */
+  // Captured so the closures below do not have to re-narrow it. The holder is
+  // stable for the life of the app — `swap` replaces what is *inside* it — so
+  // this stays correct across a sign-in or a model change.
+  const holder = engine
+  agent = new AgentLane({
+    sidecar,
+    engine,
+    executor: new ActionExecutor({ sidecar, journal: journal ?? undefined, log: logFn }),
+    run: (run) => holder.runAgent(run),
+    journal: journal ?? undefined,
+    captures,
+    onJournalChanged: notifyJournalChanged,
+    hud: {
+      openCard: (card, onAction) => hud?.openCard(card, onAction),
+      updateCard: (card) => hud?.updateCard(card),
+      closeCard: () => hud?.closeCard(),
+      update: (patch) => void pipeline?.patchState(patch),
+      announce: (phase, notice, lastAction) =>
+        void pipeline?.announce(phase, notice, lastAction)
+    },
+    trace: () => pipeline?.currentTrace() ?? new Trace(),
+    log: logFn
+  })
+
+  /**
+   * Which of the two gets this utterance.
+   *
+   * Decided per utterance rather than at boot, because both inputs move under
+   * the app: `swap` replaces the engine whenever the user signs in, signs out or
+   * changes model, and the setting is a checkbox. `dictation.ts` sees only
+   * `NavigateLaneLike` — one method — so it needs to know about none of this.
+   */
+  const agentLane = agent
+  const stepLane = navigate
+  navigateRouter = {
+    propose: (request: AgentRequest) =>
+      settings?.get().agentLoop && holder.canRunAgent
+        ? agentLane.propose(request)
+        : stepLane.propose(request)
+  }
+
   // Questions about the window in front of you. Shares the engine's `answer`
   // turn with the navigation lane — a navigation is this with a walk in front
   // of it — and shares nothing else with any lane that writes, because it has
@@ -595,7 +649,7 @@ async function bootstrap(): Promise<void> {
       journal: journal ?? undefined,
       captures: captures ?? undefined,
       sculpt,
-      navigate,
+      navigate: navigateRouter,
       ask: ask ?? undefined,
       intent,
       // Read per utterance, so changing it in Settings takes effect on the
