@@ -59,12 +59,16 @@ import { NavigateLane } from './pipeline/navigate'
 import { AgentLane, type AgentRequest } from './pipeline/agent'
 import type { NavigateLaneLike } from './pipeline/dictation'
 import { TurnMemory } from './services/turns'
+import { AppleScriptApps } from './services/apps'
+import { AppleScriptMenus } from './services/menus'
+import { AppleScriptBrowser } from './services/browser'
 import { AskLane } from './pipeline/ask'
 import { ActionExecutor } from './pipeline/actions'
 import { IntentRouter } from './pipeline/intent'
 import { appliedText, diffText } from './pipeline/diff'
 import { FakeEngine } from './engine/fake'
 import { AgentEngine } from './engine/agent'
+import { ApiKeyEngine } from './engine/api-key'
 import { detectClaudeCodeLogin, EngineHolder, engineStatus, resolveEngine } from './engine/select'
 import { CredentialsStore, type CredentialKind } from './store/credentials'
 import type { Engine } from './engine/types'
@@ -493,7 +497,7 @@ async function bootstrap(): Promise<void> {
       log: logFn
     })
   )
-  log.info('engine', { kind: engine.name, model: engine.model, detectedLogin })
+  log.info('engine', { kind: engine.name, ...engineModels(), detectedLogin })
   // Bring the subprocess up now rather than on the first edit, which is the
   // one the user is actually waiting for.
   warmEngine()
@@ -596,6 +600,12 @@ async function bootstrap(): Promise<void> {
     sidecar,
     engine,
     executor: new ActionExecutor({ sidecar, journal: journal ?? undefined, log: logFn }),
+    // Made once and shared: it holds no state, and the only thing it owns is
+    // knowing how to spell a script. See `services/browser.ts` for why this is
+    // here rather than behind a sidecar verb.
+    browser: new AppleScriptBrowser(),
+    apps: new AppleScriptApps(),
+    menus: new AppleScriptMenus(),
     run: (run) => holder.runAgent(run),
     journal: journal ?? undefined,
     captures,
@@ -960,12 +970,20 @@ ipcMain.handle(IPC.settingsSet, (_event, patch: Partial<Settings>) => {
   const before = settings?.get()
   const next = settings?.set(patch) ?? null
   if (next) {
-    // Which lane and which model are both engine-shaping, so the change has to
+    // Which lane and which models are engine-shaping, so the change has to
     // reach the holder — otherwise picking "Fast" would keep using the careful
-    // model until the next launch, and quietly.
-    if (before && (before.engine !== next.engine || before.editModel !== next.editModel)) {
-      reloadEngine()
-    }
+    // model until the next launch, and quietly. All three model settings are
+    // listed because each is baked into the engine at construction: the two
+    // session models when the sessions are built, the loop's when `runAgent`
+    // reads it.
+    const reshaped =
+      before !== undefined &&
+      before !== null &&
+      (before.engine !== next.engine ||
+        before.editModel !== next.editModel ||
+        before.classifierModel !== next.classifierModel ||
+        before.agentModel !== next.agentModel)
+    if (reshaped) reloadEngine()
     // Every window stamps its own theme, so the change has to reach all of
     // them — including the HUD, which has its own "page in the dark" rule.
     for (const win of BrowserWindow.getAllWindows()) {
@@ -980,6 +998,26 @@ ipcMain.handle(IPC.settingsSet, (_event, patch: Partial<Settings>) => {
 function warmEngine(): void {
   const current = engine?.current
   if (current instanceof AgentEngine) current.warm()
+}
+
+/**
+ * All three models, for the log.
+ *
+ * `Engine.model` is the edit model alone, so a line saying which engine came
+ * up used to say nothing about how routing or the loop were configured — and
+ * those are settings-shaped problems, the kind found in a log file afterwards
+ * rather than caught in the moment. Undefined keys are omitted by the logger,
+ * so a signed-out engine still prints one clean line.
+ */
+function engineModels(): Record<string, string | null | undefined> {
+  const current = engine?.current
+  return {
+    model: current?.model ?? null,
+    classifier: current instanceof AgentEngine || current instanceof ApiKeyEngine
+      ? current.classifierModel
+      : undefined,
+    agent: current instanceof AgentEngine ? current.agentModel : undefined
+  }
 }
 
 /**
@@ -1003,7 +1041,7 @@ function reloadEngine(): void {
       log: logFn
     })
   )
-  log.info('engine reloaded', { kind: engine.name, model: engine.model })
+  log.info('engine reloaded', { kind: engine.name, ...engineModels() })
   // A new engine deserves its own chance at the classifier: what was measured
   // too slow was the old one, and an API key answers far faster than the
   // subscription lane's harness does.

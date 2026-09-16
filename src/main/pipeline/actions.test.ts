@@ -13,7 +13,8 @@ import { ActionExecutor, place, type Scan } from './actions'
  * to hold, and each is tested here on its own terms:
  *
  *   the union   a step that cannot be described cannot be performed
- *   the kind    a press target is not a type target and vice versa
+ *   the kind    nothing takes text that is not a text field; nothing is pressed
+ *               that does not advertise `AXPress` — which a text field may
  *   the handle  an index is only good for the scan it came from
  */
 
@@ -151,11 +152,43 @@ describe('press', () => {
     expect(h.sidecar.targetActions).toEqual([])
   })
 
-  it('refuses a target that is a text field, not a button', async () => {
-    const h = harness()
+  it('refuses a target that advertises no press action', async () => {
+    const h = harness([
+      target(0, { title: 'Search', role: 'AXButton' }),
+      target(1, { title: 'Sent 4:12pm', role: 'AXGroup', actions: ['AXScrollToVisible'] })
+    ])
     await scanned(h.sidecar)
-    const result = await h.run({ verb: 'press', index: 1, label: 'Channel or user name' })
+    const result = await h.run({ verb: 'press', index: 1, label: 'Sent 4:12pm' })
     expect(result).toMatchObject({ ok: false, refusedBy: 'wrong-kind' })
+    expect(h.sidecar.targetActions).toEqual([])
+  })
+
+  /**
+   * Google Calendar's start time, which is where this rule came from.
+   *
+   * It is an `AXComboBox`, so its `kind` is `type`, and it refuses a caret
+   * while its popup is shut — `type` comes back `focus-refused`, whose message
+   * says to press it first. This used to refuse on `kind` alone, so the run
+   * died between two of Mull's own sentences: press it first, no. Four
+   * attempts across both lanes in one evening never set a meeting time.
+   *
+   * `kind` says what a control is *for*. Only `AXPress` says what it will take.
+   */
+  it('presses a text-role control that carries AXPress', async () => {
+    const h = harness([
+      target(0, { title: 'Title', role: 'AXTextField', kind: 'type' }),
+      target(1, {
+        title: 'Start time',
+        role: 'AXComboBox',
+        kind: 'type',
+        value: '1:00am',
+        actions: ['AXPress', 'AXShowMenu', 'AXScrollToVisible']
+      })
+    ])
+    await scanned(h.sidecar)
+    const result = await h.run({ verb: 'press', index: 1, label: 'Start time' })
+    expect(result.ok).toBe(true)
+    expect(h.sidecar.targetActions).toMatchObject([{ verb: 'press', index: 1 }])
   })
 
   /**

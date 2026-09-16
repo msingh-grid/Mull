@@ -45,6 +45,9 @@ import { insertionProfile } from '../services/insertion-table'
 const DESTRUCTIVE =
   /\b(delete|remove|leave|archive|block|unsend|discard|trash|deactivate|unsubscribe|sign out|log out|log off)\b/i
 
+/** The action name the sidecar performs, spelled once. See `case 'press'`. */
+const AX_PRESS = 'AXPress'
+
 /**
  * There is no name check on typing any more, and its absence is deliberate.
  *
@@ -224,7 +227,28 @@ export class ActionExecutor {
             refusedBy: 'no-such-target'
           }
         }
-        if (target.kind !== 'press') {
+        /**
+         * Can this be pressed — not, is pressing the *only* thing it does.
+         *
+         * `kind` answers "what is this control for", and for a text role the
+         * answer is "typing". It used to be read here as "and therefore nothing
+         * else", which made this gate stricter than the sidecar's: `AXTargets.press`
+         * checks `AXPress` on the element it re-reads, and every text-role control
+         * Chromium emits carries it.
+         *
+         * Google Calendar's start time is the case that found this. It is an
+         * `AXComboBox`, so `kind` is `type`; it refuses a caret while its popup is
+         * shut, so `type` fails with `focus-refused` — whose message says, in so
+         * many words, *press it first to open it*. The one tool that could do that
+         * then refused categorically, and the run died between two of Mull's own
+         * sentences. Pressed, the popup opens, the caret goes in, and "3:00pm"
+         * lands in the field.
+         *
+         * So: ask the element. A text field with no `AXPress` still refuses here,
+         * and the sidecar refuses again on the element as it is at press time —
+         * this scan may be stale, that read never is.
+         */
+        if (!target.actions.includes(AX_PRESS)) {
           return { ok: false, detail: `${target.title} is not pressable`, refusedBy: 'wrong-kind' }
         }
         if (DESTRUCTIVE.test(target.title)) {

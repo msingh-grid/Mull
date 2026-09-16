@@ -583,16 +583,124 @@ a day, and an agent loop without a stop is not something to run twice. Compare
 wall-clock, tokens and success against `NavigateLane` on today's goals.
 *Go/no-go on the whole architecture. ~3 days with the stop.*
 
-**M-B · Cross-app.** Swift 1–5. Tools `apps`, `windows`, `switchApp`,
-`switchWindow`. Read-only still.
+**M-B · Cross-app.** ~~Swift 1–5.~~ Tools `apps`, `switchApp`. **Built** —
+`src/main/services/apps.ts`.
 *"What's the last thing Priya said in Slack" — Mull goes there, reads it, comes
 back, and you watch it happen.*
 
-**M-C · Writing.** Swift 6–7. `setText`, `typeText`, `scrollTo`, `key` without
-Return. Fills forms, does not commit.
+- **No Swift, again, and this time none was needed.** `activateApp` has been in
+  the sidecar contract since M2 with `restore` as its only caller, so
+  `switchApp` is a call that already existed. The half that was genuinely
+  missing is *listing* what is running — Electron's main process cannot see it —
+  and that went to System Events for the same reason the browser did: a protocol
+  bump costs the whole sidecar when a binary has not been rebuilt, and a missing
+  app list costs one tool that says so in a sentence.
+- **`windows` and `switchWindow` are not built**, and are the one part of this
+  milestone that is genuinely deferred rather than re-routed. There is no window
+  enumeration in the sidecar and `AXRaise` through System Events is the flaky
+  path; the reference task does not need it. Worth revisiting when a real goal
+  fails for want of it, not before.
+- **`switchApp` can only reach what `apps` returned in the same run.** The
+  narrowing that makes the id a value Mull produced rather than one the model
+  recalled — §4.6 of the pipeline README, and the same argument `knownHosts`
+  makes for `checkUrl`.
+- **`restore` stopped being unconditional, and that was this milestone's real
+  design error.** Shipping it, "open Slack" opened Slack and then put the user's
+  editor back — the one thing asked for, undone, with two screen flickers on the
+  way. A run that *finishes* now says where to leave the user (`done({stay})`);
+  a run that stops, expires or throws still restores. The same fix repaired
+  `arrived`, which required prose and therefore filed every successful
+  destination run as **failed**.
 
-**M-D · Browser.** Swift 8. `tabs`, `switchTab`, `openUrl`.
+**M-C · Writing.** ~~Swift 6–7.~~ `setText` **built** (with M-D); `key` **built**
+— `AgentKeySchema`, seven navigation keys, no Return and no escape. Fills forms,
+does not commit.
+
+- **`key` goes through `navKey`, not `keyChord`.** The verb that structurally
+  cannot express ⏎, chosen by picking a method name — so the keystroke closure
+  moved from "no tool carries a key" to "no tool can carry *that* key", which is
+  the property that was always doing the work. `escape` is excluded too, for a
+  duller reason: a synthetic Escape posts upstream of `ChordScope`'s global
+  shortcut, so an agent pressing it would end its own run.
+- **`scrollTo` is built now**, and the deferral reasoning above turned out to
+  be wrong in an interesting way. It does need Swift and protocol 8 — that part
+  held. What did not hold was "`pageDown` with `times` reaches that": a page key
+  moves whatever holds keyboard focus, which in a browser is frequently not the
+  thing being read, and the failure is silent. `AXScrollToVisible` asks the
+  *element* to make itself visible instead, and a survey of six applications
+  found it advertised by **519 of 575** targets — it was never an exotic action,
+  it was simply never performed. Verified live: an element at y=982 came to
+  y=121.
+- **`typeText` is not built, deliberately.** It would type at the caret without
+  naming a target, which loses `setText`'s read-back, its "was it a text
+  control" check and the journal's record of what the field held before. Those
+  are the receipts that made writing defensible in the first place.
+
+**M-D · Browser.** ~~Swift 8.~~ `tabs`, `switchTab`, `openUrl`. **Built** —
+`src/main/services/browser.ts`.
 *Gmail → Calendar becomes reachable.*
+
+Two things landed differently from this plan and are worth recording here rather
+than only in the code:
+
+- **It is not in the sidecar.** The handshake is strict equality, so a new verb
+  means protocol 8, and a `mull-mac` binary that has not been rebuilt then fails
+  `init` and takes the *whole* sidecar down — no dictation, no accessibility.
+  `npm run build:sidecar` is a separate manual step. AppleScript needs nothing
+  native, so it runs from main as an injectable `osascript` subprocess.
+- **`openUrl` carries a gate.** §7's asymmetry argument applies to it more
+  directly than this milestone list implies: it is the first verb here that
+  reaches the network, and it needs no keystroke, so the closure that made
+  `press` and `setText` safe says nothing about it. `checkUrl` narrows it —
+  https/http only, no credentials, and a query string only to a host already
+  open in a tab. That is a narrowing, not a proof; the budget gate in §7 is
+  still the real answer and is still unbuilt.
+
+**M-F · The menu bar.** `menus`, `chooseMenu`. **Built** —
+`src/main/services/menus.ts`.
+*Every command an application has, not merely the ones it drew.*
+
+Not in the original milestone list at all, which is the point worth recording:
+it was found by measuring rather than by planning. A survey of what Mull can
+actually address turned up one surface it had never looked at.
+
+- **Every Mac application has one, and Mull scanned one level too low.**
+  `AXTargets.scan` roots at `AXHarvest.window(of: app)`; a menu bar hangs off the
+  *application*. Measured across eight applications and four toolkits — AppKit,
+  Chromium, Electron, Zed's GPUI — with no exceptions and 89–204 commands each.
+  The case that made it unignorable: **Zed publishes zero targets and one block
+  of text to accessibility, and has 110 commands in its menus.**
+- **No Swift and no protocol bump.** System Events reads the whole hierarchy in
+  0.4–1.3s, so it reuses the `osascript` runner `apps` already needed. The
+  script's shape is load-bearing: the obvious per-item property reads take
+  **6.3s** against Chrome, three bulk fetches per menu take **0.55s**.
+- **It is the first widening the keystroke closure does not cover, and that is
+  the real cost.** Mail sends from a menu item. So `checkMenuCommand` — a
+  deny-list on the command's name — now holds a property that used to be held by
+  the shape of `AgentKeySchema`. A regex is not a type, and §7's budget gate is
+  still the honest answer. See `@shared/agent`'s header, which no longer claims
+  the closure covers everything.
+- **Depth one only.** A submenu is marked and refused rather than hidden.
+
+**M-G · List options.** **Built** — `AXTargets.optionRoles`.
+*Opening a dropdown and picking from it, which failed in both lanes.*
+
+- **Two unrelated mechanisms were losing the same thing.** In Chromium the popup
+  *is* in the window tree, but its options are `AXStaticText` and `neverTargets`
+  dropped them: Calendar's time list is 96 options, all visible in the window
+  text, **0** addressable. In native apps the menu is not in the window tree at
+  all — which is M-F.
+- **The container is the test, not the role.** `neverTargets` is right that a
+  Chromium tree is full of pressable `AXStaticText`; inside an `AXList` or
+  `AXMenu` that same claim means something different. Measured after the change:
+  Slack, VS Code, Notes and Finder report exactly the target counts they did
+  before, so the narrowing holds.
+- **The bug was two conditions further down than the one being debugged.** All
+  96 options passed the container test and the `AXPress` test, and were dropped
+  by the *unnamed control* rule — static text keeps its text in `AXValue`. Worse,
+  the first fix put the value fallback only in the scan, so `resolve` re-read the
+  same element as unnamed and refused every press as `changed`: a target offered
+  that could never be pressed. Both now read one `name(of:)`.
 
 **M-E · Commit.** The budget gate from §7.
 

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { MODEL_IDS } from '@shared/settings'
 import { renderContext, renderTargets } from './prompts'
 import type { ClassifiedIntent, ClassifyRequest } from './types'
 
@@ -17,19 +18,73 @@ import type { ClassifiedIntent, ClassifyRequest } from './types'
  *     the answer is dictation before anyone is asked. That branch lives in
  *     `router.ts` and is the narrowed form of the "dictation never waits"
  *     invariant.
- *  2. **It is tiny.** One cached system prompt, a handful of output tokens, and
- *     always Haiku regardless of the edit model — this is a classification, not
+ *  2. **It is tiny.** One cached system prompt and a handful of output tokens,
+ *     on one model regardless of the edit model — this is a classification, not
  *     a judgement about someone's writing.
  *  3. **Every failure is `dictate`.** Malformed JSON, a timeout, an engine that
  *     is signed out: the answer is to type what the user said, which is what
  *     Mull did before any of this existed and is always recoverable with ⌥Z.
  */
 
-/** The classifier is always Haiku. Latency is the whole design constraint. */
-export const CLASSIFIER_MODEL = 'claude-haiku-4-5'
+/**
+ * One model for every engine, whatever the edit model is.
+ *
+ * This was Haiku, chosen when latency was the whole design constraint and the
+ * job was two words wide: insert this, or act on that. The job has grown. The
+ * classifier now decides between four routes, reads `<recent>` to tell a
+ * follow-up from a fresh sentence, and hands `navigate` a goal that an agent
+ * will spend twenty steps on — and it was getting those wrong often enough to
+ * be the thing standing between a good utterance and a good run. A route
+ * chosen wrongly is not recoverable downstream: nothing later in the pipeline
+ * reconsiders it.
+ *
+ * Latency still matters, and this costs some: measured at p50 954ms on Haiku
+ * against a budget raised to 20 000ms to pay for it (`intent.ts`'s
+ * `DEFAULT_TIMEOUT_MS`). The system prompt is still cached, which is most of
+ * what kept it quick.
+ *
+ * This is now the **default** rather than the pin: `settings.classifierModel`
+ * overrides it, and both engines take the resolved id from `resolveEngine`.
+ * It stays here so a test, a probe or an engine built without settings still
+ * has an answer, and it is spelled through `MODEL_IDS` so that answer cannot
+ * drift from the menu.
+ */
+export const CLASSIFIER_MODEL = MODEL_IDS.sonnet
 
-/** Enough to answer `{"intent":"edit","target":"document"}` and no more. */
-export const CLASSIFIER_MAX_TOKENS = 64
+/**
+ * The other budget, and the one that fails silently.
+ *
+ * This was 64 — "enough to answer `{"intent":"edit","target":"document"}` and
+ * no more" — which was true of the vocabulary it was written for. It is not
+ * true now. Three of the six answers carry a sentence of the user's own words
+ * back, and `navigate` carries the longest of them by design: the prompt below
+ * explicitly demands a whole instruction naming both where to go and what to
+ * find there, because a bare subject is useless to the lane that reads it.
+ *
+ *   {"intent":"navigate","goal":"open the conversation with Anil Turaga and
+ *    find what he said about the terms doc"}
+ *
+ * That is already most of 64 tokens. A goal one clause longer runs out mid
+ * string — and a cap does not truncate politely, it stops. The JSON never
+ * closes, `parseClassification` throws, and `IntentRouter` treats a malformed
+ * answer exactly as it treats a timeout: fall back to the rules, route to
+ * `dictate`. So the failure looks like the classifier deciding badly, when what
+ * actually happened is that it decided well and was cut off mid-sentence, with
+ * the longest and most considered answers the likeliest to be lost.
+ *
+ * 512 because output tokens are only billed when used — an `edit` answer still
+ * costs its fifteen — so the ceiling costs nothing except as insurance, and
+ * insurance is all it is. It bounds a runaway, it does not shape the answer.
+ * The prompt is what keeps the reply short. Eight times the old number rather
+ * than twice it for the same reason: the thing being bought is the certainty
+ * that no sentence a person can reasonably say gets cut in half, and buying it
+ * narrowly is how it comes back.
+ *
+ * Only the API-key lane sets this; the Agent SDK lane has no equivalent cap,
+ * which is why this failure would have shown up on one engine and not the
+ * other.
+ */
+export const CLASSIFIER_MAX_TOKENS = 512
 
 /**
  * How much of the field the classifier is shown.
@@ -49,7 +104,7 @@ Answer with one JSON object and nothing else:
 {"intent":"edit","target":"document","instruction":"<what they asked for>"}
 {"intent":"compose","instruction":"<what they asked for>"}
 {"intent":"ask","question":"<what they want to know>"}
-{"intent":"navigate","goal":"<where to go, and what to find out there>"}
+{"intent":"navigate","goal":"<where to go, and what to do or find out there>"}
 
 Choose "edit" when the words ask for something to be done TO the text shown to you — rewrite, shorten, fix, translate, change the tone, turn into a list. Use target "selection" when a selection is shown, otherwise "document" (the whole field).
 
@@ -77,12 +132,17 @@ Ask for exactly as much as they asked for. Do not narrow a broad request to the 
   question: "What does this thread say?"
   NOT:      "What is the status of the terms doc redlines?"   ← they asked about all of it
 
-Choose "navigate" ONLY when the user names a specific place or person that is not in <screen> and would have to be opened first — "what did Priya say about the terms doc" with no Priya anywhere on screen, "check the eng-platform channel", "open the thread about pricing". The tool will go and look, then come back.
+Choose "navigate" when the user wants the tool to **go somewhere and do something**, rather than to answer from what is in front of them. Two shapes, and both are "navigate":
 
-This is the only route that presses buttons in someone else's application, so it is the last resort and never the safe guess. Three rules, and all three must hold:
-- The user named somewhere else. "This", "these", "here" and "my emails" mean what is already on screen — those are never "navigate".
-- What they named is genuinely absent from <screen> AND from <targets>.
-- Reading it would actually answer them.
+- **Go and find out.** "What did Priya say about the terms doc" with no Priya anywhere on screen, "check the eng-platform channel", "open the thread about pricing". The tool goes, reads, and comes back with an answer.
+- **Go and act.** "Open Slack", "switch to my calendar", "go to Gmail", "open the Anil thread", "put the address into the search box on that page". The user is asking to be taken somewhere or to have something done there. There may be no answer at the end, and that is fine — being in the right place *is* the outcome.
+
+The second shape is easy to misread as dictation, because "open my slack" looks like three words to type. It is not. **If the sentence asks for something to be opened, switched to, gone to, or done in another place, it is "navigate" — never "dictate".** The tool can change which application is in front, so "somewhere else" now includes other applications, not only other parts of this one.
+
+This is the only route that presses buttons in someone else's application, so it is never the safe guess for a *question*. The rules:
+- The user named somewhere else, or asked to be taken somewhere. "This", "these" and "here" mean what is already on screen.
+- "My emails", "my messages", "my calendar" are ambiguous on their own: with that thing already on screen they mean what is in front of the user, so "ask"; with an *action* in front of them — "open my email", "go to my calendar" — they name a destination, so "navigate".
+- For the *find out* shape, what they named must be genuinely absent from <screen> AND from <targets>, and reading it must actually answer them. The *act* shape has no such condition: a request to open something is a request to open it, whether or not the answer is visible.
 
 A <targets> block, when present, lists what can be pressed in this window — sidebar rows, tabs, buttons, search boxes. It is the other half of the evidence, and it exists because <screen> deliberately leaves these out: a conversation list, a row of tabs and a channel sidebar are all navigation, and none of them appears in the window's text.
 
@@ -96,7 +156,11 @@ Asking you to look over, triage, review or pick out things from what is already 
 
 If you are weighing "navigate" against "ask", the answer is "ask": working from the window the user is already looking at is always the cheaper mistake.
 
-"goal" is read by something that has never seen the user's words — it gets only this sentence and a list of what is on screen — and it is also printed on a card the user approves before anything is pressed. So write a whole instruction, not a subject. Name where to go AND what to find out when you arrive. A bare name is useless: "Anil Turaga" says nothing about what to do with him.
+**If you are weighing "navigate" against "dictate", the answer is "navigate".** That trade runs the other way, because the mistakes are not the same size. A "navigate" that should have been "dictate" puts a card on screen naming where it is about to go, and the user presses Escape or ignores it — nothing has happened. A "dictate" that should have been "navigate" types the user's own instruction into whatever they were looking at, which is the wrong text in somebody's document, or nothing at all with no explanation. "Open my slack" typed into an editor is the failure to avoid.
+
+"goal" is read by something that has never seen the user's words — it gets only this sentence and a list of what is on screen — and it is also printed on a card the user approves before anything is pressed. So write a whole instruction, not a subject. Name where to go AND what to do or find out when you arrive. A bare name is useless: "Anil Turaga" says nothing about what to do with him.
+
+For the *act* shape the goal is allowed to be short, because the act is the whole of it — "open Slack and bring it to the front" is a complete goal. Do not invent a question to justify it. If the user only asked to be taken somewhere, say only that.
 
   said: "what did Anil say about the terms doc"
   goal: "open the conversation with Anil Turaga and find what he said about the terms doc"

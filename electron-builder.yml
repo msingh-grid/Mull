@@ -45,6 +45,14 @@ mac:
   extendInfo:
     # macOS kills the process instead of prompting when this string is missing.
     NSMicrophoneUsageDescription: Mull listens only while you hold ⌥Space, and transcribes on this Mac.
+    # Same rule, and the string is shown verbatim in the consent dialog with the
+    # target's name filled in — so it says what will be read rather than asking
+    # for control in the abstract. Paired with the apple-events entitlement.
+    #
+    # It has to cover two different targets now: a browser, asked what tabs it
+    # has open, and System Events, asked which applications are running. macOS
+    # shows one string for both, so it names the reading rather than the reader.
+    NSAppleEventsUsageDescription: Mull reads which tabs and applications you have open, so it can tell one page from another and go back to where you were.
     # Screen Recording needs no usage string — TCC handles that pane itself —
     # but the app only appears in it once it has called
     # CGRequestScreenCaptureAccess, which the Grant button now does.

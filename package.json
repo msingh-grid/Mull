@@ -2,7 +2,7 @@
   "name": "mull",
   "version": "0.0.1",
   "private": true,
-  "description": "Mull \u2014 macOS voice-first thinking layer (M1 skeleton)",
+  "description": "Mull — macOS voice-first thinking layer (M1 skeleton)",
   "main": "out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "rebuild:native": "electron-rebuild -f -m .",
     "check:native": "electron scripts/native-check.cjs",
+    "check:applescript": "tsx scripts/check-applescript.ts",
     "icons": "electron scripts/make-icons.cjs",
     "fetch:model": "tsx scripts/fetch-model.ts",
     "smoke": "tsx scripts/smoke.ts",

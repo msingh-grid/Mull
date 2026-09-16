@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import type { EngineCredentials, EngineKind, EngineStatus } from '@shared/engine'
-import type { Settings } from '@shared/settings'
+import { MODEL_IDS, type Settings } from '@shared/settings'
 import { AgentEngine } from './agent'
 import { ApiKeyEngine } from './api-key'
 import type { AgentGoal, AgentRunResult } from './agent-loop'
@@ -28,18 +28,27 @@ import type {
  * whether it is worth selecting.
  */
 
+/**
+ * Three jobs, three choices, one table of ids.
+ *
+ * `editModel` is careful-or-fast: an edit is judgement about someone's writing
+ * and the diff card makes that judgement cheap to check, so it defaults
+ * careful; the lane is latency-bound against a 1.2 s first-token budget, so
+ * fast is a real option. The other two choose from `MODEL_IDS` directly and
+ * are documented where they are declared, in `@shared/settings`.
+ *
+ * All three resolve here, at the one place that already has both the settings
+ * and the engine constructors — so `classify.ts` and `@shared/agent` keep
+ * their constants as defaults and neither has to learn what a setting is.
+ */
 const MODELS: Record<Settings['editModel'], string> = {
-  // Careful. The default: an edit is judgement about someone's writing, and
-  // the diff card makes the judgement visible before it costs anything.
-  sonnet: 'claude-sonnet-5',
-  // Fast. The lane is latency-bound against a 1.2 s first-token budget, and on
-  // ordinary tightening this is hard to tell apart.
-  haiku: 'claude-haiku-4-5'
+  sonnet: MODEL_IDS.sonnet,
+  haiku: MODEL_IDS.haiku
 }
 
 export interface ResolveEngineOptions {
   credentials: EngineCredentials
-  settings: Pick<Settings, 'engine' | 'editModel'>
+  settings: Pick<Settings, 'engine' | 'editModel' | 'classifierModel' | 'agentModel'>
   /** Result of `detectClaudeCodeLogin()`, passed in so this stays pure. */
   detectedLogin: boolean
   /**
@@ -54,12 +63,24 @@ export interface ResolveEngineOptions {
 export function resolveEngine(options: ResolveEngineOptions): Engine {
   const { credentials, settings, detectedLogin, log, thinking } = options
   const model = MODELS[settings.editModel]
+  // Resolved here and passed in, rather than read from settings inside the
+  // engines: an engine that reaches for a store is an engine that cannot be
+  // built in a test without one.
+  const classifierModel = MODEL_IDS[settings.classifierModel]
+  const agentModel = MODEL_IDS[settings.agentModel]
   const subscription = credentials.oauthToken !== null || detectedLogin
 
   const agent = (): Engine =>
-    new AgentEngine({ oauthToken: credentials.oauthToken, model, log, thinking })
+    new AgentEngine({
+      oauthToken: credentials.oauthToken,
+      model,
+      classifierModel,
+      agentModel,
+      log,
+      thinking
+    })
   const apiKey = (): Engine =>
-    new ApiKeyEngine({ apiKey: credentials.apiKey as string, model })
+    new ApiKeyEngine({ apiKey: credentials.apiKey as string, model, classifierModel })
 
   switch (settings.engine) {
     case 'subscription':

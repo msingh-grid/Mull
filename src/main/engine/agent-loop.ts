@@ -11,14 +11,26 @@ import {
   AGENT_DEADLINE_MS,
   AGENT_SERVER,
   AGENT_TOOLS,
+  AppsInputSchema,
   DoneInputSchema,
   FindInputSchema,
+  KeyInputSchema,
   LookInputSchema,
   MAX_AGENT_TURNS,
+  ChooseMenuInputSchema,
+  MenusInputSchema,
   NoteInputSchema,
+  OpenUrlInputSchema,
   PressInputSchema,
+  ScrollToInputSchema,
   SetTextInputSchema,
-  toolName
+  SwitchAppInputSchema,
+  SwitchTabInputSchema,
+  TabsInputSchema,
+  checkMenuCommand,
+  checkUrl,
+  toolName,
+  type AgentKey
 } from '@shared/agent'
 import { AGENT_SYSTEM_PROMPT, agentPrompt } from './prompts'
 import type { ScreenContext } from '@shared/context'
@@ -37,8 +49,31 @@ import type { ScreenContext } from '@shared/context'
  * clear about: the SDK documents `tools` as "the base set of available
  * **built-in** tools", and an MCP server is additive to it. So the line that
  * excludes Bash, Read, Edit, WebFetch and the rest is untouched, and what the
- * model gains is five in-process functions that close over Mull's own sidecar.
- * The agent gets a loop and Mull's hands; it does not get a computer.
+ * model gains is twelve in-process functions that close over Mull's own sidecar,
+ * the browser in front of it and the list of what else is running. The agent
+ * gets a loop and Mull's hands; it does not get a computer.
+ *
+ * Only one of the twelve reaches further than the hands do. `openUrl` is a
+ * request that leaves the machine, so it is the only tool here that needs
+ * permission rather than merely a description — see the gate below, and
+ * `checkUrl` in `@shared/agent` for what it checks and what it does not.
+ *
+ * The two cross-app tools are deliberately *not* gated here, and that is a
+ * decision rather than an omission. `switchApp` can only reach an application
+ * the user already has open and that `apps` has already named in *this* run, so
+ * its check is where that state lives — in the handler — rather than duplicated
+ * into a callback that would have to be handed the same map to be any stricter.
+ * `openUrl` is gated here because a request that has been sent cannot be unsent,
+ * which is a different kind of thing entirely.
+ *
+ * That argument used to lean on a second leg — *`restore` runs on every exit
+ * path, so a switch is reversible* — and that leg is now shorter than it was. A
+ * run that **finishes** may ask to be left where it is (`done({stay})`), because
+ * "open Slack" is a goal whose whole content is being in Slack. Runs that stop,
+ * expire or throw still restore unconditionally. So the honest statement is that
+ * a switch is reversible right up until the model says the switch *was* the
+ * task — which is the point at which the user wanted it anyway, and is visible
+ * on the card as it happens either way.
  *
  * `settingSources: []` stays too — no CLAUDE.md, no user settings, no MCP
  * servers the user happens to have configured for Claude Code.
@@ -70,8 +105,17 @@ export interface AgentHandlers {
   find(input: { query: string; kind?: 'press' | 'type' }): Promise<string>
   press(input: { index: number; expectTitle: string }): Promise<string>
   setText(input: { index: number; expectTitle: string; text: string }): Promise<string>
+  key(input: { key: AgentKey; times?: number }): Promise<string>
+  scrollTo(input: { index: number; expectTitle: string }): Promise<string>
+  apps(input: Record<string, never>): Promise<string>
+  switchApp(input: { bundleId: string; because: string }): Promise<string>
+  menus(input: { query?: string }): Promise<string>
+  chooseMenu(input: { menu: string; name: string; because: string }): Promise<string>
+  tabs(input: Record<string, never>): Promise<string>
+  switchTab(input: { index?: number; urlContains?: string }): Promise<string>
+  openUrl(input: { url: string; newTab?: boolean }): Promise<string>
   note(input: { text: string }): Promise<string>
-  done(input: { found: boolean; because: string }): Promise<string>
+  done(input: { found: boolean; because: string; stay?: boolean }): Promise<string>
 }
 
 /**
@@ -89,6 +133,17 @@ export interface AgentGoal {
   handlers: AgentHandlers
   /** Refuse every act, and end the turn, once this says so. */
   stopped: () => boolean
+  /**
+   * May this URL be opened? Asked before `openUrl` runs, and before the handler
+   * is entered at all.
+   *
+   * Supplied by the lane rather than computed here, because the answer depends
+   * on which sites the run has already been shown the inside of — state the
+   * loop does not have and should not start keeping. Absent, `checkUrl` is
+   * applied with nothing known, which is the strict reading rather than the
+   * permissive one: a missing gate must fail closed.
+   */
+  urlGate?: (url: string) => { ok: boolean; because: string }
   maxTurns?: number
   deadlineMs?: number
 }
@@ -153,6 +208,60 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentRunResult
         async (input) => reply(await request.handlers.setText(input))
       ),
       tool(
+        'key',
+        'Press a navigation key — arrows, tab, page up, page down. There is no Return.',
+        KeyInputSchema.shape,
+        async (input) => reply(await request.handlers.key(input))
+      ),
+      tool(
+        'scrollTo',
+        'Bring one numbered thing into view. Presses nothing; it only changes what is on screen.',
+        ScrollToInputSchema.shape,
+        async (input) => reply(await request.handlers.scrollTo(input))
+      ),
+      tool(
+        'apps',
+        'Every application running right now, with the id switchApp needs.',
+        AppsInputSchema.shape,
+        async (input) => reply(await request.handlers.apps(input as Record<string, never>))
+      ),
+      tool(
+        'switchApp',
+        'Bring another running application to the front. The user watches this happen, so say why.',
+        SwitchAppInputSchema.shape,
+        async (input) => reply(await request.handlers.switchApp(input))
+      ),
+      tool(
+        'menus',
+        'Every command this application has, from its menu bar. Works even in apps whose windows cannot be read.',
+        MenusInputSchema.shape,
+        async (input) => reply(await request.handlers.menus(input))
+      ),
+      tool(
+        'chooseMenu',
+        'Choose one command from the menus. The user watches this happen, so say why.',
+        ChooseMenuInputSchema.shape,
+        async (input) => reply(await request.handlers.chooseMenu(input))
+      ),
+      tool(
+        'tabs',
+        'Every tab this browser has open, with its title and its address. Works even when the page itself cannot be read.',
+        TabsInputSchema.shape,
+        async (input) => reply(await request.handlers.tabs(input as Record<string, never>))
+      ),
+      tool(
+        'switchTab',
+        'Go to a tab that is already open, by its number or by part of its address.',
+        SwitchTabInputSchema.shape,
+        async (input) => reply(await request.handlers.switchTab(input))
+      ),
+      tool(
+        'openUrl',
+        'Go to an address that is not open yet. This sends a request out to the internet and cannot be undone.',
+        OpenUrlInputSchema.shape,
+        async (input) => reply(await request.handlers.openUrl(input))
+      ),
+      tool(
         'note',
         'Say in one clause what you are doing, for the user watching.',
         NoteInputSchema.shape,
@@ -207,6 +316,58 @@ export async function runAgent(request: AgentRunRequest): Promise<AgentRunResult
         // whatever a future harness adds by default.
         request.log?.('warn', `agent: refused an unfamiliar tool "${name}"`)
         return { behavior: 'deny', message: 'that tool is not available here' }
+      }
+      /**
+       * The URL gate — the one place a *widening* of this vocabulary is
+       * policed rather than merely described.
+       *
+       * Here rather than only in the handler for the same reason the stop is
+       * here: this runs before the handler is entered, so a call the model has
+       * already emitted never reaches the machine. The handler checks again,
+       * and both checks read the same pure function.
+       *
+       * `interrupt` is deliberately *not* set. A refused URL is a correction
+       * the next turn can act on — take the query string off, or go to the
+       * plain address — where the stop is an ending. Ending the run over a
+       * malformed address would turn a fixable mistake into a failed task.
+       */
+      if (name === OPEN_URL) {
+        const asked = (input as { url?: unknown }).url
+        const gate = request.urlGate ?? ((url: string) => checkUrl(url))
+        const verdict = typeof asked === 'string' ? gate(asked) : { ok: false, because: 'openUrl needs a url' }
+        if (!verdict.ok) {
+          request.log?.('warn', 'agent: refused a url', { url: asked, because: verdict.because })
+          return { behavior: 'deny', message: verdict.because }
+        }
+      }
+      /**
+       * The menu gate — the second one, and the one that carries more.
+       *
+       * The URL gate above narrows a widening. This one holds a property the
+       * rest of the vocabulary gets for free: **nothing here can send.** That
+       * used to be a fact about `AgentKeySchema` having no Return in it, and a
+       * menu bar routes straight around a keystroke closure — Mail sends from a
+       * menu, so does Slack. See `checkMenuCommand`.
+       *
+       * Refused without `interrupt`, like a bad URL and unlike the stop: the
+       * model has plenty of legitimate commands left and "not that one" is a
+       * correction it can act on. Ending the run would turn a guard into a
+       * failure.
+       */
+      if (name === CHOOSE_MENU) {
+        const asked = input as { menu?: unknown; name?: unknown }
+        const verdict =
+          typeof asked.menu === 'string' && typeof asked.name === 'string'
+            ? checkMenuCommand(asked.menu, asked.name)
+            : { ok: false, because: 'chooseMenu needs a menu and a name' }
+        if (!verdict.ok) {
+          request.log?.('warn', 'agent: refused a menu command', {
+            menu: asked.menu,
+            name: asked.name,
+            because: verdict.because
+          })
+          return { behavior: 'deny', message: verdict.because }
+        }
       }
       // `updatedInput` carries the arguments through unchanged. Omitting it is
       // not the same as passing `{}`, which would hand the handler nothing.
@@ -281,8 +442,14 @@ function reply(text: string): { content: Array<{ type: 'text'; text: string }> }
   return { content: [{ type: 'text', text }] }
 }
 
-/** The five, by the full MCP names `canUseTool` is actually handed. */
+/** All fifteen, by the full MCP names `canUseTool` is actually handed. */
 const OURS: ReadonlySet<string> = new Set(AGENT_TOOLS.map(toolName))
+
+/** The one that reaches the network, spelled the way the gate is handed it. */
+const OPEN_URL = toolName('openUrl')
+
+/** The one that could send, if it were not gated. Same spelling, same reason. */
+const CHOOSE_MENU = toolName('chooseMenu')
 
 function defaultStart(options: Options, prompt: AsyncIterable<SDKUserMessage>): Query {
   return query({ prompt, options })

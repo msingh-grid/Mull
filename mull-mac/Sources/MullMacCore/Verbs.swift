@@ -22,7 +22,7 @@ import Foundation
 /// Protocol 7 (M5a Stage 5): `uiTargets` — the same window read a third way, as
 /// a numbered list of things that can be pressed or typed into. A read, like
 /// `windowContext`, and under the same guards; nothing here acts.
-public let SIDECAR_PROTOCOL_VERSION = 7
+public let SIDECAR_PROTOCOL_VERSION = 8
 public let SIDECAR_VERSION = "0.7.0"
 
 // MARK: - Param structs (mirror the zod schemas)
@@ -360,6 +360,9 @@ public protocol SystemActions {
     /// follows with the ordinary `insertText` chain.
     func focusTarget(harvestId: String, index: Int, expectRole: String?, expectTitle: String?)
         -> TargetActionInfo
+    /// Bring an enumerated element into view. Touches nothing else.
+    func scrollTarget(harvestId: String, index: Int, expectRole: String?, expectTitle: String?)
+        -> TargetActionInfo
     /// Post one navigation key with no modifiers, ever.
     ///
     /// A separate verb from `keyChord`, which can express ⏎ and ⌘-anything.
@@ -627,6 +630,14 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
     d.register("focusTarget") { raw in
         try targetAction(raw) { params in
             system.focusTarget(
+                harvestId: params.harvestId, index: params.index, expectRole: params.expectRole,
+                expectTitle: params.expectTitle)
+        }
+    }
+
+    d.register("scrollTarget") { raw in
+        try targetAction(raw) { params in
+            system.scrollTarget(
                 harvestId: params.harvestId, index: params.index, expectRole: params.expectRole,
                 expectTitle: params.expectTitle)
         }

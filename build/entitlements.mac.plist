@@ -19,9 +19,39 @@
       Info.plist (see electron-builder.yml) — without the string, macOS kills
       the process rather than prompting.
 
-  Deliberately absent: app sandbox (Accessibility control of other apps is
-  impossible inside it) and Apple Events (Mull drives apps through CGEvent and
-  the Accessibility API, never by scripting them).
+    automation.apple-events
+      Browser tabs, and nothing else. This entry is new, and it replaces a note
+      here that said the opposite — "Mull drives apps through CGEvent and the
+      Accessibility API, never by scripting them" — so it is worth saying what
+      changed and why, because this is the widest entry in the file.
+
+      A browser tab is not a window. It never appears in kAXWindowsAttribute,
+      it carries no URL, and Chromium exposes only the frontmost tab's content
+      with no identity attached. So through the Accessibility API alone Mull
+      could not say which page it was looking at, could not tell two tabs apart
+      and could not go back to one. AppleScript asks the browser instead, and it
+      is the only route that needs no extension, no debugging port and no page
+      access. See src/main/services/browser.ts.
+
+      What this widens: with this entitlement Mull *may* send Apple Events to
+      any application the user consents to. Consent is still per-application and
+      still the user's — macOS prompts on the first event to each target, and
+      until they answer, the call fails and Mull carries on without it. Automation
+      is granted per target, so a user may allow Chrome and refuse System Events;
+      each failure degrades on its own and says which one it was.
+
+      What Mull actually sends is seven fixed scripts: three against a table of
+      nine browser bundle ids, asking what tabs are open, and one against System
+      Events, asking which applications are running. Every argument is passed as
+      an argument rather than spliced into the script, and `npm run
+      check:applescript` compiles all seven without running any of them.
+
+      Paired with NSAppleEventsUsageDescription in electron-builder.yml, under
+      the same rule as the microphone: without the string macOS kills the
+      process instead of prompting.
+
+  Deliberately absent: app sandbox — Accessibility control of other apps is
+  impossible inside it.
 -->
 <plist version="1.0">
   <dict>
@@ -32,6 +62,8 @@
     <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
     <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.automation.apple-events</key>
     <true/>
   </dict>
 </plist>

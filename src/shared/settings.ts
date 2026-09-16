@@ -9,6 +9,29 @@ import { z } from 'zod'
  * Persistence is src/main/store/settings.ts; this file never touches disk.
  */
 
+/**
+ * The models a user may pick between, and the one place their ids are written.
+ *
+ * Three jobs choose a model — rewriting, routing, and the agent loop — and
+ * until now each held its own string literal in its own file. That is fine
+ * while nothing is configurable and wrong the moment something is: a menu and
+ * a default that disagree about how to spell a model produce a runtime error
+ * from the API and nothing at all from the type checker.
+ *
+ * The names are the jobs' names, not the models' marketing ones, because the
+ * choice a person is making is "how careful, how fast" and the answer to that
+ * outlives any particular version number.
+ */
+export const ModelChoiceSchema = z.enum(['haiku', 'sonnet', 'opus'])
+
+export type ModelChoice = z.infer<typeof ModelChoiceSchema>
+
+export const MODEL_IDS: Record<ModelChoice, string> = {
+  haiku: 'claude-haiku-4-5',
+  sonnet: 'claude-sonnet-5',
+  opus: 'claude-opus-5'
+}
+
 export const SettingsSchema = z.object({
   /**
    * Gone at M5b, kept only so a stored settings file still parses.
@@ -54,6 +77,25 @@ export const SettingsSchema = z.object({
    * field never leaves the machine either way.
    */
   routing: z.enum(['model', 'rules']).default('model'),
+  /**
+   * Which model does that deciding, when `routing` is `model`.
+   *
+   * This was Haiku and not a setting at all, back when the decision was two
+   * words wide — insert this, or act on that. It now picks between six routes,
+   * reads the last few turns to tell a follow-up from a fresh sentence, and
+   * writes the goal that an agent run spends twenty steps on. A route chosen
+   * wrongly is not recoverable downstream; nothing later reconsiders it.
+   *
+   * So it defaults to Sonnet, and it is exposed because the right answer
+   * depends on things Mull cannot see. Haiku is roughly a second faster and
+   * genuinely enough for someone who mostly dictates and edits. Opus is here
+   * for the other end — worth trying if routing is what stands between a good
+   * sentence and a good run, and worth abandoning if the wait shows.
+   *
+   * Never allowed to think, at any choice: see `thinking` below for the
+   * measurement that settled it.
+   */
+  classifierModel: ModelChoiceSchema.default('sonnet'),
   /**
    * How much of the window in front of you Mull may read (M5a).
    *
@@ -114,6 +156,26 @@ export const SettingsSchema = z.object({
    * with that engine selected this setting does nothing.
    */
   agentLoop: z.boolean().default(false),
+  /**
+   * Which model drives that loop.
+   *
+   * Deliberately its own setting rather than `editModel`'s, because the two
+   * jobs fail in opposite ways and only one of them is checked by a human
+   * before it takes effect. A rewrite lands in a diff card and is read; a
+   * press happens. Defaulted to Opus for that reason — the expensive failure
+   * here is not a clumsy sentence, it is pressing the wrong thing in someone
+   * else's application.
+   *
+   * Lower is a real option and not merely a cheaper one: a loop that finishes
+   * in eight turns on Sonnet can beat one that finishes in five on Opus, since
+   * every turn carries a window read with it. Which wins is a question about
+   * the app being driven, so it is answered here rather than guessed once in
+   * a constant.
+   *
+   * Does nothing while `agentLoop` is off, and nothing on the API-key lane,
+   * which has no tool loop.
+   */
+  agentModel: ModelChoiceSchema.default('opus'),
   /**
    * Where the user dragged the HUD, in screen coordinates. Null means the
    * default bottom-centre. Clamped back onto a real display at launch, because

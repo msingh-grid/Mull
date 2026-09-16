@@ -112,6 +112,7 @@ describe('sidecar-api zod contract', () => {
       'uiTargets',
       'pressTarget',
       'focusTarget',
+      'scrollTarget',
       'navKey',
       'promptScreenRecording',
       'insertText',
@@ -124,7 +125,7 @@ describe('sidecar-api zod contract', () => {
       'stopHotkeyTap'
     ])
     // Bumped whenever a shape changes; the sidecar's `init` refuses a mismatch.
-    expect(SIDECAR_PROTOCOL_VERSION).toBe(7)
+    expect(SIDECAR_PROTOCOL_VERSION).toBe(8)
   })
 })
 
@@ -224,10 +225,19 @@ describe('navKey', () => {
     }
   })
 
-  it('is exactly the eight keys that only move a caret or a highlight', () => {
+  /**
+   * `backTab` is the one entry that posts a modifier, and it is here rather
+   * than in `keyChord` because the caller still cannot *compose* one: the shift
+   * is welded to the name inside `RealSystem.navKeyCodes`, so the set of
+   * keystrokes this verb can emit is exactly as long as this list. ⇧⇥ earns it
+   * by being unreachable otherwise — ⌘F and ⌘S have menu commands in every
+   * application; going backwards through a form has none.
+   */
+  it('is exactly the nine keys that only move a caret or a highlight', () => {
     expect(NavKeySchema.options).toEqual([
       'escape',
       'tab',
+      'backTab',
       'up',
       'down',
       'left',

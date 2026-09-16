@@ -48,8 +48,13 @@ type Move =
   | { tool: 'find'; query: string }
   | { tool: 'press'; index: number; title: string }
   | { tool: 'setText'; index: number; title: string; text: string }
+  | { tool: 'apps' }
+  | { tool: 'switchApp'; bundleId: string; because: string }
+  | { tool: 'menus'; query?: string }
+  | { tool: 'chooseMenu'; menu: string; name: string; because: string }
+  | { tool: 'key'; key: 'down' | 'pageDown'; times?: number }
   | { tool: 'note'; text: string }
-  | { tool: 'done'; found: boolean; because: string }
+  | { tool: 'done'; found: boolean; because: string; stay?: boolean }
 
 function harness(
   script: Move[],
@@ -91,6 +96,7 @@ function harness(
     amend: () => {}
   }
 
+  const chosen: string[] = []
   const shortcuts = new Set<string>()
   const handlers = new Map<string, () => void>()
   const controller = new HudController({
@@ -137,6 +143,21 @@ function harness(
         lastActions.push(lastAction)
       }
     },
+    apps: {
+      list: async () => [
+        { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack', front: true },
+        { bundleId: 'com.apple.iCal', name: 'Calendar', front: false }
+      ]
+    },
+    menus: {
+      list: async () => [
+        { menu: 'File', name: 'New Event\u2026', enabled: true, submenu: false },
+        { menu: 'Message', name: 'Send', enabled: true, submenu: false }
+      ],
+      choose: async (process: string, menu: string, name: string) => {
+        chosen.push(`${process}: ${menu} \u25b8 ${name}`)
+      }
+    },
     // The loop, faked: it plays the script, asking the stop before each move
     // exactly where `canUseTool` would.
     run: async (request) => {
@@ -153,8 +174,26 @@ function harness(
             expectTitle: move.title,
             text: move.text
           })
+        else if (move.tool === 'apps') await request.handlers.apps({})
+        else if (move.tool === 'menus')
+          await request.handlers.menus(move.query === undefined ? {} : { query: move.query })
+        else if (move.tool === 'chooseMenu')
+          await request.handlers.chooseMenu({
+            menu: move.menu,
+            name: move.name,
+            because: move.because
+          })
+        else if (move.tool === 'switchApp')
+          await request.handlers.switchApp({ bundleId: move.bundleId, because: move.because })
+        else if (move.tool === 'key')
+          await request.handlers.key({ key: move.key, ...(move.times ? { times: move.times } : {}) })
         else if (move.tool === 'note') await request.handlers.note({ text: move.text })
-        else await request.handlers.done({ found: move.found, because: move.because })
+        else
+          await request.handlers.done({
+            found: move.found,
+            because: move.because,
+            ...(move.stay === undefined ? {} : { stay: move.stay })
+          })
       }
       return { ended: options.ended ?? 'done', turns: played.length, costUsd: 0.01 }
     }
@@ -163,6 +202,7 @@ function harness(
   return {
     lane,
     sidecar,
+    chosen,
     cards,
     rows,
     notices,
@@ -422,5 +462,319 @@ describe('endingNote', () => {
   it('never lets a stop read as “nothing happened”', () => {
     expect(endingNote(ran('stopped'), null, 0)).toMatch(/before anything was pressed/)
     expect(endingNote(ran('stopped'), null, 4)).toMatch(/stays pressed/)
+  })
+})
+
+describe('going to another application', () => {
+  /**
+   * The claim this whole milestone rests on, asserted rather than asserted-in-a
+   * -comment.
+   *
+   * `AGENT-V2.md` §11 says the screen moving under somebody is the thing most
+   * likely to make a working feature feel like a malfunction, and the mitigation
+   * is that the card says where it is going and *why* before it goes. That is
+   * only true because `act` draws the row and then awaits the handler — so this
+   * checks the card as it stood at the moment the switch was still in flight,
+   * not the one left behind afterwards.
+   */
+  it('puts the reason on the card before the screen moves', async () => {
+    const h = harness([
+      { tool: 'apps' },
+      { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'to check Thursday' },
+      { tool: 'done', found: true, because: 'Thursday is free' }
+    ])
+    /**
+     * Read at the instant the screen actually moves, not afterwards.
+     *
+     * The lane copies the step *array* into each card but not the steps
+     * themselves, so a snapshot taken earlier is retroactively mutated when a
+     * row resolves — which makes "what did the card say before" unanswerable
+     * from the list of cards. It is answerable here, because `activateApp` is
+     * the call that moves the screen, and whatever the card says at that moment
+     * is what a user looking up would have read.
+     *
+     * (Harmless in the running app, where every draw re-renders from the live
+     * objects. It only bites a test that tries to look backwards.)
+     */
+    let asTheScreenMoved: { verb: string; object: string; state: string } | null = null
+    const realActivate = h.sidecar.activateApp.bind(h.sidecar)
+    h.sidecar.activateApp = async (params) => {
+      const row = h.last().steps.find((step) => step.verb === 'go to')
+      if (row && !asTheScreenMoved) {
+        asTheScreenMoved = { verb: row.verb, object: row.object, state: row.state }
+      }
+      return realActivate(params)
+    }
+
+    await h.lane.propose({ goal: 'is Thursday free', transcript: 'is Thursday free', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(asTheScreenMoved).toEqual({
+      verb: 'go to',
+      object: 'to check Thursday',
+      state: 'running'
+    })
+    // And it is still the reason once the run has settled — a destination would
+    // have overwritten it.
+    expect(h.last().steps.find((step) => step.verb === 'go to')?.object).toBe('to check Thursday')
+  })
+
+  /**
+   * The window the user was in comes back however the run ended — and after a
+   * cross-app run that is no longer a formality, because the app in front at
+   * the end is genuinely somewhere else.
+   */
+  it('comes back to where the user was', async () => {
+    const h = harness([
+      { tool: 'apps' },
+      { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'to check Thursday' },
+      { tool: 'look', want: 'text' },
+      { tool: 'done', found: true, because: 'Thursday is free' }
+    ])
+    await h.lane.propose({ goal: 'is Thursday free', transcript: 'is Thursday free', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    // Calendar on the way out, Slack on the way back, in that order.
+    expect(h.sidecar.activated).toEqual(['com.apple.iCal', 'com.tinyspeck.slackmacgap'])
+  })
+
+  /**
+   * A press that happened in Calendar must not be written down as a press in
+   * Slack. The journal is the record of what Mull did on somebody's machine, and
+   * a row naming the wrong application is worse than no row at all.
+   */
+  it('files each step against the application it actually happened in', async () => {
+    const h = harness([
+      { tool: 'look', want: 'targets' },
+      { tool: 'press', index: 1, title: 'Anil Turaga' },
+      { tool: 'apps' },
+      { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'to check Thursday' },
+      { tool: 'look', want: 'targets' },
+      { tool: 'press', index: 1, title: 'Anil Turaga' },
+      { tool: 'done', found: true, because: 'Thursday is free' }
+    ])
+    await h.lane.propose({ goal: 'is Thursday free', transcript: 'is Thursday free', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    const apps = h.stepRows().map((row) => row.app?.name)
+    expect(apps).toEqual(['Slack', 'Calendar'])
+  })
+
+  /**
+   * Escape has to work in the middle of a cross-app run, which is the moment it
+   * matters most: the user is looking at an application they did not open.
+   */
+  it('stops mid-errand and still puts the window back', async () => {
+    const h = harness(
+      [
+        { tool: 'apps' },
+        { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'to check Thursday' },
+        { tool: 'press', index: 1, title: 'Anil Turaga' },
+        { tool: 'done', found: true, because: 'never reached' }
+      ],
+      { ended: 'stopped' }
+    )
+    await h.lane.propose({ goal: 'is Thursday free', transcript: 'is Thursday free', app: null })
+    await h.run()
+    h.cancel()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.played).not.toContain('done')
+    expect(h.sidecar.activated).toContain('com.tinyspeck.slackmacgap')
+    expect(h.runRow()?.status).toBe('cancelled')
+  })
+})
+
+describe('where the user is left', () => {
+  /**
+   * The bug this fixes, stated as a test.
+   *
+   * "Open Slack" opened Slack and then put Zed back, which is the only thing the
+   * user asked for, undone, while the screen flickered twice. `restore` being
+   * unconditional was right for as long as every run was an errand; `switchApp`
+   * ended that.
+   */
+  it('stays where it went when being there was the point', async () => {
+    const h = harness([
+      { tool: 'apps' },
+      { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'the user asked for it' },
+      { tool: 'done', found: true, because: 'Calendar is in front', stay: true }
+    ])
+    await h.lane.propose({ goal: 'open my calendar', transcript: 'open my calendar', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    // Went there, and stayed. No second activation putting Slack back.
+    expect(h.sidecar.activated).toEqual(['com.apple.iCal'])
+    expect(h.last().note).toContain('left in Calendar')
+  })
+
+  /** An errand is still an errand: the answer goes to the user where the user was. */
+  it('comes back when it went to fetch something', async () => {
+    const h = harness([
+      { tool: 'apps' },
+      { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'to check Thursday' },
+      { tool: 'look', want: 'text' },
+      { tool: 'done', found: true, because: 'Thursday is free' }
+    ])
+    await h.lane.propose({ goal: 'is Thursday free', transcript: 'is Thursday free', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.sidecar.activated).toEqual(['com.apple.iCal', 'com.tinyspeck.slackmacgap'])
+  })
+
+  /**
+   * The guess, for when the model does not say. A run that moved and has
+   * nothing to tell you was a destination; one with an answer was a question.
+   */
+  it('guesses from what happened when the model did not say', async () => {
+    const h = harness([
+      { tool: 'apps' },
+      { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'the user asked for it' },
+      { tool: 'done', found: true, because: 'Calendar is in front' }
+    ])
+    await h.lane.propose({ goal: 'open my calendar', transcript: 'open my calendar', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.sidecar.activated).toEqual(['com.apple.iCal'])
+  })
+
+  /**
+   * Rule one, and it outranks the model. A run the user stopped did not get
+   * them what they asked for, so leaving them somewhere they did not choose
+   * adds insult — and a half-finished run has no standing to say where anybody
+   * should be.
+   */
+  it('puts the window back when the run did not finish, whatever it asked for', async () => {
+    const h = harness(
+      [
+        { tool: 'apps' },
+        { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'the user asked for it' },
+        { tool: 'press', index: 1, title: 'Anil Turaga' },
+        { tool: 'done', found: true, because: 'never reached', stay: true }
+      ],
+      { ended: 'stopped' }
+    )
+    await h.lane.propose({ goal: 'open my calendar', transcript: 'open my calendar', app: null })
+    await h.run()
+    h.cancel()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.sidecar.activated).toContain('com.tinyspeck.slackmacgap')
+  })
+
+  /**
+   * The second bug `switchApp` exposed: `arrived` required prose, so a run that
+   * opened Slack, said so, and had no question to answer was filed as **failed**
+   * and announced as an **error**. An errand arrives by having something to say;
+   * a destination arrives by being there.
+   */
+  it('counts a destination as done even though it has nothing to say', async () => {
+    const h = harness([
+      { tool: 'apps' },
+      { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'the user asked for it' },
+      { tool: 'done', found: true, because: 'Calendar is in front', stay: true }
+    ])
+    await h.lane.propose({ goal: 'open my calendar', transcript: 'open my calendar', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.runRow()?.status).toBe('applied')
+    expect(h.runRow()?.summary).toContain('Opened')
+    // And the user is not told their own request went wrong.
+    expect(h.lastActions[h.lastActions.length - 1]?.summary).toContain('Opened')
+  })
+
+  /**
+   * A run that never left the window restores as it always did — `restore` also
+   * puts the *conversation* back, not only the application, and that is worth
+   * nothing changing for the many runs that only ever pressed things.
+   */
+  it('leaves single-window runs exactly as they were', async () => {
+    const h = harness([
+      { tool: 'look', want: 'both' },
+      { tool: 'press', index: 1, title: 'Anil Turaga' },
+      { tool: 'done', found: true, because: 'found it' }
+    ])
+    await h.lane.propose({ goal: 'what did Anil say', transcript: 'what did Anil say', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.sidecar.activated).toEqual(['com.tinyspeck.slackmacgap'])
+  })
+})
+
+describe('using the menus', () => {
+  /**
+   * The same argument `switchApp` makes one block above, for a wider act — but
+   * with one deliberate difference, and it is the reason this test exists.
+   *
+   * A switch shows its own result: the user can see which application came
+   * forward, so the row spends its whole width on *why*. A menu command shows
+   * nothing — it is a flicker, and then a window that may or may not have
+   * changed. So the row carries the command's own path as well as the reason,
+   * because this row is the only record of what was chosen that appears anywhere
+   * the user is looking.
+   */
+  it('puts the command and the reason on the card', async () => {
+    const h = harness([
+      { tool: 'menus' },
+      { tool: 'chooseMenu', menu: 'File', name: 'New Event…', because: 'to add Thursday' },
+      { tool: 'done', found: true, because: 'the form is open', stay: true }
+    ])
+
+    await h.lane.propose({ goal: 'add an event', transcript: 'add an event', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    const row = h.last().steps.find((step) => step.verb === 'menu')
+    expect(row?.object).toContain('New Event…')
+    expect(row?.object).toContain('to add Thursday')
+    expect(h.chosen).toEqual(['Slack: File ▸ New Event…'])
+  })
+
+  /**
+   * The invariant, asserted at the lane rather than only at the schema.
+   *
+   * `checkMenuCommand` is unit-tested in `@shared/agent`, and a guard that is
+   * only tested where it is defined is a guard nobody has checked is *wired in*.
+   * This drives the real handler through the real lane and asserts that nothing
+   * reached the bridge.
+   */
+  it('will not send, and the run carries on without it', async () => {
+    const h = harness([
+      { tool: 'menus' },
+      { tool: 'chooseMenu', menu: 'Message', name: 'Send', because: 'to send it' },
+      { tool: 'done', found: false, because: 'Mull does not send' }
+    ])
+
+    await h.lane.propose({ goal: 'send it', transcript: 'send it', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.chosen).toEqual([])
+    const row = h.last().steps.find((step) => step.verb === 'menu')
+    expect(row?.state).toBe('failed')
+  })
+
+  /** A read is not an act, so its row says what was asked rather than why. */
+  it('shows what the menus were asked for', async () => {
+    const h = harness([
+      { tool: 'menus', query: 'event' },
+      { tool: 'done', found: true, because: 'found it' }
+    ])
+
+    await h.lane.propose({ goal: 'what can it do', transcript: 'what can it do', app: null })
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    const row = h.last().steps.find((step) => step.verb === 'menus')
+    expect(row?.object).toContain('event')
+    expect(row?.state).toBe('done')
   })
 })

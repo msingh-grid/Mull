@@ -210,6 +210,16 @@ public final class RealSystem: SystemActions {
             actualTitle: outcome.actualTitle)
     }
 
+    public func scrollTarget(
+        harvestId: String, index: Int, expectRole: String?, expectTitle: String?
+    ) -> TargetActionInfo {
+        let outcome = AXTargets.scroll(
+            harvestId: harvestId, index: index, expectRole: expectRole, expectTitle: expectTitle)
+        return TargetActionInfo(
+            ok: outcome.ok, reason: outcome.reason, actualRole: outcome.actualRole,
+            actualTitle: outcome.actualTitle)
+    }
+
     /// The only keys the navigator may ask for.
     ///
     /// A separate map from `keyCodes`, not a filter over it, because the point
@@ -218,24 +228,35 @@ public final class RealSystem: SystemActions {
     /// from letting them through. ⏎ is how Slack, Messages, Discord and Mail all
     /// send — it is the actuator, so it is not navigation.
     ///
-    /// No modifiers are accepted at all, so there is no ⌘Q, no ⌘W, and no chord
-    /// that could mean something else in an app nobody tested.
-    static let navKeyCodes: [String: CGKeyCode] = [
-        "escape": CGKeyCode(kVK_Escape),
-        "tab": CGKeyCode(kVK_Tab),
-        "up": CGKeyCode(kVK_UpArrow),
-        "down": CGKeyCode(kVK_DownArrow),
-        "left": CGKeyCode(kVK_LeftArrow),
-        "right": CGKeyCode(kVK_RightArrow),
-        "pageup": CGKeyCode(kVK_PageUp),
-        "pagedown": CGKeyCode(kVK_PageDown)
+    /// No modifier is ever *accepted* — the caller names a key, never a chord,
+    /// so there is no ⌘Q, no ⌘W, and no combination that could mean something
+    /// else in an app nobody tested.
+    ///
+    /// `backTab` is the one entry that posts a modifier, and it does not weaken
+    /// that. The shift lives here, in Mull's own table, welded to a name; the
+    /// caller still cannot compose one, so the set of chords that can leave this
+    /// function is exactly as long as this literal. ⇧⇥ is worth the entry
+    /// because moving *backwards* through a form is otherwise unreachable —
+    /// there is no menu command for it in any application, which is not true of
+    /// ⌘F or ⌘S.
+    static let navKeyCodes: [String: (code: CGKeyCode, flags: CGEventFlags)] = [
+        "escape": (CGKeyCode(kVK_Escape), []),
+        "tab": (CGKeyCode(kVK_Tab), []),
+        "backtab": (CGKeyCode(kVK_Tab), .maskShift),
+        "up": (CGKeyCode(kVK_UpArrow), []),
+        "down": (CGKeyCode(kVK_DownArrow), []),
+        "left": (CGKeyCode(kVK_LeftArrow), []),
+        "right": (CGKeyCode(kVK_RightArrow), []),
+        "pageup": (CGKeyCode(kVK_PageUp), []),
+        "pagedown": (CGKeyCode(kVK_PageDown), [])
     ]
 
     public func navKey(key: String) -> (sent: Bool, reason: String?) {
-        guard let code = Self.navKeyCodes[key.lowercased()] else {
+        guard let stroke = Self.navKeyCodes[key.lowercased()] else {
             return (false, "not-a-navigation-key")
         }
-        return postKey(code, flags: []) ? (true, nil) : (false, "cgevent-post-failed")
+        return postKey(stroke.code, flags: stroke.flags)
+            ? (true, nil) : (false, "cgevent-post-failed")
     }
 
     public func focusedElement(context: Int) -> FocusedElementLookup {

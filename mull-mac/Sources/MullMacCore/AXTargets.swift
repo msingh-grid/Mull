@@ -167,6 +167,53 @@ public enum AXTargets {
         "AXSplitGroup", "AXUnknown"
     ]
 
+    /// Roles that mean "the things below me are choices, not prose".
+    ///
+    /// Google Calendar's start time is the case this exists for. Pressing it
+    /// opens a listbox of 96 times; every one of them is an `AXStaticText`, so
+    /// `neverTargets` dropped all 96 and the scan offered the empty `AXList` and
+    /// nothing inside it. Measured, not guessed: 97 time strings in the window
+    /// text, 96 of them `AXStaticText`, **0** offered as targets.
+    ///
+    /// The container is the whole test, and it has to be, because
+    /// `neverTargets`' own docstring is right about why: a Chromium tree is full
+    /// of `AXStaticText` that claims `AXPress` because an ancestor somewhere
+    /// attached a click handler, and offering all of it buries the six controls
+    /// that matter. Inside a list or a menu that same claim means something
+    /// different — there, a pressable line of text *is* an option.
+    /// `AXScrollToVisible`, spelled out.
+    ///
+    /// `kAXPressAction` and friends are bridged into Swift; this one is not — it
+    /// is declared in `NSAccessibility` rather than in the C API, and the
+    /// literal is the whole of what the bridged constant would have been.
+    private static let scrollAction = "AXScrollToVisible"
+
+    private static let choiceContainers: Set<String> = ["AXList", "AXMenu", "AXComboBox"]
+
+    /// Roles that become targets when they are inside one of the above.
+    private static let optionRoles: Set<String> = ["AXStaticText"]
+
+    /// How many options one scan may offer.
+    ///
+    /// A dropdown's worth, and not a chat log's — a separate cap from the
+    /// 300-target budget because the feared case is one open list crowding out
+    /// every real control, which the shared budget cannot distinguish from an
+    /// app that genuinely has 300 buttons.
+    ///
+    /// **A hundred, because the feared case did not happen.** The number started
+    /// at forty on the reasoning that a message list is plausibly an `AXList`
+    /// full of pressable `AXStaticText`; measuring said otherwise — Slack, the
+    /// likeliest victim, reports exactly the 288 targets it reported before this
+    /// rule existed, and so do VS Code, Notes and Finder. The container test is
+    /// doing the work the cap was insurance against.
+    ///
+    /// Forty had a real cost, too: Calendar's time list truncated at 9:45am, so
+    /// the one case this was built for could not reach 3pm and could not tell
+    /// that it had been cut off. A hundred covers a 24-hour list at quarter-hour
+    /// granularity, which is about as long as an honest chooser gets, and still
+    /// leaves two thirds of the budget for controls.
+    private static let maxOptions = 100
+
     private static let attributes =
         [
             kAXRoleAttribute,
@@ -208,7 +255,9 @@ public enum AXTargets {
         var elements: [AXUIElement] = []
         var visited = 0
         var stoppedBy = "complete"
-        var stack: [(element: AXUIElement, depth: Int)] = [(root, 0)]
+        var stack: [(element: AXUIElement, depth: Int, inChoices: Bool)] = [(root, 0, false)]
+        /// How many list options have been offered. See `maxOptions`.
+        var choicesTaken = 0
         let deadline = startedAt + budget.deadline
         /// Identities already offered. See `identity(of:)`.
         var seen = Set<String>()
@@ -219,7 +268,7 @@ public enum AXTargets {
         /// window. See `webContent` and the `browser-cold` result below.
         var webNodes = 0
 
-        while let (element, depth) = stack.popLast() {
+        while let (element, depth, inChoices) = stack.popLast() {
             if visited >= budget.maxNodes {
                 stoppedBy = "nodes"
                 break
@@ -236,7 +285,11 @@ public enum AXTargets {
 
             let node = read(element)
             if webContent(element) { webNodes += 1 }
-            if let target = target(from: node, index: targets.count, element: element) {
+            if let target = target(
+                from: node, index: targets.count, element: element, inChoices: inChoices,
+                choicesTaken: choicesTaken)
+            {
+                if optionRoles.contains(node.role) { choicesTaken += 1 }
                 // Deduplicated *before* the cap, so `maxTargets` counts things
                 // the user could distinguish rather than times we saw the same
                 // button. Chrome publishes its toolbar and tab strip under two
@@ -252,8 +305,11 @@ public enum AXTargets {
             }
 
             guard depth < budget.maxDepth else { continue }
+            // Once inside a list of choices, everything below it is too. See
+            // `choiceContainers`.
+            let below = inChoices || choiceContainers.contains(node.role)
             for child in node.children.reversed() {
-                stack.append((child, depth + 1))
+                stack.append((child, depth + 1, below))
             }
         }
 
@@ -357,9 +413,54 @@ public enum AXTargets {
     ///      model and cannot be checked by the user reading the card, so
     ///      offering it is offering a coin flip. Chromium emits a great many of
     ///      these for layout elements that happen to carry a click handler.
-    private static func target(from node: Node, index: Int, element: AXUIElement) -> Target? {
+    /// The best name an element has — in **one** place, because two would drift.
+    ///
+    /// Title, then description, then — for a list option only — its value.
+    ///
+    /// ### Why the third fallback exists
+    ///
+    /// It is what actually made `optionRoles` work, and it cost an hour to find.
+    /// A pressable `AXStaticText` inside Calendar's time list has an empty
+    /// `AXTitle` and keeps its text in `AXValue`, because that is where static
+    /// text keeps text. So all 96 options passed the container test, passed the
+    /// `AXPress` test, and were then dropped by the unnamed-control rule — two
+    /// conditions further down than the one being debugged.
+    ///
+    /// ### Why it is one function and not two copies
+    ///
+    /// Because the first version *was* two copies, and the second one was
+    /// missed. `resolve` re-reads the element before a press and refuses when
+    /// the name it computes does not match the one the caller was shown — so an
+    /// option that the scan named "3:00pm" from its value was re-read as ""
+    /// and refused as `changed`. The scan offered a target that could never be
+    /// pressed, which is worse than not offering it: the model sees the thing it
+    /// wants and is told the screen moved.
+    ///
+    /// ### Why the value fallback is not general
+    ///
+    /// `AXValue` on an ordinary control is its *contents*, not its name. Naming
+    /// a search box after whatever is typed in it would make the target change
+    /// identity as the user types — and identity is what `resolve` checks.
+    private static func name(of node: Node) -> String? {
+        if let named = [node.title, node.help].compactMap({ $0?.trimmed }).first(where: {
+            !$0.isEmpty
+        }) {
+            return named
+        }
+        guard optionRoles.contains(node.role) else { return nil }
+        return node.value?.trimmed
+    }
+
+    private static func target(
+        from node: Node, index: Int, element: AXUIElement, inChoices: Bool, choicesTaken: Int
+    ) -> Target? {
         if node.role.isEmpty { return nil }
-        if neverTargets.contains(node.role) { return nil }
+        if neverTargets.contains(node.role) {
+            // The one exception, and it is narrow on purpose. See `optionRoles`.
+            guard inChoices, optionRoles.contains(node.role), choicesTaken < maxOptions,
+                node.actions.contains(kAXPressAction)
+            else { return nil }
+        }
 
         let kind: Kind
         if textRoles.contains(node.role) {
@@ -370,11 +471,7 @@ public enum AXTargets {
             return nil
         }
 
-        // Title, then description, then — for a text field only — its
-        // placeholder-ish value. A button named by its contents is named by
-        // `title`; a search box is usually named by `description`.
-        let name = [node.title, node.help].compactMap { $0?.trimmed }.first { !$0.isEmpty }
-        guard let name, !name.isEmpty else { return nil }
+        guard let name = name(of: node), !name.isEmpty else { return nil }
 
         return Target(
             index: index,
@@ -527,6 +624,50 @@ public enum AXTargets {
         }
     }
 
+    /// Bring an element into view without touching it.
+    ///
+    /// ### Why this is a verb and not a keystroke
+    ///
+    /// Scrolling was reachable before only through `navKey` — `pageDown`, some
+    /// number of times, and then look again to find out whether it worked. That
+    /// is blind in both directions: the caller cannot tell how far a page is,
+    /// and it moves whatever happens to have keyboard focus, which in a browser
+    /// is often not the thing being read.
+    ///
+    /// `AXScrollToVisible` asks the *element* to make itself visible, so the
+    /// application decides which of its scroll views to move and by how much.
+    /// It is on 519 of the 575 elements surveyed across six applications, which
+    /// is why this is a general answer rather than a per-app one.
+    ///
+    /// ### Why it re-reads first, like the other two
+    ///
+    /// It touches nothing, so it cannot press the wrong button — but it can
+    /// scroll the user's window somewhere that has nothing to do with what they
+    /// asked, and a stale index is exactly how that happens. The verification is
+    /// cheap and shared, so there is no reason to skip it here.
+    public static func scroll(
+        harvestId: String, index: Int, expectRole: String?, expectTitle: String?
+    ) -> Outcome {
+        switch resolve(harvestId: harvestId, index: index, expectRole: expectRole,
+                       expectTitle: expectTitle) {
+        case .refused(let outcome):
+            return outcome
+        case .found(let found):
+            guard found.actions.contains(scrollAction) else {
+                return Outcome(
+                    ok: false, reason: "not-scrollable", actualRole: found.role,
+                    actualTitle: found.title)
+            }
+            let status = AXUIElementPerformAction(found.element, scrollAction as CFString)
+            guard status == .success else {
+                return Outcome(
+                    ok: false, reason: "scroll-refused", actualRole: found.role,
+                    actualTitle: found.title)
+            }
+            return Outcome(ok: true, reason: nil, actualRole: found.role, actualTitle: found.title)
+        }
+    }
+
     /// Put the caret in something that takes text.
     ///
     /// This deliberately does not type: the caller focuses here and then uses
@@ -604,7 +745,7 @@ public enum AXTargets {
 
         AXUIElementSetMessagingTimeout(held.element, messagingTimeout)
         let node = read(held.element)
-        let name = [node.title, node.help].compactMap { $0?.trimmed }.first { !$0.isEmpty } ?? ""
+        let name = name(of: node) ?? ""
 
         // An element that answers with no role at all is not a changed element,
         // it is a destroyed one — the handle outlived the thing. Pressing

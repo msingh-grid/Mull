@@ -1,20 +1,34 @@
 import { describe, expect, it } from 'vitest'
 import type { EngineCredentials } from '@shared/engine'
-import type { Settings } from '@shared/settings'
+import { MODEL_IDS, type Settings } from '@shared/settings'
+import { AGENT_MODEL } from '@shared/agent'
 import { EngineHolder, resolveEngine, SignedOutEngine } from './select'
+import { AgentEngine } from './agent'
+import { ApiKeyEngine } from './api-key'
+import { CLASSIFIER_MODEL } from './classify'
 import { FakeEngine } from './fake'
 import { cleanEditOutput, cleanEditPartial, editPrompt, maxOutputTokens } from './prompts'
 
 const NOTHING: EngineCredentials = { oauthToken: null, apiKey: null }
 
+/** The slice `resolveEngine` reads, at its defaults. */
+type EngineSettings = Pick<Settings, 'engine' | 'editModel' | 'classifierModel' | 'agentModel'>
+
+const BASE: EngineSettings = {
+  engine: 'auto',
+  editModel: 'sonnet',
+  classifierModel: 'sonnet',
+  agentModel: 'opus'
+}
+
 function pick(
   credentials: Partial<EngineCredentials>,
-  settings: Partial<Pick<Settings, 'engine' | 'editModel'>> = {},
+  settings: Partial<EngineSettings> = {},
   detectedLogin = false
 ): { name: string; model: string | null } {
   const engine = resolveEngine({
     credentials: { ...NOTHING, ...credentials },
-    settings: { engine: 'auto', editModel: 'sonnet', ...settings },
+    settings: { ...BASE, ...settings },
     detectedLogin
   })
   return { name: engine.name, model: engine.model }
@@ -42,7 +56,7 @@ describe('resolveEngine — an explicit choice', () => {
   it('refuses rather than quietly using the credential you did not pick', async () => {
     const engine = resolveEngine({
       credentials: { oauthToken: null, apiKey: 'key' },
-      settings: { engine: 'subscription', editModel: 'sonnet' },
+      settings: { ...BASE, engine: 'subscription' },
       detectedLogin: false
     })
     expect(engine.name).toBe('signed-out')
@@ -60,6 +74,66 @@ describe('resolveEngine — the model switch', () => {
   it('maps careful and fast to real model ids', () => {
     expect(pick({ apiKey: 'key' }, { editModel: 'sonnet' }).model).toBe('claude-sonnet-5')
     expect(pick({ apiKey: 'key' }, { editModel: 'haiku' }).model).toBe('claude-haiku-4-5')
+  })
+
+  /**
+   * Three jobs, three settings, and the failure this guards against is one
+   * knob silently moving another: before these were separate, choosing "fast"
+   * for edits would have changed routing too, and choosing anything at all
+   * would have left the loop alone regardless.
+   */
+  function built(settings: Partial<EngineSettings>): AgentEngine {
+    const engine = resolveEngine({
+      credentials: { oauthToken: 'token', apiKey: null },
+      settings: { ...BASE, ...settings },
+      detectedLogin: false
+    })
+    expect(engine).toBeInstanceOf(AgentEngine)
+    return engine as AgentEngine
+  }
+
+  it('gives each of the three jobs its own model', () => {
+    const engine = built({ editModel: 'haiku', classifierModel: 'opus', agentModel: 'sonnet' })
+    expect(engine.model).toBe('claude-haiku-4-5')
+    expect(engine.classifierModel).toBe('claude-opus-5')
+    expect(engine.agentModel).toBe('claude-sonnet-5')
+  })
+
+  it('moves one without moving the others', () => {
+    const before = built({})
+    const after = built({ classifierModel: 'haiku' })
+    expect(after.classifierModel).toBe('claude-haiku-4-5')
+    expect(after.model).toBe(before.model)
+    expect(after.agentModel).toBe(before.agentModel)
+  })
+
+  it('passes the routing model to the API-key lane too', () => {
+    const engine = resolveEngine({
+      credentials: { oauthToken: null, apiKey: 'key' },
+      settings: { ...BASE, classifierModel: 'haiku' },
+      detectedLogin: false
+    })
+    expect(engine).toBeInstanceOf(ApiKeyEngine)
+    expect((engine as ApiKeyEngine).classifierModel).toBe('claude-haiku-4-5')
+  })
+
+  /**
+   * The settings defaults and the constants are two ways of saying the same
+   * thing, and they are in different files. An engine built the long way and
+   * one built from a bare token have to agree, or a probe measures something
+   * the app never runs.
+   */
+  it('defaults to the same models the constants name', () => {
+    const engine = built({})
+    const bare = new AgentEngine({ oauthToken: 'token', model: MODEL_IDS.sonnet })
+    expect(engine.classifierModel).toBe(bare.classifierModel)
+    expect(engine.agentModel).toBe(bare.agentModel)
+    expect(bare.classifierModel).toBe(CLASSIFIER_MODEL)
+    expect(bare.agentModel).toBe(AGENT_MODEL)
+  })
+
+  it('spells every choice as a real model id', () => {
+    for (const id of Object.values(MODEL_IDS)) expect(id).toMatch(/^claude-[a-z0-9-]+$/u)
   })
 })
 

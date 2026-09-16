@@ -74,11 +74,14 @@
      2  8  run, reversed           7  6  walk
      3  4  wave                    8  6  paw to chin, arms folded
      4  5  leap
-   Run and walk go unused. They are the makings of a pet that wanders the
-   screen when it is left alone, which is not this change.
+   Run is the hover state. Its mirror and walk go unused — they are the makings
+   of a pet that wanders the screen when it is left alone, which is not this
+   change.
 
-   Every row used here has its ink at y 5–202 within the cell, so the cat's feet
-   stay at one height and it never appears to jump as the mood changes. */
+   Every *mood* row has its ink at y 5–202 within the cell, so the cat's feet
+   stay at one height and it never appears to jump as the mood changes. Run does
+   not: 17–190, a shorter crouched pose whose feet are 12 source pixels higher.
+   See `.pet:hover`, which puts them back on the ground. */
 .pet {
   --pet-frame-w: 60px;
   --pet-frame-h: 65px;
@@ -135,6 +138,7 @@
    which is why it is one cell past the last one. */
 @keyframes pet-4 { from { background-position-x: 0; } to { background-position-x: -240px; } }
 @keyframes pet-6 { from { background-position-x: 0; } to { background-position-x: -360px; } }
+@keyframes pet-8 { from { background-position-x: 0; } to { background-position-x: -480px; } }
 /* The leap, which is the one animation that ends rather than loops — so the
    stop *is* displayed, and with `jump-end` it would be the empty sixth cell of
    a five-frame row: the cat would blink out of existence on landing.
@@ -182,6 +186,38 @@
 .pet.is-trouble .pet-sprite {
   background-position-y: -325px;
   animation: pet-sad 2.4s steps(4) infinite;
+}
+
+/* Hover: the cat runs, whatever mood it was in.
+
+   Last among the sprite rules on purpose. Every mood above is `.pet.is-x
+   .pet-sprite` and this is `.pet:hover .pet-sprite` — identical specificity, so
+   source order is the only thing deciding it, and moving this block up would
+   silently switch hover off for every mood.
+
+   Inside `no-preference` rather than countered later: under reduced motion the
+   rule then does not exist at all, so hover neither animates *nor* changes the
+   pose. Killing only the animation would leave a cat that changes what it looks
+   like when a pointer passes over it and then stands there, which is a stranger
+   thing than doing nothing.
+
+   The nudge is not a design choice. Row 1's ink sits at y 17–190 where every
+   mood row is 5–202 — measured off the sheet's alpha — so the run pose's feet
+   are 12 source pixels above where the others stand, and the cat would lift off
+   its own shadow the instant the pointer arrived. 4px rendered is 12.8 source:
+   a quarter-pixel past exact, and whole, where the true 3.75 would land the
+   sprite on a fraction and bleed the neighbouring cell into view. */
+@media (prefers-reduced-motion: no-preference) {
+  .pet:hover .pet-sprite {
+    /* Row 1 faces right and row 2 is its mirror; Pet.tsx sets the variable from
+       which half of the cat the pointer is in, so the cat runs *towards* it.
+       The fallback is the right-facing row, which is what shows for the one
+       frame before the first pointer event arrives — and on any pointer that
+       reports no position at all. */
+    background-position-y: var(--pet-run-row, -65px);
+    transform: translateY(4px);
+    animation: pet-8 0.64s steps(8) infinite;
+  }
 }
 
 /* The panel is bounded by the stage it stands on, and its scrolling regions

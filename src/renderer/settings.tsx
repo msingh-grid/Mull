@@ -152,8 +152,31 @@ function EnginePane({
       </Row>
       <p>
         {settings.routing === 'model'
-          ? 'When something is selected, or the box you’re typing in already has text, Mull asks a fast model whether you meant to dictate or to edit — and sends it that text. Speaking into an empty box never asks anything and never leaves this Mac.'
+          ? 'When something is selected, or the box you’re typing in already has text, Mull asks a model whether you meant to dictate or to edit — and sends it that text. Speaking into an empty box never asks anything and never leaves this Mac.'
           : 'Mull decides with a local list of phrasings. Nothing about what’s on your screen is sent anywhere — but the list is noticeably worse at ordinary sentences, so expect instructions to get typed sometimes.'}
+      </p>
+
+      <Row
+        label="Which model decides"
+        hint={settings.routing === 'model' ? 'you wait for this one' : 'rules only — unused'}
+      >
+        <select
+          value={settings.classifierModel}
+          disabled={settings.routing !== 'model'}
+          onChange={(event) =>
+            void update({ classifierModel: event.target.value as Settings['classifierModel'] })
+          }
+        >
+          <option value="haiku">Fast — Haiku 4.5</option>
+          <option value="sonnet">Careful — Sonnet 5</option>
+          <option value="opus">Most careful — Opus 5</option>
+        </select>
+      </Row>
+      <p>
+        This is the one decision nothing downstream reconsiders, so getting it wrong costs the
+        whole request — but you wait for it before anything happens, every time. Haiku is about a
+        second quicker and enough if you mostly dictate and edit. Move up if Mull keeps
+        misunderstanding what you asked for, and back down if the pause starts to show.
       </p>
 
       <Row label="Claude subscription" hint={status?.hasSubscription ? 'token saved' : undefined}>
@@ -260,6 +283,29 @@ function EnginePane({
         {settings.agentLoop
           ? 'Mull gives the model tools — look, find, press — and it decides what to do next after seeing what each one returns. It can take up to 40 turns instead of 6, so it can do more than fetch one thing. Escape stops it at the next action; what has already been pressed stays pressed. Needs the Claude subscription lane.'
           : 'Mull runs the loop and asks the model for one step at a time, up to six, re-reading the window before each one. Reliable for “open this conversation and tell me what it says”, and not much more — it remembers nothing between steps.'}
+      </p>
+
+      <Row
+        label="Which model drives"
+        hint={settings.agentLoop ? 'presses things in other apps' : 'unused while stepping'}
+      >
+        <select
+          value={settings.agentModel}
+          disabled={!settings.agentLoop}
+          onChange={(event) =>
+            void update({ agentModel: event.target.value as Settings['agentModel'] })
+          }
+        >
+          <option value="opus">Most careful — Opus 5</option>
+          <option value="sonnet">Careful — Sonnet 5</option>
+          <option value="haiku">Fast — Haiku 4.5</option>
+        </select>
+      </Row>
+      <p>
+        Separate from the edit model on purpose: a rewrite waits in a card for your ⏎, and a press
+        just happens. Cheaper is not simply faster here — every turn carries a fresh read of the
+        window, so a model that needs three more turns can take longer overall than the one that
+        costs more per turn. Which wins depends on the app being driven.
       </p>
 
       <Row label="Connection">

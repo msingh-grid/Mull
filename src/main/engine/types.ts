@@ -244,10 +244,10 @@ export interface Engine {
   /**
    * Words to type, or an instruction about text on screen?
    *
-   * On the critical path, so implementations use the fastest model they have
-   * (see `CLASSIFIER_MODEL`) and answer in a handful of tokens. Throwing is
-   * allowed — `IntentRouter` treats any failure, including a timeout, as
-   * `dictate` and falls back to the local rules.
+   * On the critical path, so implementations answer in a handful of tokens
+   * from one shared model (see `CLASSIFIER_MODEL`) rather than the edit model.
+   * Throwing is allowed — `IntentRouter` treats any failure, including a
+   * timeout, as `dictate` and falls back to the local rules.
    */
   classify(request: ClassifyRequest): Promise<ClassifiedIntent>
   /**

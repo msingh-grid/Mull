@@ -254,6 +254,7 @@ export class SidecarClient extends EventEmitter<SidecarEvents> implements Sideca
   uiTargets = (p: SidecarParams<'uiTargets'>) => this.call('uiTargets', p)
   pressTarget = (p: SidecarParams<'pressTarget'>) => this.call('pressTarget', p)
   focusTarget = (p: SidecarParams<'focusTarget'>) => this.call('focusTarget', p)
+  scrollTarget = (p: SidecarParams<'scrollTarget'>) => this.call('scrollTarget', p)
   navKey = (p: SidecarParams<'navKey'>) => this.call('navKey', p)
   promptScreenRecording = (p: SidecarParams<'promptScreenRecording'>) =>
     this.call('promptScreenRecording', p)
@@ -589,7 +590,11 @@ export class FakeSidecar implements SidecarApi {
   private targetsWarmed = false
 
   /** Every press and focus the executor asked for, in order. */
-  targetActions: Array<{ verb: 'press' | 'focus' | 'navKey'; index?: number; key?: string }> = []
+  targetActions: Array<{
+    verb: 'press' | 'focus' | 'scroll' | 'navKey'
+    index?: number
+    key?: string
+  }> = []
 
   /**
    * Swap what the pretend window offers, mid-test.
@@ -610,7 +615,7 @@ export class FakeSidecar implements SidecarApi {
   private scanned: UiTarget[] | null = null
 
   private async actOnTarget(
-    verb: 'press' | 'focus',
+    verb: 'press' | 'focus' | 'scroll',
     p: SidecarParams<'pressTarget'>
   ): Promise<{ ok: boolean; reason: string | null; actualRole: string | null; actualTitle: string | null }> {
     const refuse = (reason: string, target?: UiTarget) => ({
@@ -636,6 +641,8 @@ export class FakeSidecar implements SidecarApi {
     if (verb === 'press') {
       if (!target.actions.includes('AXPress')) return refuse('not-pressable', target)
       if (!target.enabled) return refuse('disabled', target)
+    } else if (verb === 'scroll') {
+      if (!target.actions.includes('AXScrollToVisible')) return refuse('not-scrollable', target)
     } else if (target.kind !== 'type') {
       return refuse('not-typeable', target)
     }
@@ -651,13 +658,16 @@ export class FakeSidecar implements SidecarApi {
   }
 
   /** Called after an accepted press or focus. See `retarget`. */
-  onTargetAction: ((verb: 'press' | 'focus', index: number) => void) | null = null
+  onTargetAction: ((verb: 'press' | 'focus' | 'scroll', index: number) => void) | null = null
 
   async pressTarget(p: SidecarParams<'pressTarget'>) {
     return this.actOnTarget('press', p)
   }
   async focusTarget(p: SidecarParams<'focusTarget'>) {
     return this.actOnTarget('focus', p)
+  }
+  async scrollTarget(p: SidecarParams<'scrollTarget'>) {
+    return this.actOnTarget('scroll', p)
   }
   async navKey(p: SidecarParams<'navKey'>) {
     if (this.overrides.secureInput) return { sent: false, reason: 'secure-input' }

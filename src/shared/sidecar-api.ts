@@ -322,7 +322,8 @@ export const TargetActionResultSchema = z.object({
    * 'gone' — the handle outlived the element; the window has been replaced.
    * 'changed' — the element is no longer what the caller was shown.
    * 'disabled' | 'not-pressable' | 'not-typeable' | 'press-refused'
-   * | 'focus-refused' | 'secure-input' | 'no-accessibility'
+   * | 'focus-refused' | 'not-scrollable' | 'scroll-refused' | 'secure-input'
+   * | 'no-accessibility'
    */
   reason: z.string().nullable(),
   /** What the element says it is now, so a refusal can be explained. */
@@ -343,10 +344,22 @@ export const TargetActionResultSchema = z.object({
  *
  * Not a filter over `keyChord`'s map either: a filter is one edit away from
  * letting ⏎ through, and this list is one where it was never present.
+ *
+ * ### `backTab`, and why it does not break the sentence above
+ *
+ * It posts ⇧⇥ — a modifier, in a verb whose docstring says there are none. The
+ * property that matters is not "no modifier is ever posted", it is **the caller
+ * cannot compose a chord**: the shift is welded to a name inside
+ * `RealSystem.navKeyCodes`, so the set of keystrokes that can leave this verb is
+ * exactly as long as that literal, and ⏎ is still not in it.
+ *
+ * It earns the entry by being unreachable any other way. ⌘F and ⌘S have menu
+ * commands in every application; moving *backwards* through a form has none.
  */
 export const NavKeySchema = z.enum([
   'escape',
   'tab',
+  'backTab',
   'up',
   'down',
   'left',
@@ -518,7 +531,7 @@ export const KeyChordResultSchema = z.object({
  * The `init` handshake rejects a mismatch, so a stale `mull-mac` binary fails
  * loudly at boot instead of returning shapes the host can't parse.
  */
-export const SIDECAR_PROTOCOL_VERSION = 7
+export const SIDECAR_PROTOCOL_VERSION = 8
 
 // ---------------------------------------------------------------------------
 // Notifications: sidecar -> host, no id, no reply.
@@ -558,6 +571,7 @@ export const SidecarMethods = {
   uiTargets: { params: UiTargetsParamsSchema, result: UiTargetsResultSchema },
   pressTarget: { params: TargetActionParamsSchema, result: TargetActionResultSchema },
   focusTarget: { params: TargetActionParamsSchema, result: TargetActionResultSchema },
+  scrollTarget: { params: TargetActionParamsSchema, result: TargetActionResultSchema },
   navKey: { params: NavKeyParamsSchema, result: NavKeyResultSchema },
   promptScreenRecording: {
     params: PromptScreenRecordingParamsSchema,

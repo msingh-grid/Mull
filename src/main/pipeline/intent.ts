@@ -105,11 +105,28 @@ export interface IntentRouterDeps {
  *   thinking: disabled           p50   954ms   min  845ms   max  1219ms
  *
  * See `thinking: { type: 'disabled' }` in `engine/agent.ts`. With that in
- * place, 8s is roughly six times the measured worst case — enough for a cold
+ * place, 8s was roughly six times the measured worst case — enough for a cold
  * session or a bad minute, and short enough that falling back is still a
  * decision rather than a hang.
+ *
+ * Third time, and this one is a deliberate purchase rather than a correction.
+ * `CLASSIFIER_MODEL` moved from Haiku to Sonnet because the routing was wrong
+ * too often, and a larger model on the same tiny completion costs somewhere
+ * around two to three times the wall clock. Those measurements above were
+ * Haiku's; keeping the same six-times margin over a worst case that has itself
+ * grown is how 8s becomes 20s. The same rule decides it as before — the budget
+ * is a multiple of the measured worst case, not a guess at what a user will
+ * tolerate — and the ceiling is still doing its real job, which is to end a
+ * hang, not to hurry a slow answer.
+ *
+ * What makes 20s affordable is that almost nothing waits this long. Only Fn
+ * classifies at all, and the timeout is the tail, not the experience: when the
+ * model answers in two seconds the user waits two seconds. The cost of being
+ * wrong in the other direction is worse and quieter — a timeout throws away a
+ * decision the model was about to make correctly and replaces it with the
+ * rules, which is the failure this whole file exists to document.
  */
-const DEFAULT_TIMEOUT_MS = 8_000
+const DEFAULT_TIMEOUT_MS = 20_000
 
 /**
  * How many timeouts before Mull stops asking this engine.

@@ -74,6 +74,13 @@ export interface AgentEngineOptions {
   /** From `claude setup-token`. Omit to inherit an existing Claude Code login. */
   oauthToken?: string | null
   model: string
+  /**
+   * The routing and loop models, already resolved from `settings` by
+   * `resolveEngine`. Optional so a test or a probe can build an engine with
+   * nothing but a token and still get the documented defaults.
+   */
+  classifierModel?: string
+  agentModel?: string
   now?: () => number
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   /** Injected in tests, so none of this needs a subprocess. */
@@ -93,6 +100,16 @@ export class AgentEngine implements Engine {
   readonly name = 'agent'
   readonly model: string
   private readonly health: EngineHealth
+  /**
+   * The other two models, public because they are worth reading back.
+   *
+   * `Engine.model` is the edit model alone, so until now a log line saying
+   * which engine came up said nothing about how routing or the loop were
+   * configured — and a settings-shaped problem is exactly the kind you
+   * diagnose from a log file afterwards rather than catch in the moment.
+   */
+  readonly classifierModel: string
+  readonly agentModel: string
   /** Kept for `runAgent`, which builds its own query rather than using one. */
   private readonly oauthToken: string | null
   private readonly log: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
@@ -106,6 +123,8 @@ export class AgentEngine implements Engine {
     this.model = options.model
     this.health = new EngineHealth({ now: options.now })
     this.oauthToken = options.oauthToken ?? null
+    this.classifierModel = options.classifierModel ?? CLASSIFIER_MODEL
+    this.agentModel = options.agentModel ?? AGENT_MODEL
     this.log = options.log ?? ((): void => {})
 
     const shared = {
@@ -123,7 +142,7 @@ export class AgentEngine implements Engine {
     this.classifier = new AgentSession({
       ...shared,
       label: 'classify',
-      model: CLASSIFIER_MODEL,
+      model: this.classifierModel,
       systemPrompt: CLASSIFIER_SYSTEM_PROMPT
     })
     this.composer = new AgentSession({
@@ -287,11 +306,11 @@ export class AgentEngine implements Engine {
   async runAgent(request: AgentGoal): Promise<AgentRunResult> {
     return runAgent({
       ...request,
-      // `AGENT_MODEL`, not `this.model`: the loop is pinned to the strongest
-      // model rather than inheriting the one chosen for rewriting paragraphs.
-      // See the note on the constant — the two jobs fail in different ways and
-      // only one of them is checked by a human before it takes effect.
-      model: AGENT_MODEL,
+      // `agentModel`, not `this.model`: the loop has its own choice rather
+      // than inheriting the one made for rewriting paragraphs. See the note on
+      // the constant — the two jobs fail in different ways and only one of
+      // them is checked by a human before it takes effect.
+      model: this.agentModel,
       oauthToken: this.oauthToken,
       log: this.log
     })

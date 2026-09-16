@@ -50,6 +50,13 @@ import {
 export interface ApiKeyEngineOptions {
   apiKey: string
   model: string
+  /**
+   * The routing model, already resolved from `settings` by `resolveEngine`.
+   * Optional so a test can build an engine from a key alone and still get the
+   * documented default. There is no `agentModel` here: this lane has no tool
+   * loop, so `runAgent` is not implemented on it at all.
+   */
+  classifierModel?: string
   /** Injected in tests; anything shaped like the SDK client will do. */
   client?: Pick<Anthropic['messages'], 'stream' | 'create'>
   now?: () => number
@@ -58,11 +65,14 @@ export interface ApiKeyEngineOptions {
 export class ApiKeyEngine implements Engine {
   readonly name = 'api-key'
   readonly model: string
+  /** Public for the same reason as on `AgentEngine`: so a log can say it. */
+  readonly classifierModel: string
   private readonly messages: Pick<Anthropic['messages'], 'stream' | 'create'>
   private readonly health: EngineHealth
 
   constructor(options: ApiKeyEngineOptions) {
     this.model = options.model
+    this.classifierModel = options.classifierModel ?? CLASSIFIER_MODEL
     this.messages =
       options.client ??
       new Anthropic({
@@ -85,7 +95,7 @@ export class ApiKeyEngine implements Engine {
   async classify(request: ClassifyRequest): Promise<ClassifiedIntent> {
     try {
       const message = await this.messages.create({
-        model: CLASSIFIER_MODEL,
+        model: this.classifierModel,
         max_tokens: CLASSIFIER_MAX_TOKENS,
         system: [
           { type: 'text', text: CLASSIFIER_SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }
