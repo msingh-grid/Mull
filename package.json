@@ -7,19 +7,30 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "build:sidecar": "cd mull-mac && swift build -c release",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "rebuild:native": "electron-rebuild -f -m .",
     "check:native": "electron scripts/native-check.cjs",
+    "check:applescript": "tsx scripts/check-applescript.ts",
+    "icons": "electron scripts/make-icons.cjs",
+    "fetch:model": "tsx scripts/fetch-model.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "bench:engine": "tsx scripts/bench-engine.ts",
+    "notarize:dryrun": "tsx scripts/notarize-dryrun.ts",
+    "pack:local": "npm run build:sidecar && npm run build && tsx scripts/pack-local.ts",
     "test": "vitest run"
   },
   "author": "",
   "license": "UNLICENSED",
   "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.270",
+    "@anthropic-ai/sdk": "0.125.0",
     "better-sqlite3": "^13.0.3",
     "diff": "^9.0.0",
     "electron-log": "^5.4.4",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "uiohook-napi": "^1.5.5",
     "zod": "^4.6.4"
   },
   "devDependencies": {
@@ -32,6 +43,7 @@
     "electron": "^44.3.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
+    "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
     "vitest": "^5.0.0"

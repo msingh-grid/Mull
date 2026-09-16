@@ -1,0 +1,642 @@
+/* ============================================================================
+   Ordinary windows — journal, settings, onboarding (docs/DESIGN.md §6.8)
+
+   These are not the HUD: they are focusable, keyboard-navigable, and they
+   follow system appearance. Shared chrome lives here; each window adds only
+   what is its own.
+   ========================================================================== */
+
+body.window {
+  background: var(--paper);
+  color: var(--ink);
+  /* Room for the inset traffic lights (titleBarStyle: hiddenInset). */
+  padding: 0;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.win {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.win-head {
+  flex: none;
+  padding: 30px 26px 14px;
+  border-bottom: 1px solid var(--hairline);
+  /* The whole header is the drag region; controls inside opt back out. */
+  -webkit-app-region: drag;
+}
+.win-head h1 {
+  font-family: var(--serif);
+  font-size: var(--fs-title);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  margin: 0;
+}
+.win-head .sub {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.win-head button,
+.win-head input,
+.win-head select {
+  -webkit-app-region: no-drag;
+}
+
+.win-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 26px 26px;
+}
+
+/* Section rules are hairlines; nothing heavier exists in this system. */
+.section + .section {
+  margin-top: 22px;
+  padding-top: 20px;
+  border-top: 1px solid var(--hairline);
+}
+.section h2 {
+  font-size: var(--fs-label);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 12px;
+}
+.section p {
+  margin: 0 0 12px;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+
+.empty {
+  padding: 40px 0;
+  text-align: center;
+  color: var(--ink-3);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 14px;
+}
+
+/* ── Journal rows (§6.5) ─────────────────────────────────────────────────── */
+.journal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.journal-entry {
+  /* Past ~50 rows the browser stops laying out what is scrolled away. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 46px;
+}
+
+.journal-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-inner);
+  padding: 11px 14px;
+  box-shadow: var(--shadow-row);
+  font-size: var(--fs-journal);
+  font-family: var(--sans);
+  color: var(--ink-2);
+}
+.journal-row:hover { background: var(--paper-bright); }
+
+.journal-row .kind {
+  font-size: var(--fs-label);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  background: var(--paper-recessed);
+  color: var(--ink-2);
+  border-radius: 4px;
+  padding: 2px 7px;
+  flex: none;
+}
+.journal-row .kind.edit,
+.journal-row .kind.command,
+.journal-row .kind.answer,
+/* An expedition reads as work Mull produced, like an edit or an answer. */
+.journal-row .kind.looked { background: var(--ins-wash); color: var(--ins); }
+.journal-row .kind.failed,
+.journal-row .kind.undone { background: var(--del-wash); color: var(--del); }
+/* The steps inside one are machinery, not outcomes — quieter than their plan,
+   so an expedition reads as one event with moving parts rather than five. */
+.journal-row .kind.pressed,
+.journal-row .kind.typed,
+.journal-row .kind.read,
+.journal-row .kind.key { background: var(--paper-recessed); color: var(--ink-3); }
+/* Sending is the one thing here that cannot be taken back. It gets the weight
+   that says so, rather than sharing a colour with a press. */
+.journal-row .kind.sent { background: var(--warn-wash); color: var(--warn); }
+
+.journal-row .app { color: var(--ink-2); flex: none; }
+.journal-row .time {
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.journal-row .sep { color: var(--ink-3); opacity: 0.55; flex: none; }
+.journal-row .sum {
+  font-family: var(--serif);
+  font-size: 13px;
+  color: var(--ink);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.journal-row .changes { color: var(--ink-3); flex: none; }
+
+/* ── An expedition and its steps ─────────────────────────────────────────── */
+
+/* The steps are indented and hung off a rule, so the relationship is visible
+   without reading anything: these happened because of the row above them. */
+.journal-steps {
+  margin: 4px 0 0 22px;
+  padding-left: 12px;
+  border-left: 2px solid var(--hairline);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.journal-steps .journal-row {
+  padding: 7px 12px;
+  box-shadow: none;
+  background: transparent;
+}
+.journal-steps .journal-row:hover { background: var(--paper-bright); }
+.journal-steps .journal-row .sum { font-size: 12px; color: var(--ink-2); }
+
+.journal-row .ordinal {
+  flex: none;
+  min-width: 16px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--fs-label);
+  text-align: right;
+}
+
+/* ── Everything recorded ─────────────────────────────────────────────────── */
+
+.everything { margin-top: 10px; }
+.everything-head {
+  font-size: var(--fs-label);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 6px;
+}
+.everything dl { margin: 0; }
+.everything .fact {
+  display: flex;
+  gap: 10px;
+  padding: 3px 0;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 12px;
+}
+.everything dt {
+  flex: none;
+  width: 96px;
+  color: var(--ink-3);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+.everything dd {
+  margin: 0;
+  color: var(--ink-2);
+  min-width: 0;
+  /* Long values wrap rather than stretching the window — a transcript and a
+     scan summary both end up here and neither is short. */
+  overflow-wrap: anywhere;
+}
+
+.journal-undo {
+  border: 1px solid var(--hairline);
+  background: var(--paper-bright);
+  color: var(--ink-2);
+  border-radius: var(--r-chip);
+  padding: 3px 11px;
+  font-size: 11.5px;
+  font-weight: 650;
+  flex: none;
+  transition: background var(--t-fast) var(--ease-out);
+}
+.journal-undo:hover { background: var(--paper-recessed); }
+.journal-undo:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+/* Expanded detail reuses the card shell, so a diff looks identical in the
+   record and in the preview that proposed it. */
+.journal-detail {
+  margin: 6px 0 2px 14px;
+  padding: 10px 12px 11px;
+  background: var(--paper-bright);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-inner);
+}
+.journal-detail .why {
+  margin-top: 8px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.journal-detail .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "What Mull saw" — a receipt, kept folded. It is a transcript of someone's
+   window and a photograph of their screen, so it opens only when asked. */
+.saw {
+  margin-top: 9px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 11px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.saw > summary {
+  cursor: pointer;
+  list-style: none;
+}
+.saw > summary::-webkit-details-marker { display: none; }
+.saw > summary::before {
+  content: '▸ ';
+  color: var(--ink-3);
+}
+.saw[open] > summary::before { content: '▾ '; }
+.saw > summary:hover { color: var(--ink-2); }
+.saw-title {
+  margin-top: 8px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+}
+/* The transcript is shown verbatim, wrapped rather than clipped: the whole
+   point is to be able to read what was and was not in it. */
+.saw-text {
+  margin-top: 6px;
+  max-height: 260px;
+  overflow: auto;
+  padding: 8px 9px;
+  background: var(--paper-recessed);
+  border-radius: var(--r-inner);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.saw-shot { margin-top: 8px; }
+.saw-shot img {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-inner);
+}
+.saw-shot .link {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  color: var(--ins);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.toast {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* ── Settings rows ───────────────────────────────────────────────────────── */
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 7px 0;
+}
+.set-label {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--fs-body);
+  color: var(--ink);
+}
+.set-hint {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  word-break: break-all;
+}
+/* A control cell can hold a field and its button (the engine pane's token and
+   key rows), so it lays its children out rather than assuming one child. */
+.set-control {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+select,
+.set-control input {
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink);
+  background: var(--paper-bright);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-chip);
+  padding: 4px 8px;
+}
+
+.set-control input {
+  width: 22ch;
+  /* Secrets are typed here. Dots are narrow; give them room to breathe rather
+     than letting the field look like it swallowed the paste. */
+  letter-spacing: 0.04em;
+}
+
+.set-control input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--ins);
+  outline-offset: 1px;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.warn-line {
+  font-size: 12.5px;
+  color: var(--warn);
+  background: var(--warn-wash);
+  border: 1px solid var(--warn-edge);
+  border-radius: var(--r-inner);
+  padding: 8px 11px;
+  max-width: 62ch;
+}
+
+.about-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 5px 14px;
+  font-size: 12px;
+  color: var(--ink-3);
+  align-items: baseline;
+}
+
+/* ── Permission rows (§6.4 step shape, §6.8 page 3) ──────────────────────── */
+.perm-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.perm-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 11px 0;
+}
+.perm-row + .perm-row { border-top: 1px solid var(--hairline-soft); }
+.perm-row .st {
+  font-family: var(--mono);
+  font-size: var(--fs-diff);
+  min-width: 16px;
+  text-align: center;
+  color: var(--ink-3);
+  padding-top: 2px;
+}
+.perm-row.is-done .st { color: var(--mem); }
+.perm-text { flex: 1; min-width: 0; }
+.perm-name {
+  font-size: var(--fs-body);
+  font-weight: 600;
+  color: var(--ink);
+}
+/* Quiet, and beside the name rather than under it: this row is not a problem
+   to be fixed, it is a capability the user may or may not want. */
+.perm-optional {
+  margin-left: 7px;
+  font-size: var(--fs-chip);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  vertical-align: 1px;
+}
+.perm-reason {
+  margin: 2px 0 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  max-width: 54ch;
+}
+.perm-granted {
+  flex: none;
+  font-size: var(--fs-chip);
+  font-weight: 600;
+  color: var(--mem);
+  padding-top: 3px;
+}
+
+/* Visually hidden, still announced — the ✓ is decoration, the word is not. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ── Onboarding (§6.8) — a numbered manuscript ───────────────────────────── */
+.onboarding .win-body { padding: 34px 34px 20px; }
+
+.plate { margin-bottom: 22px; }
+.plate .step-no {
+  font-family: var(--serif);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink-3);
+  margin-bottom: 4px;
+}
+.plate h2 {
+  font-family: var(--serif);
+  font-size: 25px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
+  margin: 0 0 10px;
+  text-wrap: balance;
+}
+.plate .lede {
+  margin: 0;
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink-2);
+  max-width: 60ch;
+}
+
+.tenets {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 24px;
+}
+.tenet {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 12.8px;
+  line-height: 1.5;
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+.tenet strong { color: var(--ink); font-weight: 650; }
+.t-mark { flex: none; width: 14px; text-align: center; }
+.t-mark.mem { color: var(--mem); }
+.t-mark.ins { color: var(--ins); }
+.t-mark.warn { color: var(--warn); }
+
+.stage-label {
+  font-size: var(--fs-label);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin: 0 0 9px;
+}
+
+/* The HUD mounted inside a page is an object on the desk, not a floating
+   panel — same paint, no screen-level shadow. */
+.onboarding .hud,
+.demo-hud {
+  width: 100%;
+  max-width: var(--hud-w);
+  box-shadow: var(--shadow-row);
+  border: 1px solid var(--hairline);
+}
+
+.page-note {
+  margin: 12px 0 0;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+/* The resting form, shown beside the panel on page 1 — the form a new user
+   will actually spend the day looking at (§6.1a). */
+.pet-note {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin: 18px 0 0;
+}
+.pet-note p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink-3);
+}
+
+.foot-note {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 22px;
+  padding-top: 14px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+  max-width: 66ch;
+}
+
+.ink-del { color: var(--del); font-style: normal; }
+.ink-ins { color: var(--ins); font-style: normal; }
+
+.dl-progress {
+  margin: 6px 0 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.practice-note {
+  display: block;
+  width: 100%;
+  max-width: var(--hud-w);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--paper-bright);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-inner);
+  padding: 12px 14px;
+  margin-bottom: 22px;
+  resize: vertical;
+}
+
+.win-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 26px;
+  border-top: 1px solid var(--hairline);
+  background: var(--paper);
+}
+.win-foot .grow { flex: 1; }
+.step-count {
+  font-size: 11.5px;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.ticks { display: flex; gap: 5px; }
+.ticks i {
+  width: 14px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--hairline);
+}
+.ticks i.done { background: var(--ink-3); }
+
+/* A key that is stated rather than chosen (Settings → Hotkey, M5b). Sized like
+   the <select> it replaced so the rows still line up. */
+.fixed-key {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper-recessed);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-kbd);
+  padding: 4px 9px;
+}

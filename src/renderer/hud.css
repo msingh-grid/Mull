@@ -1,0 +1,790 @@
+/* ============================================================================
+   HUD — Studio Paper panel (docs/DESIGN.md §6.1–§6.4, §6.6)
+
+   Ported from the frozen direction board, design/directions/02-studio-paper.html
+   (lines 207–364). Every literal rgba() in the board has been replaced by the
+   token that carries the same meaning, so dark mode needs no rules of its own:
+   the panel is painted entirely in custom properties from tokens.css.
+
+   The window underneath is transparent and click-through; this file paints the
+   only opaque thing on it.
+   ========================================================================== */
+
+/* The window is a bottom-anchored stage: the pet sits 24px above the screen
+   edge and the panel grows upward from it as chips and cards appear, so
+   neither the pet nor the panel's top row ever moves. */
+.hud-stage {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 0 0 24px;
+  pointer-events: none; /* only the panel and the pet take clicks */
+}
+
+/**
+ * The handle, holding the panel and the pet.
+ *
+ * A flex child of the stage, so it shrink-wraps its contents exactly — it must
+ * not be wider, or the window would hit-test a full-screen-wide strip and start
+ * eating clicks meant for the app underneath. Collapsed, that means the window
+ * is clickable across 60 pixels of cat and transparent everywhere else. Within
+ * those bounds it is the only thing that takes pointer events: hovering it
+ * makes the window clickable, and dragging from anywhere on it moves the HUD.
+ *
+ * Buttons and the scrollable diff body opt out of *dragging* in the handler
+ * rather than here, because they still need their own hover and clicks. The
+ * pet is the exception among buttons: it is the only thing always on screen,
+ * so it has to stay draggable (see `onPointerDown` in App.tsx).
+ */
+.hud-grip {
+  pointer-events: auto;
+  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.hud-grip:active {
+  cursor: grabbing;
+}
+
+.hud-grip button,
+.hud-grip .diffbody {
+  cursor: auto;
+}
+
+.hud-grip button {
+  cursor: pointer;
+}
+
+/* ── The pet (§6.1a) ─────────────────────────────────────────────────────────
+
+   Marmalade, at `assets/marmalade.webp`: an 8 × 9 sheet of 192×208 cells,
+   57 frames across nine animations. Scaled by 5/16, which is the largest scale
+   under half size that leaves both axes whole — 60×65 per frame, 480×585 for
+   the sheet — so no frame ever lands on a half pixel and bleeds its neighbour.
+
+   Frames per row, measured from the sheet's alpha rather than assumed:
+     0  6  idle, blinking          5  8  sad (frames 4–7 are the sitting ones)
+     1  8  run                     6  6  content idle
+     2  8  run, reversed           7  6  walk
+     3  4  wave                    8  6  paw to chin, arms folded
+     4  5  leap
+   Run is the hover state. Its mirror and walk go unused — they are the makings
+   of a pet that wanders the screen when it is left alone, which is not this
+   change.
+
+   Every *mood* row has its ink at y 5–202 within the cell, so the cat's feet
+   stay at one height and it never appears to jump as the mood changes. Run does
+   not: 17–190, a shorter crouched pose whose feet are 12 source pixels higher.
+   See `.pet:hover`, which puts them back on the ground. */
+.pet {
+  --pet-frame-w: 60px;
+  --pet-frame-h: 65px;
+  position: relative;
+  flex: none;
+  width: var(--pet-frame-w);
+  height: var(--pet-frame-h);
+  padding: 0;
+  border: 0;
+  background: none;
+  appearance: none;
+}
+
+/* It is the drag handle as much as it is a button, and `.hud-grip button`
+   above would otherwise make it claim to be only the latter. */
+.hud-grip .pet {
+  cursor: grab;
+}
+.hud-grip .pet:active {
+  cursor: grabbing;
+}
+
+.pet-sprite {
+  position: absolute;
+  inset: 0;
+  /* Set by the component from a bundler import — see Pet.tsx. */
+  background-image: var(--pet-sheet);
+  background-repeat: no-repeat;
+  /* Scaled here rather than in the file: the transparent pixels carry
+     undefined colour, and resampling the sheet would drag it into the edges
+     as a halo. Chromium scales with alpha in mind; an image editor would not. */
+  background-size: 480px 585px;
+}
+
+/* Grounds the cat against whatever window is behind it — without this it reads
+   as pasted on rather than standing there. Painted under the sprite, not baked
+   into it, so it is one shape in `--ink` that dark mode inverts for free. */
+.pet-shadow {
+  position: absolute;
+  left: 50%;
+  bottom: 2px;
+  width: 34px;
+  height: 6px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background: var(--ink);
+  opacity: 0.16;
+  filter: blur(1.5px);
+}
+
+/* One keyframe per frame count, reused: the row is a static
+   `background-position-y`, so only the length of the walk along x differs.
+   `steps(n)` shows frames 0…n-1 — the `to` value is the stop, not a frame,
+   which is why it is one cell past the last one. */
+@keyframes pet-4 { from { background-position-x: 0; } to { background-position-x: -240px; } }
+@keyframes pet-6 { from { background-position-x: 0; } to { background-position-x: -360px; } }
+@keyframes pet-8 { from { background-position-x: 0; } to { background-position-x: -480px; } }
+/* The leap, which is the one animation that ends rather than loops — so the
+   stop *is* displayed, and with `jump-end` it would be the empty sixth cell of
+   a five-frame row: the cat would blink out of existence on landing.
+   `jump-none` spreads the five values across [0,1] inclusive instead, so the
+   last frame is reached exactly at the end and `forwards` holds it. */
+@keyframes pet-leap { from { background-position-x: 0; } to { background-position-x: -240px; } }
+/* Sad, from frame 4: the first four are a stand-sit-wipe-curl sequence whose
+   silhouettes are too different to loop without a pop. The last four are the
+   same sitting pose, and read as one unhappy little animation. */
+@keyframes pet-sad {
+  from { background-position-x: -240px; }
+  to   { background-position-x: -480px; }
+}
+
+.pet.is-rest .pet-sprite {
+  background-position-y: 0;
+  animation: pet-6 2.4s steps(6) infinite;
+}
+/* Dozing: held on the second frame of the content idle, eyes shut. There is no
+   sleeping pose on the sheet — the one curled-up frame is mid-cry, and a cat
+   that weeps because you stopped typing is not the note to end on. */
+.pet.is-asleep .pet-sprite {
+  background-position: -60px -390px;
+}
+.pet.is-listening .pet-sprite {
+  background-position-y: -195px;
+  animation: pet-4 0.72s steps(4) infinite;
+}
+.pet.is-working .pet-sprite {
+  background-position-y: -520px;
+  animation: pet-6 1.5s steps(6) infinite;
+}
+/* Calm on purpose. Something is owed a decision, and a fidgeting cat beside a
+   card the user is trying to read is asking for attention it does not need. */
+.pet.is-waiting .pet-sprite {
+  background-position-y: -390px;
+  animation: pet-6 2.2s steps(6) infinite;
+}
+/* Once, then held on the landing — `applied` is only 1 400ms, and a leap on a
+   loop would still be leaping after the thing it was pleased about was gone. */
+.pet.is-done .pet-sprite {
+  background-position-y: -260px;
+  animation: pet-leap 0.6s steps(5, jump-none) 1 forwards;
+}
+.pet.is-trouble .pet-sprite {
+  background-position-y: -325px;
+  animation: pet-sad 2.4s steps(4) infinite;
+}
+
+/* Hover: the cat runs, whatever mood it was in.
+
+   Last among the sprite rules on purpose. Every mood above is `.pet.is-x
+   .pet-sprite` and this is `.pet:hover .pet-sprite` — identical specificity, so
+   source order is the only thing deciding it, and moving this block up would
+   silently switch hover off for every mood.
+
+   Inside `no-preference` rather than countered later: under reduced motion the
+   rule then does not exist at all, so hover neither animates *nor* changes the
+   pose. Killing only the animation would leave a cat that changes what it looks
+   like when a pointer passes over it and then stands there, which is a stranger
+   thing than doing nothing.
+
+   The nudge is not a design choice. Row 1's ink sits at y 17–190 where every
+   mood row is 5–202 — measured off the sheet's alpha — so the run pose's feet
+   are 12 source pixels above where the others stand, and the cat would lift off
+   its own shadow the instant the pointer arrived. 4px rendered is 12.8 source:
+   a quarter-pixel past exact, and whole, where the true 3.75 would land the
+   sprite on a fraction and bleed the neighbouring cell into view. */
+@media (prefers-reduced-motion: no-preference) {
+  .pet:hover .pet-sprite {
+    /* Row 1 faces right and row 2 is its mirror; Pet.tsx sets the variable from
+       which half of the cat the pointer is in, so the cat runs *towards* it.
+       The fallback is the right-facing row, which is what shows for the one
+       frame before the first pointer event arrives — and on any pointer that
+       reports no position at all. */
+    background-position-y: var(--pet-run-row, -65px);
+    transform: translateY(4px);
+    animation: pet-8 0.64s steps(8) infinite;
+  }
+}
+
+/* The panel is bounded by the stage it stands on, and its scrolling regions
+   absorb the difference.
+
+   Nothing bounded it before, so a tall card simply grew past the top of the
+   window and was clipped by it — the card title, the first steps and the whole
+   top row (orb, transcript, label) went missing, with no scrollbar anywhere,
+   because the overflow was the *window's* and a window does not scroll.
+
+   `100vh` is the window; the stage keeps 24px of padding below the panel, the
+   pet is 65px and sits 8px under it. What is left is the panel's. */
+.hud {
+  width: var(--hud-w);
+  max-width: 94vw;
+  max-height: calc(100vh - 97px);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--paper);
+  border-radius: var(--r-panel);
+  box-shadow: var(--shadow-hud);
+  padding: var(--hud-pad);
+  color: var(--ink);
+  pointer-events: auto;
+}
+
+/* Top row is fixed-height so idle → listening never shifts the layout (§4). */
+.hud-top {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 24px;
+}
+
+/* ── Orb ─────────────────────────────────────────────────────────────────── */
+.orb {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--ink);
+}
+.hud.is-idle .orb {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ink-3);
+}
+.hud.is-listening .orb {
+  animation: orb-pulse var(--pulse-period) var(--ease-out) infinite;
+}
+@keyframes orb-pulse {
+  0%   { box-shadow: 0 0 0 0   var(--orb-ping); }
+  70%  { box-shadow: 0 0 0 9px transparent; }
+  100% { box-shadow: 0 0 0 0   transparent; }
+}
+
+/* ── Waveform ────────────────────────────────────────────────────────────── */
+.wave {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 20px;
+  flex: none;
+}
+.wave i {
+  width: 2px;
+  height: var(--h, 4px);
+  border-radius: 1px;
+  background: var(--ink-3);
+  display: block;
+  transform-origin: center;
+}
+.hud.is-listening .wave i {
+  background: var(--ink-2);
+  animation: wave-tick var(--wave-period) ease-in-out infinite;
+  animation-delay: var(--d, 0ms);
+}
+@keyframes wave-tick {
+  0%, 100% { transform: scaleY(1); }
+  50%      { transform: scaleY(var(--amp, 3)); }
+}
+
+/* ── Transcript ──────────────────────────────────────────────────────────── */
+.transcript {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--serif);
+  font-size: var(--fs-transcript);
+  line-height: var(--lh-transcript);
+  color: var(--ink);
+  /* Two lines, then ellipsis: the HUD is glanceable, never a document (§7.3). */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.transcript .ghost {
+  color: var(--ink-3);
+  font-style: italic;
+}
+.caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1em;
+  background: var(--ins);
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: caret-blink 1s steps(1) infinite;
+}
+@keyframes caret-blink { 50% { opacity: 0; } }
+
+/* ── State label ─────────────────────────────────────────────────────────── */
+.state-label {
+  flex: none;
+  font-size: var(--fs-label);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.hud.is-listening .state-label,
+.hud.is-preview .state-label { color: var(--ink); }
+/* Ochre is something the user can fix — secure input, a missing permission, a
+   model that is not answering. Red pencil is something that failed. They wore
+   the same colour, which flattened a distinction the hue system exists to make
+   (§2: hue always means fact). Green is the one outcome that went entirely
+   right, and it had no colour at all. */
+.hud.is-blocked .state-label { color: var(--warn); }
+.hud.is-error .state-label { color: var(--del); }
+.hud.is-applied .state-label { color: var(--mem); }
+/* Not bold, not tracked: the seconds are a reassurance, not a deadline. */
+.state-elapsed {
+  font-weight: 500;
+  letter-spacing: 0;
+  /* Not inherited from the label: "6s" is a measurement, and "6S" is a label
+     pretending to be one. */
+  text-transform: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+/* The working line — what Mull is doing right now, under the transcript and
+   above the chips. Present only while something is in flight; a card on screen
+   is its own answer to the same question. */
+.stage {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 7px;
+  padding-left: 2px;
+  font-size: var(--fs-chip);
+  color: var(--ink-3);
+}
+/* A slow pulse rather than a spinner: the panel already carries one moving
+   thing (the waveform), and two competing rhythms read as busy rather than
+   alive. */
+.stage-pulse {
+  flex: none;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ins);
+  animation: stage-pulse 1.6s ease-in-out infinite;
+}
+@keyframes stage-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-pulse { animation: none; opacity: 0.7; }
+}
+
+/* ── Thinking toggle ─────────────────────────────────────────────────────── */
+/* Deliberately the quietest control on the panel while it is off: it is an
+   escape hatch for the occasional hard piece of writing, not a mode anyone
+   should feel invited into. Armed, it is the loudest thing here — because the
+   cost is twenty seconds a turn and forgetting it is on is the failure. */
+.think {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 9px;
+  padding: 3px 9px;
+  border-radius: var(--r-chip);
+  border: 1px solid transparent;
+  background: none;
+  font: inherit;
+  font-size: var(--fs-chip);
+  color: var(--ink-3);
+  cursor: pointer;
+  transition:
+    color var(--t-fast) var(--ease-out),
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out);
+}
+.think:hover { color: var(--ink-2); border-color: var(--hairline-soft); }
+.think .dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ink-3);
+}
+.think.is-on {
+  color: var(--warn);
+  background: var(--warn-wash);
+  border-color: var(--warn-edge);
+  font-weight: 600;
+}
+.think.is-on .dot { background: var(--warn); box-shadow: none; }
+.think:focus-visible {
+  outline: 2px solid var(--ins);
+  outline-offset: 2px;
+}
+
+/* ── Last action ghost (idle only) ───────────────────────────────────────── */
+.last-action {
+  margin-top: 9px;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 11px;
+  color: var(--ink-3);
+}
+.last-action-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+/* What the action produced. A shade darker than the meta line above it —
+   the answer is the thing worth reading, and the provenance is the caption. */
+.last-action-result {
+  margin-top: 4px;
+  color: var(--ink-2);
+  line-height: 1.45;
+  /* Two lines, then an ellipsis. The full text lives in the journal; this is a
+     reminder of what came back, not a second place to read it. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.last-action .sep { opacity: 0.6; }
+.last-action .undo { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; }
+
+/* ── Chips (§6.2) ────────────────────────────────────────────────────────── */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--fs-chip);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  border-radius: var(--r-chip);
+  padding: 3px 9px;
+  border: 1px solid var(--hairline);
+  background: var(--paper-bright);
+  color: var(--ink-2);
+  transition:
+    background var(--t-fast) var(--ease-out),
+    border-color var(--t-fast) var(--ease-out);
+  animation: rise-in var(--t-med) var(--ease-out) both;
+}
+.chip .g { font-size: 10px; opacity: 0.85; }
+.chip .k {
+  font-family: var(--mono);
+  font-size: var(--fs-kbd);
+  font-weight: 500;
+  opacity: 0.7;
+}
+.chip.intent { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.chip.cmd    { background: var(--paper-bright); border-color: var(--hairline); color: var(--ink); }
+.chip.mem    { background: var(--mem-wash); border-color: var(--mem-edge); color: var(--mem); }
+.chip.mem:hover { background: var(--mem-wash-strong); }
+.chip.warn   { background: var(--warn-wash); border-color: var(--warn-edge); color: var(--warn); }
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── Cards (§6.3, §6.4) ──────────────────────────────────────────────────── */
+/* The card's ground says what it costs to press a key, before a word is read.
+
+   `is-will` — something can still happen: an edit to apply, a message to send,
+   a plan to run. Fresh paper, and the one filled button in the app sits on it.
+   `is-wont` — nothing more will. The card is pressed into the desk instead, and
+   carries no filled button at all, because a filled accent button is this app's
+   word for *this commits*.
+
+   Derived in `cardFamily` (@shared/hud) rather than set per lane, so a new lane
+   cannot forget and a new card kind stops compiling until it decides. The
+   transition is visible: a plan settles from one to the other the moment its
+   walk is over. */
+.card {
+  margin-top: 11px;
+  /* The only child of the panel allowed to shrink — the top row and the chips
+     are one line each and there is nothing in them to give. */
+  flex: 0 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--paper-bright);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-inner);
+  padding: 10px 12px 11px;
+  animation: rise-in var(--t-med) var(--ease-out) both;
+  transition:
+    background var(--t-med) var(--ease-out),
+    border-color var(--t-med) var(--ease-out);
+}
+.card.is-wont {
+  background: var(--paper-recessed);
+  border-color: var(--hairline-soft);
+}
+.card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 10px;
+  font-size: var(--fs-label);
+  font-weight: 700;
+  letter-spacing: var(--track-label);
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+.card-title .count { font-weight: 600; letter-spacing: 0.04em; }
+
+.card-body {
+  font-family: var(--mono);
+  font-size: var(--fs-diff);
+  line-height: var(--lh-diff);
+  color: var(--ink-2);
+  max-height: var(--diff-max-h);
+  overflow-y: auto;              /* the only scrollable region in the HUD */
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-3) transparent;
+  margin-bottom: 10px;
+  white-space: pre-wrap;
+}
+.card-body::-webkit-scrollbar { width: 5px; }
+.card-body::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 3px; }
+
+.card-body del {
+  color: var(--del);
+  background: var(--del-wash);
+  text-decoration: line-through;
+  text-decoration-color: var(--del-line);
+  text-decoration-thickness: 1.5px;
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.card-body ins {
+  color: var(--ins);
+  background: var(--ins-wash);
+  text-decoration: none;
+  border-bottom: 1px solid var(--ins-line);
+  border-radius: 2px 2px 0 0;
+  padding: 0 1px;
+  font-weight: 600;
+}
+
+/* Plan steps (§6.4): the state cell is mono and fixed-width so the column of
+   ·/…/✓ reads as a column even as the verbs change length. */
+.plan-step {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.plan-step .n { color: var(--ink-3); }
+.plan-step .what { flex: 1; min-width: 0; }
+.plan-step .st { min-width: 18px; text-align: right; color: var(--ink-3); }
+.plan-step.is-running .what { color: var(--ink); }
+.plan-step.is-running .st { color: var(--ins); }
+.plan-step.is-done .st { color: var(--mem); }
+.plan-step.is-failed .st { color: var(--del); }
+
+/* What was found, under the steps that found it.
+
+   Set apart by a rule and given the body measure rather than the step grid,
+   because it is the one part of a plan card that is prose to be read rather
+   than a ledger to be scanned. Scrolls on its own past a few lines: a long
+   answer must not push Run and Cancel off the panel. */
+/* The answer, and the priority it is given.
+
+   Everything else on this card is *how* the answer was come by. So the steps
+   are capped short and scroll (below), and the answer takes whatever room is
+   left — `flex: 1 1 auto` against a bounded panel — scrolling only when it
+   genuinely cannot fit. A user who asked a question should not have to scroll
+   to reach the reply, and should never have it cut off mid-sentence. */
+.plan-answer {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--hairline-soft);
+  /* The same voice as `.card-body.is-answer`, because it is the same thing:
+     prose Mull wrote for the human to read back. Two surfaces carrying one
+     kind of writing must not be set in two faces. */
+  font-family: var(--serif);
+  font-size: var(--fs-transcript);
+  line-height: 1.58;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--ink-3) transparent;
+}
+.plan-answer::-webkit-scrollbar { width: 5px; }
+.plan-answer::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 3px; }
+
+/* The steps on a finished plan are the working, not the result. Capped tight
+   so the answer above is never the thing that gets squeezed, and scrollable so
+   a six-step walk is still all there for anyone who wants to check it. */
+.card.is-wont .card-body {
+  flex: 0 1 auto;
+  max-height: 108px;
+}
+
+/* The goal sits above the steps and reads as the thing they are serving, so it
+   borrows the step's own two-column rhythm rather than being a heading: the
+   label lines up where the step numbers line up. */
+.plan-goal {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--hairline-soft);
+  margin-bottom: 8px;
+}
+.plan-goal .n { color: var(--ink-3); }
+.plan-goal .what { flex: 1; min-width: 0; color: var(--ink); }
+
+/* ── Actions (§6.6) ──────────────────────────────────────────────────────── */
+.card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: var(--r-chip);
+  padding: 5px 13px;
+  font-size: 12px;
+  font-weight: 650;
+  border: 1px solid transparent;
+  transition:
+    background var(--t-fast) var(--ease-out),
+    transform var(--t-fast) var(--ease-out);
+}
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--ins); color: var(--on-ins); }
+.btn.primary:hover { background: var(--ins-hover); }
+.btn.ghost { background: transparent; color: var(--ink-2); border-color: var(--hairline); }
+.btn.ghost:hover { background: var(--paper-recessed); }
+/* The irreversible commit (§7.2). Ochre, because hue always means fact and this
+   one is "you cannot take this back" — not a second Apply in a louder colour.
+   Outlined rather than filled so Apply stays the only solid button on the card. */
+.btn.send {
+  background: var(--warn-wash);
+  color: var(--warn);
+  border-color: var(--warn-edge);
+}
+.btn.send:hover { background: var(--warn-edge); color: var(--on-ins); }
+.btn .k {
+  font-family: var(--mono);
+  font-size: var(--fs-kbd);
+  font-weight: 500;
+  opacity: 0.75;
+}
+
+/* The bare-send card quotes the user's own text back at them. Not diff ink —
+   nothing here is Mull's writing, and it must not look like a proposal. */
+.card-body.is-quote {
+  color: var(--ink-2);
+  white-space: pre-wrap;
+}
+
+/* An answer is prose to be read, not a diff to be inspected, so it drops the
+   monospace the other bodies use for character-level comparison.
+
+   Serif, not sans, and the design system decides that rather than taste: §1
+   casts serif for *anything the human said or is reading back*, and an answer
+   is exactly something being read back. It shipped as sans, which quietly
+   filed Mull's answer with the instrument's own labels — the voice reserved
+   for the machine talking about itself. */
+.card-body.is-answer {
+  font-family: var(--serif);
+  font-size: var(--fs-transcript);
+  line-height: 1.58;
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  /* The whole card, so it takes the panel's remaining height rather than the
+     150px a diff body is capped at — an answer is what was asked for, and a
+     diff is something to inspect a line at a time. */
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+/* Every destructive-ish action states its undo path in the same breath (§7.2). */
+/* The promise, directly under the button it describes.
+
+   It used to be `margin-left: auto` at the far right of the action row, which
+   put the one sentence naming what a key costs about three hundred pixels from
+   the key that costs it — and that distance is how an **Apply** came to sit
+   under a summary of somebody's own notes with nothing nearby to contradict it.
+
+   A caption, so it reads as belonging to the buttons rather than trailing
+   them. */
+.promise {
+  margin-top: 7px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+/* "sending can’t be undone" is a fact about the button above it, not a hint. */
+.promise.is-warning { color: var(--warn); }
+
+kbd {
+  font-family: var(--mono);
+  font-size: var(--fs-kbd);
+  font-weight: 500;
+  color: var(--ink-2);
+  background: var(--paper-recessed);
+  border: 1px solid var(--hairline);
+  border-radius: var(--r-kbd);
+  padding: 0.5px 4px;
+}
+
+/* ── Notice line ─────────────────────────────────────────────────────────────
+   Neutral by default — this line also carries plain results ("Edit applied.").
+   Ochre is reserved for the states that are actually warnings, because hue
+   always means fact (§2). */
+.notice {
+  margin-top: 9px;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+.hud.is-blocked .notice,
+.hud.is-error .notice {
+  color: var(--warn);
+}
+
+/* ── Reduced motion (§5) ─────────────────────────────────────────────────────
+   Bars freeze at a static mid-level trace rather than flattening: a frozen
+   waveform still says "live", a flat line says "broken". */
+@media (prefers-reduced-motion: reduce) {
+  .hud.is-listening .orb,
+  .hud.is-listening .wave i,
+  .caret,
+  .chip,
+  .card {
+    animation: none;
+  }
+  .hud.is-listening .wave i { transform: scaleY(2); }
+  /* The cat holds the first frame of its row — still the right pose for the
+     mood, just not moving through it. */
+  .pet-sprite { animation: none; }
+}

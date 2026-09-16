@@ -1,0 +1,215 @@
+import type { NavStep } from '@shared/nav'
+import type {
+  AnswerRequest,
+  ClassifiedIntent,
+  ComposeRequest,
+  Engine,
+  EngineState,
+  NavigateRequest,
+  TransformRequest,
+  TransformResult
+} from './types'
+
+/**
+ * FakeEngine — deterministic, local, and not a model.
+ *
+ * It exists so the diff and plan cards can be built, reviewed and demoed
+ * against something real-shaped before M4 wires an actual engine. Two rules
+ * keep it from becoming a lie:
+ *
+ *  1. It never claims to be the engine. `ready()` reports `local-only` unless
+ *     a caller explicitly asks for `ready`, so any surface that assumes a real
+ *     engine is present will visibly say otherwise.
+ *  2. Its edits are rules, not guesses — it strips hedging phrases and
+ *     collapses the wreckage. On the design's canonical sample that produces
+ *     exactly the marks the board shows; on the user's own text it produces
+ *     something modest and true rather than an invented paraphrase.
+ */
+
+/** The sample every Studio Paper surface has been designed against. */
+export const CANONICAL_SAMPLE = {
+  before:
+    'I’m so sorry to bother you again, but I was just wondering if maybe we still need your sign-off on the terms doc whenever you get a chance, no rush at all.',
+  after: 'Following up: we still need your sign-off on the terms doc by Friday.'
+} as const
+
+/** The same sample's other half: what a drafted reply looks like (M5a). */
+export const CANONICAL_DRAFT =
+  'Confirmed — the redlines are with legal now, you’ll have them by five.'
+
+/**
+ * Hedges, longest first so the greedy pass takes the biggest bite. These are
+ * the phrases the brief's sample is built from; the list is illustrative, not
+ * a linguistic claim.
+ */
+const HEDGES: Array<[RegExp, string]> = [
+  [/I’m so sorry to bother you again,? but I was just wondering if maybe\s*/giu, 'Following up: '],
+  [/\s*whenever you get a chance,? no rush at all/giu, ' by Friday'],
+  [/\s*,?\s*if that(’|')s ok(ay)? with you/giu, ''],
+  [/\s*,?\s*no rush at all/giu, ''],
+  [/\bI was (just )?wondering if (maybe )?/giu, ''],
+  [/\bI (just )?wanted to (quickly )?/giu, ''],
+  [/\bsorry to bother you,?\s*/giu, ''],
+  [/\bjust a quick (note|one),?\s*/giu, ''],
+  [/\b(just|really|very|actually|basically|kind of|sort of)\s+/giu, ''],
+  [/\bI think (that )?(maybe )?/giu, ''],
+  [/\bif you (could|can) (please )?/giu, 'please ']
+]
+
+export interface FakeEngineOptions {
+  /** What `ready()` reports. Defaults to the honest `local-only`. */
+  state?: EngineState
+  /** Delay between streamed chunks; 0 in tests. */
+  chunkMs?: number
+  /** Injected for tests. */
+  sleep?: (ms: number) => Promise<void>
+}
+
+export class FakeEngine implements Engine {
+  readonly name = 'fake'
+  readonly model = null
+  private readonly state: EngineState
+  private readonly chunkMs: number
+  private readonly sleep: (ms: number) => Promise<void>
+
+  constructor(options: FakeEngineOptions = {}) {
+    this.state = options.state ?? { kind: 'local-only', reason: 'No engine is connected yet.' }
+    this.chunkMs = options.chunkMs ?? 26
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)))
+  }
+
+  async ready(): Promise<EngineState> {
+    return this.state
+  }
+
+  /**
+   * The fake does not guess at meaning. `dictate` is the safe answer, and it
+   * is what `IntentRouter` does with a refusal anyway — it falls back to the
+   * local rules, which is the behaviour a machine with no engine should have.
+   */
+  async classify(): Promise<ClassifiedIntent> {
+    return { kind: 'dictate' }
+  }
+
+  async transform(
+    request: TransformRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    const source = request.text.trim() ? request.text : CANONICAL_SAMPLE.before
+    const text = tighten(source)
+
+    if (onPartial) {
+      // Stream by words so the card fills in the way writing does.
+      const words = text.split(/(\s+)/)
+      let sofar = ''
+      for (const word of words) {
+        sofar += word
+        onPartial(sofar)
+        if (this.chunkMs > 0) await this.sleep(this.chunkMs)
+      }
+    }
+
+    return { text }
+  }
+
+  /**
+   * A plausible reply, streamed the same way. It never reads the context — the
+   * fake exists so the HUD can be developed without an engine, and inventing a
+   * reply from a real conversation is precisely the judgement it must not fake.
+   */
+  async compose(
+    request: ComposeRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    const text = CANONICAL_DRAFT
+    if (onPartial) {
+      const words = text.split(/(\s+)/)
+      let sofar = ''
+      for (const word of words) {
+        sofar += word
+        onPartial(sofar)
+        if (this.chunkMs > 0) await this.sleep(this.chunkMs)
+      }
+    }
+    return { text }
+  }
+
+  /**
+   * A navigator with no model behind it, and no pretending otherwise.
+   *
+   * It presses the first target whose title contains a word from the goal, then
+   * reads, then stops — which is enough to exercise the loop, the card and the
+   * executor end to end without a subprocess, and is transparently not
+   * intelligence. Anything cleverer here would be a fake that passes tests the
+   * real engine would fail.
+   */
+  async navigate(request: NavigateRequest): Promise<NavStep> {
+    if (request.stepsLeft <= 0) return { verb: 'done', because: 'out of steps' }
+    const tried = new Set(
+      request.history.map((attempt) =>
+        attempt.step.verb === 'press' ? attempt.step.index : -1
+      )
+    )
+    const words = request.goal
+      .toLowerCase()
+      .split(/\W+/u)
+      .filter((word) => word.length > 3)
+    const hit = request.targets.find(
+      (target) =>
+        target.kind === 'press' &&
+        !tried.has(target.index) &&
+        words.some((word) => target.title.toLowerCase().includes(word))
+    )
+    if (hit) return { verb: 'press', index: hit.index, label: hit.title }
+    if (!request.history.some((attempt) => attempt.step.verb === 'read')) {
+      return { verb: 'read' }
+    }
+    return { verb: 'done', because: 'nothing here matches that' }
+  }
+
+  /**
+   * What was found, without reading it — the same honesty as `compose`.
+   *
+   * It reports the shape of what it was given rather than its substance,
+   * because summarising a real conversation is the one judgement a fake must
+   * not counterfeit. A caller that gets this back and shows it verbatim has
+   * demonstrated the whole path works; it has not demonstrated an answer.
+   */
+  async answer(
+    request: AnswerRequest,
+    onPartial?: (text: string) => void
+  ): Promise<TransformResult> {
+    const chars = request.context?.chars ?? 0
+    const text = chars
+      ? `(fake engine) ${chars} characters were read from ${
+          request.context?.windowTitle ?? 'that window'
+        }. There is no model here to read them.`
+      : '(fake engine) nothing readable was found in that window.'
+    if (onPartial) {
+      let sofar = ''
+      for (const word of text.split(/(\s+)/)) {
+        sofar += word
+        onPartial(sofar)
+        if (this.chunkMs > 0) await this.sleep(this.chunkMs)
+      }
+    }
+    return { text }
+  }
+}
+
+/** The rules pass. Exported so its behaviour is directly testable. */
+export function tighten(text: string): string {
+  let out = text
+  for (const [pattern, replacement] of HEDGES) out = out.replace(pattern, replacement)
+
+  out = out
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/,\s*\./g, '.')
+    .trim()
+
+  // Re-capitalise if a hedge took the opening words with it.
+  const first = out.search(/\p{L}/u)
+  if (first >= 0) out = out.slice(0, first) + out.charAt(first).toUpperCase() + out.slice(first + 1)
+  return out
+}

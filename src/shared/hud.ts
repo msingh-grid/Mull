@@ -1,0 +1,249 @@
+/**
+ * What the HUD renders, as data.
+ *
+ * The renderer computes nothing — no diffing, no classification, no deciding
+ * which chips to show. Main sends a finished picture and the panel draws it.
+ * Two reasons: the interesting logic stays unit-testable under plain node
+ * (docs/DESIGN.md is a spec, not a test harness), and a renderer that cannot
+ * derive state cannot drift from what actually happened.
+ *
+ * Component specs: docs/DESIGN.md §6.2 (chips), §6.3 (diff card), §6.4 (plan).
+ */
+
+// ---------------------------------------------------------------------------
+// Diff
+// ---------------------------------------------------------------------------
+
+/**
+ * One run of text in a diff. `same` is context, `del` is red pencil, `ins` is
+ * writing ink — the three marks the whole design metaphor rests on.
+ */
+export interface DiffSegment {
+  kind: 'same' | 'del' | 'ins'
+  text: string
+}
+
+// ---------------------------------------------------------------------------
+// Chips — §6.2. A chip announces a classification *before* the action.
+// ---------------------------------------------------------------------------
+
+export type ChipKind = 'intent' | 'cmd' | 'mem' | 'dict' | 'warn'
+
+export interface HudChip {
+  kind: ChipKind
+  label: string
+  /** Stable key for React, and the citation id for `mem` chips. */
+  id: string
+  /** Key hint printed inside the chip, e.g. '⌥Z'. */
+  hint?: string
+}
+
+// ---------------------------------------------------------------------------
+// Cards — a proposal until the user commits (§7.5). Never auto-applied.
+// ---------------------------------------------------------------------------
+
+/**
+ * A second, heavier commit offered beside Apply.
+ *
+ * Present only when Mull can both write the text *and* do the thing the user
+ * asked for next — today that is "and send it", in an app whose send chord is
+ * on the table in `services/send-table.ts`.
+ *
+ * It carries its own `warning` because it is the first thing in Mull that ⌥Z
+ * cannot take back, and §7.2 says an action states its undo path in the same
+ * breath as itself. Here the undo path is: there isn't one.
+ */
+export interface CardCommit {
+  /** Button text, e.g. 'Apply & send'. */
+  label: string
+  /** The chord printed inside it, e.g. '⌘⏎'. */
+  hint: string
+  /** One clause under the actions, e.g. 'sending can’t be undone'. */
+  warning: string
+}
+
+export interface DiffCard {
+  kind: 'diff'
+  /** Named in the card title: "EDIT PREVIEW · Mail". */
+  app: string | null
+  segments: DiffSegment[]
+  /** Counted in main so the title and the body can never disagree. */
+  changes: number
+  /** Absent on almost every card. See `CardCommit`. */
+  commit?: CardCommit | null
+}
+
+export type PlanStepState = 'pending' | 'running' | 'done' | 'failed'
+
+export interface PlanStep {
+  id: string
+  verb: string
+  object: string
+  state: PlanStepState
+}
+
+/**
+ * A plan, and — since M5a Stage 5 — a plan that is still being written.
+ *
+ * The steps arrive one at a time rather than all at once, because a user
+ * interface is a moving target: press Slack's Search and the list of things
+ * that can be pressed is entirely replaced, so a three-step plan decided
+ * against the first window has a second step that refers to nothing.
+ *
+ * That changes what Run means. It approves the **goal and the budget** — "go
+ * look for this, in this app, read-only, at most six steps" — and the steps
+ * then appear as they happen. A confirmation per press would be a dialog box
+ * nobody reads by the fourth one, and would say less than watching it.
+ */
+export interface PlanCard {
+  kind: 'plan'
+  steps: PlanStep[]
+  /** Verb context shown at the card's top right. */
+  context: string | null
+  /** The user's own words. Absent on the tray demo, present on a real plan. */
+  goal?: string | null
+  /** Named in the title, so it is obvious whose window is being driven. */
+  app?: string | null
+  /** The step budget, printed beside the app. `null` on a plan with no loop. */
+  limit?: number | null
+  /**
+   * One clause under the actions, in the place `CardCommit.warning` occupies on
+   * a diff card — and saying the opposite thing, because here the reassurance
+   * is what is true: nothing is written and nothing is sent.
+   */
+  note?: string | null
+  /**
+   * Run starts a loop that reports back onto this card, rather than answering
+   * it and dismissing it.
+   *
+   * Read by `HudController` at the instant Run is delivered — which is why it
+   * cannot be `running` below: at that instant nothing is running yet. The two
+   * are a pair. This one is the card's promise, made before the press; that one
+   * is the loop's own report, made after it.
+   *
+   * Closing a card that is about to become a transcript is what made every
+   * later `updateCard` a silent no-op and handed esc back to the app being
+   * driven — so the live step list never appeared and Stop could not be
+   * pressed. Absent on the tray's demo plan, which runs nothing and must close
+   * like any other card.
+   */
+  startsRun?: boolean
+  /** True once the loop is running; Run becomes unavailable and esc stops it. */
+  running?: boolean
+  /**
+   * What was found — the point of the whole expedition.
+   *
+   * Arrives last and streams in like a diff card's text, because it is written
+   * by the same kind of turn. Without it a plan could only report what it *did*
+   * ("51 blocks · 6023 chars"), which is a receipt for work rather than an
+   * answer to a question, and made a working navigation indistinguishable from
+   * a broken one.
+   *
+   * It is never inserted anywhere. There is no Apply on a plan card; the user
+   * reads this and dismisses it.
+   */
+  answer?: string | null
+}
+
+/**
+ * Send what is already in the box — the one card that proposes no new text.
+ *
+ * "Send the message", said over a composer the user has already filled. There
+ * is nothing to preview in the usual sense, so what the card shows is *the
+ * thing that is about to go*: Mull reads the composer and prints it back. That
+ * read is the whole safety story here. Every other card can say "here is what I
+ * would write"; this one can only say "here is what you wrote, and this key
+ * sends it".
+ *
+ * It has no Apply. There is nothing to apply, and ⏎ therefore does nothing on
+ * this card — which is also why it must stay claimed: Mull holds Return
+ * globally while a card is open, and letting it through to Slack would send the
+ * message the card is still asking about.
+ */
+export interface SendCard {
+  kind: 'send'
+  app: string | null
+  /** The composer's current contents, read just now. Never rewritten. */
+  text: string
+  commit: CardCommit
+}
+
+/**
+ * An answer — the card that proposes nothing.
+ *
+ * "Summarize the tasks I need to finish" is not a request for text; it is a
+ * request to know something. Mull used to route it to the composer, which
+ * produced a draft, a diff full of insertion marks, and an **Apply** button
+ * offering to write the summary into the note the user was reading. Pressing
+ * ⏎ out of habit — which is what ⏎ has always meant on a card — would paste
+ * it into their document.
+ *
+ * So the distinction the card makes visible is the one the request already
+ * contained: *do you want this written, or do you want to know it?* A compose
+ * ends in a diff card with Apply. A question ends here, with neither.
+ *
+ * Nothing on this card can write anywhere. There is no `commit`, no target and
+ * no text to insert — which is why ⏎ is free to mean "done" rather than having
+ * to be held inert the way it is on a `SendCard`.
+ */
+export interface AnswerCard {
+  kind: 'answer'
+  /** Whose window this was read from. Named in the title. */
+  app: string | null
+  /** The answer, arriving a sentence at a time. */
+  text: string
+}
+
+export type HudCard = DiffCard | PlanCard | SendCard | AnswerCard
+
+/**
+ * What the user's ⏎ / ⌘⏎ / esc do while a card is open.
+ *
+ * `apply-send` is offered only when the card carries a `commit`, and it is
+ * always a separate keystroke from `apply` — never a mode, never a default.
+ * Someone who presses ⏎ out of habit has applied an edit, which is what ⏎ has
+ * always done here; they have not sent a message.
+ */
+export type HudAction = 'apply' | 'apply-send' | 'cancel'
+
+/**
+ * Will pressing a key on this card make anything happen?
+ *
+ * The one question a user has before touching the keyboard, and until now the
+ * answer was spread across four card types with four different action
+ * grammars: the button in the first position was sometimes the thing that
+ * writes (Apply), sometimes the thing that starts a process (Run), sometimes
+ * the thing that closes (Done), and sometimes absent. ⏎ therefore meant four
+ * things, which is exactly how an **Apply** ended up under a summary of
+ * somebody's own notes, one reflexive Return from pasting it back in.
+ *
+ * So it is derived here, from the card itself, and both halves of the app read
+ * it: `services/hud.ts` decides what ⏎ does, `components/Cards.tsx` decides
+ * what the card is made of. A lane cannot set it, and a new card kind cannot
+ * forget to — the switch below stops compiling instead.
+ *
+ *   `will`  something can still happen. Fresh paper (`--paper-bright`), the
+ *           one filled button in the app, and a promise naming the cost.
+ *   `wont`  nothing more will. Pressed into the desk (`--paper-recessed`),
+ *           no filled button anywhere, and ⏎ means done.
+ *
+ * A plan crosses from one to the other: a proposal while it waits for Run and
+ * while it walks, a report the moment the walk is over. That transition is
+ * visible, and it is the same moment the card stops offering to run again.
+ */
+export type CardFamily = 'will' | 'wont'
+
+export function cardFamily(card: HudCard): CardFamily {
+  switch (card.kind) {
+    case 'diff':
+    case 'send':
+      return 'will'
+    case 'answer':
+      return 'wont'
+    case 'plan':
+      // Still running: something is happening. Never run at all: Run is still
+      // on offer. Anything else means it has been and come back.
+      if (card.running) return 'will'
+      return card.steps.length > 0 || card.answer ? 'wont' : 'will'
+  }
+}

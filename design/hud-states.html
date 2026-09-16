@@ -1,0 +1,1358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Mull HUD — every state</title>
+<style>
+/* ============================================================================
+   Tokens — copied verbatim from src/renderer/tokens.css so this board is
+   standalone and can be opened from disk. If they drift, tokens.css wins.
+   ========================================================================== */
+:root {
+  color-scheme: light;
+  --paper:#faf7ef; --paper-bright:#fffdf6; --paper-recessed:#f1ecdf;
+  --ink:#2b2418; --ink-2:#5b523f; --ink-3:#766c55;
+  --hairline:rgba(43,36,24,.18); --hairline-soft:rgba(43,36,24,.10);
+  --selection:rgba(39,79,142,.20);
+  --del:#b23a2e; --del-wash:rgba(178,58,46,.10); --del-line:rgba(178,58,46,.72);
+  --ins:#274f8e; --ins-wash:rgba(39,79,142,.09); --ins-line:rgba(39,79,142,.42);
+  --warn:#9a6410; --warn-wash:rgba(154,100,16,.11); --warn-edge:rgba(154,100,16,.42);
+  --mem:#4f6b33; --mem-wash:rgba(79,107,51,.10); --mem-edge:rgba(79,107,51,.42);
+  --orb-ping:rgba(43,36,24,.32);
+  --on-ink:#fffdf6; --on-ins:#fffdf6; --ins-hover:#1f4177;
+  --serif:ui-serif,"New York","Iowan Old Style",Palatino,Charter,Georgia,serif;
+  --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --fs-transcript:13px; --fs-diff:12px; --fs-chip:11px; --fs-journal:12px;
+  --fs-label:11px; --fs-kbd:11px; --fs-body:13.5px; --fs-title:21px;
+  --track-label:.10em; --lh-transcript:1.45; --lh-diff:1.7; --lh-body:1.55;
+  --r-panel:10px; --r-inner:7px; --r-chip:5px; --r-kbd:3px;
+  --hud-w:480px; --hud-pad:13px 15px 12px; --diff-max-h:150px;
+  --shadow-hud:0 0 0 .5px rgba(43,36,24,.38),0 18px 44px rgba(35,26,12,.32),0 4px 12px rgba(35,26,12,.16);
+  --shadow-row:0 2px 8px rgba(35,26,12,.07);
+  --t-fast:140ms; --t-med:220ms; --ease-out:cubic-bezier(.22,.7,.3,1);
+  --pulse-period:1.6s; --wave-period:.95s;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark;
+  --paper:#211c13; --paper-bright:#2a2418; --paper-recessed:#1a1610;
+  --ink:#ece5d3; --ink-2:#bfb397; --ink-3:#96896c;
+  --hairline:rgba(236,229,211,.20); --hairline-soft:rgba(236,229,211,.11);
+  --selection:rgba(143,176,232,.28);
+  --del:#e0796b; --del-wash:rgba(224,121,107,.13); --del-line:rgba(224,121,107,.72);
+  --ins:#8fb0e8; --ins-wash:rgba(143,176,232,.12); --ins-line:rgba(143,176,232,.48);
+  --warn:#d2a04f; --warn-wash:rgba(210,160,79,.13); --warn-edge:rgba(210,160,79,.45);
+  --mem:#a3bf7d; --mem-wash:rgba(163,191,125,.12); --mem-edge:rgba(163,191,125,.45);
+  --orb-ping:rgba(236,229,211,.34);
+  --on-ink:#211c13; --on-ins:#211c13; --ins-hover:#a3bfef;
+  --shadow-hud:0 0 0 .5px rgba(0,0,0,.6),0 20px 50px rgba(0,0,0,.55),0 4px 14px rgba(0,0,0,.4);
+  --shadow-row:0 2px 8px rgba(0,0,0,.3);
+} }
+:root[data-theme="dark"] { color-scheme: dark;
+  --paper:#211c13; --paper-bright:#2a2418; --paper-recessed:#1a1610;
+  --ink:#ece5d3; --ink-2:#bfb397; --ink-3:#96896c;
+  --hairline:rgba(236,229,211,.20); --hairline-soft:rgba(236,229,211,.11);
+  --selection:rgba(143,176,232,.28);
+  --del:#e0796b; --del-wash:rgba(224,121,107,.13); --del-line:rgba(224,121,107,.72);
+  --ins:#8fb0e8; --ins-wash:rgba(143,176,232,.12); --ins-line:rgba(143,176,232,.48);
+  --warn:#d2a04f; --warn-wash:rgba(210,160,79,.13); --warn-edge:rgba(210,160,79,.45);
+  --mem:#a3bf7d; --mem-wash:rgba(163,191,125,.12); --mem-edge:rgba(163,191,125,.45);
+  --orb-ping:rgba(236,229,211,.34);
+  --on-ink:#211c13; --on-ins:#211c13; --ins-hover:#a3bfef;
+  --shadow-hud:0 0 0 .5px rgba(0,0,0,.6),0 20px 50px rgba(0,0,0,.55),0 4px 14px rgba(0,0,0,.4);
+  --shadow-row:0 2px 8px rgba(0,0,0,.3);
+}
+
+/* ============================================================================
+   Page chrome — the board itself, in the same design system.
+   ========================================================================== */
+*, *::before, *::after { box-sizing: border-box; }
+::selection { background: var(--selection); }
+html { -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
+body {
+  margin: 0;
+  background: var(--paper-recessed);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+}
+:focus-visible { outline: 2px solid var(--ins); outline-offset: 2px; border-radius: 3px; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--hairline); border-radius: 5px; border: 3px solid var(--paper-recessed); }
+::-webkit-scrollbar-track { background: transparent; }
+
+.wrap { max-width: 1280px; margin: 0 auto; padding: 0 32px 140px; }
+
+/* — masthead ————————————————————————————————————————————————————————— */
+.masthead { padding: 96px 0 0; }
+.masthead h1 {
+  font-family: var(--serif); font-weight: 600;
+  font-size: clamp(34px, 5.2vw, 56px); line-height: 1.06;
+  letter-spacing: -.022em; margin: 0; max-width: 16ch; text-wrap: balance;
+}
+.lede {
+  margin: 22px 0 0; max-width: 62ch;
+  font-size: 16px; line-height: 1.62; color: var(--ink-2);
+}
+.lede strong { color: var(--ink); font-weight: 600; }
+.masthead-meta {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px;
+  margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--hairline);
+  font-family: var(--mono); font-size: var(--fs-kbd); color: var(--ink-3);
+}
+.masthead-meta span { display: inline-flex; align-items: center; gap: 7px; }
+
+.themeswitch {
+  margin-left: auto; display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--paper); border: 1px solid var(--hairline); border-radius: var(--r-chip);
+}
+.themeswitch button {
+  appearance: none; border: 0; background: none; cursor: pointer;
+  font-family: var(--sans); font-size: var(--fs-chip); font-weight: 600;
+  letter-spacing: .01em; color: var(--ink-3); padding: 4px 11px; border-radius: 3px;
+  transition: background var(--t-fast) var(--ease-out), color var(--t-fast) var(--ease-out);
+}
+.themeswitch button[aria-pressed="true"] { background: var(--ink); color: var(--on-ink); }
+
+/* — sections ————————————————————————————————————————————————————————— */
+section { margin-top: 104px; scroll-margin-top: 28px; }
+section > h2 {
+  font-family: var(--serif); font-weight: 600;
+  font-size: clamp(25px, 3vw, 33px); line-height: 1.16; letter-spacing: -.016em;
+  margin: 0 0 16px; max-width: 22ch; text-wrap: balance;
+}
+section > .say { margin: 0 0 40px; max-width: 66ch; color: var(--ink-2); }
+section > .say + .say { margin-top: -26px; }
+.say strong { color: var(--ink); font-weight: 600; }
+.say code, .inline {
+  font-family: var(--mono); font-size: .88em;
+  background: var(--paper); border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-kbd); padding: .5px 5px; color: var(--ink);
+}
+
+/* — specimen ————————————————————————————————————————————————————————— */
+.specs { display: grid; gap: 34px; }
+.specs.two { grid-template-columns: repeat(auto-fit, minmax(540px, 1fr)); }
+.spec { min-width: 0; }
+.spec-head { display: flex; align-items: baseline; gap: 12px; margin-bottom: 13px; }
+.spec-name {
+  font-family: var(--mono); font-size: var(--fs-kbd); font-weight: 500;
+  letter-spacing: .04em; text-transform: uppercase; color: var(--ink-3);
+  white-space: nowrap;
+}
+.spec-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.spec-note b { color: var(--ink); font-weight: 600; }
+.stage {
+  background: var(--paper-recessed);
+  border: 1px solid var(--hairline-soft);
+  border-radius: var(--r-panel);
+  padding: 30px 26px;
+  display: flex; justify-content: center;
+  overflow-x: auto;
+}
+.stage.tall { padding: 44px 26px; }
+
+/* — rule block ——————————————————————————————————————————————————————— */
+.rules { display: grid; gap: 1px; background: var(--hairline-soft); border: 1px solid var(--hairline); border-radius: var(--r-inner); overflow: hidden; }
+.rule { background: var(--paper); padding: 20px 22px; display: grid; grid-template-columns: 132px 1fr; gap: 20px; align-items: start; }
+.rule-k { font-family: var(--sans); font-size: var(--fs-label); font-weight: 700; letter-spacing: var(--track-label); text-transform: uppercase; padding-top: 2px; }
+.rule-k.marks { color: var(--ins); }
+.rule-k.acts  { color: var(--ins); }
+.rule-k.reads { color: var(--ink-3); }
+.rule-v { font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+.rule-v b { color: var(--ink); font-weight: 600; }
+.rule-v em { font-style: normal; font-family: var(--mono); font-size: 11.5px; color: var(--ink-3); }
+
+/* — table ———————————————————————————————————————————————————————————— */
+table.vocab { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.vocab th {
+  text-align: left; font-family: var(--sans); font-size: var(--fs-label); font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-3);
+  padding: 0 16px 10px 0; border-bottom: 1px solid var(--hairline);
+}
+table.vocab td { padding: 11px 16px 11px 0; border-bottom: 1px solid var(--hairline-soft); color: var(--ink-2); vertical-align: top; }
+table.vocab td:first-child { font-family: var(--sans); font-size: var(--fs-label); font-weight: 700; letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink); white-space: nowrap; }
+table.vocab td.gone { color: var(--ink-3); text-decoration: line-through; text-decoration-color: var(--del-line); }
+table.vocab td.new::after { content: "new"; font-family: var(--mono); font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ins); margin-left: 8px; }
+
+/* — change list —————————————————————————————————————————————————————— */
+ol.changes { list-style: none; counter-reset: c; margin: 0; padding: 0; display: grid; gap: 1px; background: var(--hairline-soft); border: 1px solid var(--hairline); border-radius: var(--r-inner); overflow: hidden; }
+ol.changes li { counter-increment: c; background: var(--paper); padding: 18px 22px 18px 58px; position: relative; font-size: 13px; line-height: 1.6; color: var(--ink-2); }
+ol.changes li::before { content: counter(c); position: absolute; left: 22px; top: 18px; font-family: var(--mono); font-size: 11px; color: var(--ink-3); }
+ol.changes b { color: var(--ink); font-weight: 600; }
+ol.changes .where { font-family: var(--mono); font-size: 11px; color: var(--ink-3); display: block; margin-top: 5px; }
+
+/* ============================================================================
+   The HUD itself — ported from src/renderer/hud.css. Structure and values are
+   the shipped ones; the proposals in this board are marked in the notes.
+   ========================================================================== */
+.hud {
+  width: var(--hud-w); max-width: 100%;
+  background: var(--paper); border-radius: var(--r-panel);
+  box-shadow: var(--shadow-hud); padding: var(--hud-pad); color: var(--ink);
+  font-family: var(--sans);
+}
+.hud-top { display: flex; align-items: center; gap: 11px; min-height: 24px; }
+
+.orb { width: 13px; height: 13px; border-radius: 50%; flex: none; background: var(--ink); }
+.is-idle .orb { background: transparent; box-shadow: inset 0 0 0 1.5px var(--ink-3); }
+.is-listening .orb { animation: orb-pulse var(--pulse-period) var(--ease-out) infinite; }
+@keyframes orb-pulse {
+  0% { box-shadow: 0 0 0 0 var(--orb-ping); }
+  70% { box-shadow: 0 0 0 9px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.wave { display: flex; align-items: center; gap: 2.5px; height: 20px; flex: none; }
+.wave i { width: 2px; height: var(--h, 4px); border-radius: 1px; background: var(--ink-3); display: block; transform-origin: center; }
+.is-listening .wave i { background: var(--ink-2); animation: wave-tick var(--wave-period) ease-in-out infinite; animation-delay: var(--d, 0ms); }
+@keyframes wave-tick { 0%,100% { transform: scaleY(1); } 50% { transform: scaleY(var(--amp,3)); } }
+
+.transcript {
+  flex: 1; min-width: 0;
+  font-family: var(--serif); font-size: var(--fs-transcript);
+  line-height: var(--lh-transcript); color: var(--ink);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+.transcript .ghost { color: var(--ink-3); font-style: italic; }
+.caret { display: inline-block; width: 1.5px; height: 1em; background: var(--ins); vertical-align: text-bottom; margin-left: 1px; animation: caret-blink 1s steps(1) infinite; }
+@keyframes caret-blink { 50% { opacity: 0; } }
+
+.state-label {
+  flex: none; font-size: var(--fs-label); font-weight: 700;
+  letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-3);
+  white-space: nowrap;
+}
+.is-listening .state-label, .is-preview .state-label { color: var(--ink); }
+.is-blocked .state-label { color: var(--warn); }
+.is-error .state-label { color: var(--del); }
+.is-applied .state-label { color: var(--mem); }
+.state-elapsed { font-weight: 500; letter-spacing: 0; text-transform: none; font-variant-numeric: tabular-nums; opacity: .75; }
+
+.stageline { display: flex; align-items: center; gap: 7px; margin-top: 7px; padding-left: 2px; font-size: var(--fs-chip); color: var(--ink-3); }
+.stage-pulse { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--ins); animation: stage-pulse 1.6s ease-in-out infinite; }
+@keyframes stage-pulse { 0%,100% { opacity: .25; transform: scale(.8); } 50% { opacity: 1; transform: scale(1); } }
+
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: var(--fs-chip); font-weight: 600; letter-spacing: .01em;
+  border-radius: var(--r-chip); padding: 3px 9px;
+  border: 1px solid var(--hairline); background: var(--paper-bright); color: var(--ink-2);
+  animation: rise-in var(--t-med) var(--ease-out) both;
+}
+.chip .g { font-size: 10px; opacity: .85; }
+.chip .k { font-family: var(--mono); font-size: var(--fs-kbd); font-weight: 500; opacity: .7; }
+.chip.intent { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
+.chip.cmd { background: var(--paper-bright); border-color: var(--hairline); color: var(--ink); }
+.chip.mem { background: var(--mem-wash); border-color: var(--mem-edge); color: var(--mem); }
+.chip.warn { background: var(--warn-wash); border-color: var(--warn-edge); color: var(--warn); }
+@keyframes rise-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* — the card ————————————————————————————————————————————————————————— */
+.card {
+  margin-top: 11px; border-radius: var(--r-inner);
+  border: 1px solid var(--hairline); padding: 10px 12px 11px;
+  animation: rise-in var(--t-med) var(--ease-out) both;
+}
+/* PROPOSED: the card's ground is the promise. Fresh page = a key changes
+   something. Pressed into the desk = nothing changes, ever. */
+.card.will  { background: var(--paper-bright); }
+.card.wont  { background: var(--paper-recessed); border-color: var(--hairline-soft); }
+
+.card-title {
+  display: flex; align-items: baseline; gap: 12px;
+  font-size: var(--fs-label); font-weight: 700; letter-spacing: var(--track-label);
+  text-transform: uppercase; color: var(--ink-3); margin-bottom: 9px;
+}
+.card-title .count { margin-left: auto; font-weight: 500; letter-spacing: .04em; font-variant-numeric: tabular-nums; }
+
+.card-body {
+  font-family: var(--mono); font-size: var(--fs-diff); line-height: var(--lh-diff);
+  color: var(--ink-2); max-height: var(--diff-max-h); overflow-y: auto;
+  white-space: pre-wrap; margin-bottom: 11px;
+}
+.card-body del { color: var(--del); background: var(--del-wash); text-decoration: line-through; text-decoration-color: var(--del-line); text-decoration-thickness: 1.5px; border-radius: 2px; padding: 0 1px; }
+.card-body ins { color: var(--ins); font-weight: 600; background: var(--ins-wash); text-decoration: none; border-bottom: 1px solid var(--ins-line); border-radius: 2px 2px 0 0; padding: 0 1px; }
+.card-body.is-quote { color: var(--ink-2); }
+.card > *:last-child { margin-bottom: 0; }
+/* PROPOSED: an answer is the human reading something back, so it is serif —
+   DESIGN.md §1 casts serif for exactly that. It ships as sans today. */
+.card-body.is-answer {
+  font-family: var(--serif); font-size: var(--fs-transcript);
+  line-height: 1.58; color: var(--ink); max-height: 168px;
+}
+
+.plan-goal { display: flex; align-items: baseline; gap: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--hairline-soft); margin-bottom: 8px; font-family: var(--mono); font-size: var(--fs-diff); }
+.plan-goal .n { color: var(--ink-3); }
+.plan-goal .what { flex: 1; min-width: 0; color: var(--ink); }
+.plan-step { display: flex; align-items: baseline; gap: 8px; font-family: var(--mono); font-size: var(--fs-diff); line-height: var(--lh-diff); color: var(--ink-2); }
+.plan-step .n { color: var(--ink-3); }
+.plan-step .what { flex: 1; min-width: 0; }
+.plan-step .st { min-width: 18px; text-align: right; color: var(--ink-3); }
+.plan-step.running .what { color: var(--ink); }
+.plan-step.running .st { color: var(--ins); }
+.plan-step.done .st { color: var(--mem); }
+.plan-step.failed .st { color: var(--del); }
+.plan-step.failed .what { color: var(--del); }
+.plan-answer { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--hairline-soft); font-family: var(--serif); font-size: var(--fs-transcript); line-height: 1.58; color: var(--ink); }
+
+/* — actions: PROPOSED two-line block ———————————————————————————————————
+   The consequence sits under the button it describes instead of 300px away
+   at the right margin. That distance is how an Apply ended up on an answer. */
+.card-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  border-radius: var(--r-chip); padding: 5px 13px;
+  font-family: var(--sans); font-size: 12px; font-weight: 650;
+  border: 1px solid transparent; cursor: pointer;
+  transition: background var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-out);
+}
+.btn:active { transform: translateY(1px); }
+.btn.primary { background: var(--ins); color: var(--on-ins); }
+.btn.primary:hover { background: var(--ins-hover); }
+.btn.ghost { background: transparent; color: var(--ink-2); border-color: var(--hairline); }
+.btn.ghost:hover { background: var(--paper-recessed); }
+.btn.send { background: var(--warn-wash); color: var(--warn); border-color: var(--warn-edge); }
+.btn .k { font-family: var(--mono); font-size: var(--fs-kbd); font-weight: 500; opacity: .75; }
+.promise { margin-top: 7px; font-size: var(--fs-chip); color: var(--ink-3); display: flex; align-items: center; gap: 6px; }
+.promise.warnish { color: var(--warn); }
+kbd { font-family: var(--mono); font-size: var(--fs-kbd); background: var(--paper-recessed); border: 1px solid var(--hairline); border-radius: var(--r-kbd); padding: .5px 4px; }
+
+/* — last action ghost ——————————————————————————————————————————————— */
+.lastaction { margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--hairline-soft); display: flex; align-items: baseline; gap: 10px; font-size: var(--fs-chip); color: var(--ink-3); }
+.lastaction .sum { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lastaction .result { display: block; margin-top: 5px; font-family: var(--serif); font-size: 12px; line-height: 1.5; color: var(--ink-2); white-space: normal; }
+.lastaction .undo { flex: none; display: inline-flex; align-items: center; gap: 5px; }
+
+/* — notice ——————————————————————————————————————————————————————————— */
+.notice { margin-top: 9px; font-size: var(--fs-chip); color: var(--warn); }
+.is-error .notice { color: var(--del); }
+
+/* — thinking toggle ————————————————————————————————————————————————— */
+.think { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-chip); color: var(--ink-3); }
+.think .dot { width: 6px; height: 6px; border-radius: 50%; border: 1px solid var(--ink-3); }
+.think.on { color: var(--ins); }
+.think.on .dot { background: var(--ins); border-color: var(--ins); }
+
+/* — the pet, drawn rather than sprited (the sheet is a binary asset) ——— */
+.pet-stub { width: 60px; height: 65px; display: flex; align-items: flex-end; justify-content: center; }
+.pet-stub svg { display: block; }
+.grip { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+  .wave i { transform: scaleY(2); }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+<style>
+/* The pet (§6.1a), driven from the real sheet: 8×9 cells of 192×208, scaled
+   5/16 → 60×65 per frame, 480×585 for the sheet. Row = mood, column = frame. */
+.pet { position: relative; width: 60px; height: 65px; flex: none; }
+.pet i {
+  position: absolute; inset: 0;
+  background-image: url("../src/renderer/assets/marmalade.webp");
+  background-repeat: no-repeat; background-size: 480px 585px;
+}
+.pet-shadow { position: absolute; left: 50%; bottom: 1px; width: 34px; height: 7px; transform: translateX(-50%); border-radius: 50%; background: var(--ink); opacity: .16; filter: blur(2px); }
+@keyframes pet6 { to { background-position-x: -360px; } }
+@keyframes pet4 { to { background-position-x: -240px; } }
+@keyframes pet5 { to { background-position-x: -300px; } }
+@keyframes pet-trouble { from { background-position-x: -240px; } to { background-position-x: -480px; } }
+.pet.rest      i { background-position: 0 0;     animation: pet6 2.4s steps(6) infinite; }
+.pet.listening i { background-position: 0 -195px; animation: pet4 .72s steps(4) infinite; }
+.pet.working   i { background-position: 0 -520px; animation: pet6 1.5s steps(6) infinite; }
+.pet.waiting   i { background-position: 0 -390px; animation: pet6 2.2s steps(6) infinite; }
+@keyframes pet-leap { from { background-position-x: 0; } to { background-position-x: -240px; } }
+.pet.done      i { background-position-y: -260px; animation: pet-leap .6s steps(5, jump-none) 1 forwards; }
+.pet.trouble   i { background-position: -240px -325px; animation: pet-trouble 2.4s steps(4) infinite; }
+.pet.asleep    i { background-position: -60px -390px; }
+@media (prefers-reduced-motion: reduce) { .pet i { animation: none !important; } }
+</style>
+
+<header class="masthead">
+  <h1>Every state the panel can be in</h1>
+  <p class="lede">
+    Mull now does three different things to your Mac, and the panel has been
+    reporting all three the same way. <strong>This board gives each of them a
+    material</strong> — so before reading a single word you already know whether
+    the key you are about to press changes your document, moves somebody else's
+    window, or does nothing at all.
+  </p>
+  <div class="masthead-meta">
+    <span>design/hud-states.html</span>
+    <span>tokens: Studio Paper</span>
+    <span>spec: docs/DESIGN.md §6.1–6.4</span>
+    <div class="themeswitch" role="group" aria-label="Appearance">
+      <button type="button" data-theme-set="light" aria-pressed="false">Paper</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">Lamplit</button>
+    </div>
+  </div>
+</header>
+
+<section id="families">
+  <h2>Three things Mull does, and the card says which</h2>
+  <p class="say">
+    The panel grew one label at a time and ended up with ten of them in a single
+    slot — four activities, three card kinds, two faults and an outcome, all in
+    the same 11px tracked grey. Nothing in the <em>form</em> of the word told you
+    which kind you were reading.
+  </p>
+  <p class="say">
+    Underneath that vocabulary the product actually does three things, and they
+    differ in exactly the way a user cares about: <strong>what it costs to press
+    the key.</strong> So the ground under the card carries it, and the words are
+    free to say something else.
+  </p>
+  <div class="rules">
+    <div class="rule">
+      <div class="rule-k marks">Marks</div>
+      <div class="rule-v">
+        <b>Mull writes into your document.</b> Dictation, an edit, a draft, a send.
+        The card sits on fresh paper — <em>--paper-bright</em> — carries the one
+        filled button in the app, and promises the undo in the same breath.
+      </div>
+    </div>
+    <div class="rule">
+      <div class="rule-k acts">Acts</div>
+      <div class="rule-v">
+        <b>Mull presses things in another app.</b> A navigation plan, before you
+        press Run. Fresh paper too, because something <i>will</i> happen — but the
+        promise is different, and it is the true one: nothing is written or sent.
+      </div>
+    </div>
+    <div class="rule">
+      <div class="rule-k reads">Reads</div>
+      <div class="rule-v">
+        <b>Mull tells you something.</b> An answer, or a finished plan. The card
+        is pressed into the desk — <em>--paper-recessed</em> — and there is no
+        filled button anywhere on it, because a filled button is this app's word
+        for <i>this commits</i>.
+      </div>
+    </div>
+  </div>
+  <p class="say" style="margin-top:34px">
+    One rule to learn, and it is visible from across the room:
+    <strong>fresh paper means a key changes something. A pressed-in well means
+    nothing will.</strong> The Apply button that turned up under a summary of
+    somebody's own notes could not have survived this — an answer has no fresh
+    paper to put it on.
+  </p>
+</section>
+
+<style>
+.flow { border: 1px solid var(--hairline); border-radius: var(--r-inner); overflow: hidden; background: var(--paper); }
+.flow-head, .flow-row { display: grid; grid-template-columns: 116px 150px 128px 1fr 92px; gap: 0; align-items: center; }
+.flow-head { padding: 13px 22px; border-bottom: 1px solid var(--hairline); font-size: var(--fs-label); font-weight: 700; letter-spacing: var(--track-label); text-transform: uppercase; color: var(--ink-3); }
+.flow-row { padding: 15px 22px; border-bottom: 1px solid var(--hairline-soft); font-size: 13px; color: var(--ink-2); }
+.flow-row:last-child { border-bottom: 0; }
+.flow-row .key { font-family: var(--mono); font-size: 12px; color: var(--ink); }
+.flow-row .route { font-family: var(--mono); font-size: 12px; color: var(--ins); }
+.flow-row .lands b { color: var(--ink); font-weight: 600; }
+.flow-row .lands .k { font-family: var(--mono); font-size: 11px; color: var(--ink-3); margin-left: 7px; }
+.fam { justify-self: end; font-size: var(--fs-label); font-weight: 700; letter-spacing: var(--track-label); text-transform: uppercase; padding: 2px 8px; border-radius: var(--r-kbd); }
+.fam.marks { color: var(--ins); background: var(--ins-wash); }
+.fam.acts  { color: var(--ins); background: transparent; box-shadow: inset 0 0 0 1px var(--ins-line); }
+.fam.reads { color: var(--ink-3); background: transparent; box-shadow: inset 0 0 0 1px var(--hairline); }
+.flow-row.sub .key, .flow-row.sub .heard { color: var(--ink-3); opacity: .55; }
+@media (max-width: 760px) {
+  .flow-head { display: none; }
+  .flow-row { grid-template-columns: 1fr; gap: 6px; padding: 16px 18px; }
+  .fam { justify-self: start; }
+}
+</style>
+
+<section id="flow">
+  <h2>What a held key turns into</h2>
+  <p class="say">
+    Two keys, six routes, three endings. The right-hand column is the whole
+    design: it is the only thing the user has to predict, and until now the panel
+    made them find out by pressing.
+  </p>
+  <div class="flow">
+    <div class="flow-head">
+      <div>Hold</div><div>Heard</div><div>Routed</div><div>Lands in</div><div></div>
+    </div>
+    <div class="flow-row">
+      <div class="key">⌥Space</div>
+      <div class="heard">your words</div>
+      <div class="route">dictate</div>
+      <div class="lands"><b>Text at the caret.</b> No engine, no card, no wait.</div>
+      <div><span class="fam marks">Mark</span></div>
+    </div>
+    <div class="flow-row">
+      <div class="key">Fn</div>
+      <div class="heard">words + the window</div>
+      <div class="route">edit</div>
+      <div class="lands"><b>Diff card.</b> Red pencil out, ink in.<span class="k">⏎ Apply</span></div>
+      <div><span class="fam marks">Mark</span></div>
+    </div>
+    <div class="flow-row sub">
+      <div class="key">Fn</div>
+      <div class="heard">words + the window</div>
+      <div class="route">compose</div>
+      <div class="lands"><b>Diff card, all insertion.</b> A reply drawn from the thread.<span class="k">⏎ Apply</span></div>
+      <div><span class="fam marks">Mark</span></div>
+    </div>
+    <div class="flow-row sub">
+      <div class="key">Fn</div>
+      <div class="heard">words + the window</div>
+      <div class="route">send</div>
+      <div class="lands"><b>Send card.</b> Your own text, read back before it goes.<span class="k">⌘⏎ Send</span></div>
+      <div><span class="fam marks">Mark</span></div>
+    </div>
+    <div class="flow-row sub">
+      <div class="key">Fn</div>
+      <div class="heard">words + the window</div>
+      <div class="route">ask</div>
+      <div class="lands"><b>Answer card.</b> Read it and dismiss it.<span class="k">esc</span></div>
+      <div><span class="fam reads">Read</span></div>
+    </div>
+    <div class="flow-row sub">
+      <div class="key">Fn</div>
+      <div class="heard">words + the window</div>
+      <div class="route">navigate</div>
+      <div class="lands"><b>Plan card</b> → it walks → <b>the answer</b>, and the window goes back.<span class="k">⏎ Run</span></div>
+      <div><span class="fam acts">Act</span></div>
+    </div>
+  </div>
+</section>
+
+<section id="rest">
+  <h2>At rest</h2>
+  <p class="say">
+    Almost all of Mull's life is this. The panel folds away and leaves a cat on
+    the desk; everything else grows upward from it, so the one fixed point on
+    screen never moves.
+  </p>
+  <div class="specs two">
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Folded</div>
+        <div class="spec-note">The default. 60×65 pixels of window, click-through everywhere else. The cat is the drag handle and the only thing always on screen.</div>
+      </div>
+      <div class="stage tall">
+        <div class="grip">
+          <div class="pet rest"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Asleep</div>
+        <div class="spec-note">Untouched for 90 seconds. A held frame, not a loop — stillness is the point.</div>
+      </div>
+      <div class="stage tall">
+        <div class="grip">
+          <div class="pet asleep"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Idle · first run</div>
+        <div class="spec-note">The hint names <b>both</b> keys. A key nobody knows about is a feature that does not exist.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-idle">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript"><span class="ghost">Hold ⌥Space to dictate · Fn to ask</span></div>
+              <div class="state-label">Idle</div>
+            </div>
+          </div>
+          <div class="pet rest"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Idle · after a mark</div>
+        <div class="spec-note">The ghost row holds for four seconds past <span class="inline">applied</span>, or the <kbd>⌥Z</kbd> offer would appear and vanish inside a second and a half.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-idle">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript"><span class="ghost">Hold ⌥Space to dictate · Fn to ask</span></div>
+              <div class="state-label">Idle</div>
+            </div>
+            <div class="lastaction">
+              <div class="sum">Edit · Mail · “make this less apologetic”</div>
+              <div class="undo"><kbd>⌥Z</kbd> undo</div>
+            </div>
+          </div>
+          <div class="pet rest"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Idle · after a read</div>
+        <div class="spec-note">A read produced no text to undo, so the row carries <b>the answer</b> instead. Without it the panel replayed your question back at you and the answer went nowhere.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-idle">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript"><span class="ghost">Hold ⌥Space to dictate · Fn to ask</span></div>
+              <div class="state-label">Idle</div>
+            </div>
+            <div class="lastaction">
+              <div class="sum">Answered · Notes · “summarize all my tasks”
+                <span class="result">Three left: the ACT agent (later), the rag→mcp conversion, and wiring real config.</span>
+              </div>
+            </div>
+          </div>
+          <div class="pet rest"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Idle · thinking armed</div>
+        <div class="spec-note">The quietest control in the app while it is off, and deliberately visible while it is on — nobody should leave it armed and wonder why everything got slow.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-idle">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript"><span class="ghost">Hold ⌥Space to dictate · Fn to ask</span></div>
+              <div class="think on"><span class="dot"></span>thinking</div>
+              <div class="state-label">Idle</div>
+            </div>
+          </div>
+          <div class="pet rest"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="working">
+  <h2>While it works</h2>
+  <p class="say">
+    The panel used to say <span class="inline">THINKING</span> and nothing else
+    for as long as twenty seconds, which is indistinguishable from a hang — and
+    was reported as one. Two fixes, both here: the label names the
+    <strong>activity</strong>, and the line under it names the <strong>step</strong>
+    and starts counting once there is genuinely something to wait for.
+  </p>
+  <p class="say">
+    <strong>One proposal in this section:</strong> <span class="inline">INSERTING</span>
+    becomes <span class="inline">WRITING</span>, and <span class="inline">READING</span>
+    joins the set. <i>Inserting</i> is the implementation's word for it; the
+    product's own metaphor is an editor with a pencil, and a pencil writes.
+  </p>
+  <div class="specs two">
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Listening · ⌥Space</div>
+        <div class="spec-note">Dictation raises no chip. It is the default and needs no announcement — and nothing about it leaves the Mac.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-listening">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px;--d:0ms;--amp:2.6"></i><i style="--h:7px;--d:90ms;--amp:1.9"></i><i style="--h:5px;--d:180ms;--amp:3.1"></i><i style="--h:9px;--d:70ms;--amp:1.6"></i><i style="--h:6px;--d:220ms;--amp:2.4"></i><i style="--h:4px;--d:140ms;--amp:3"></i></div>
+              <div class="transcript">and I’ll have the deck over to you by five<span class="caret"></span></div>
+              <div class="state-label">Listening</div>
+            </div>
+          </div>
+          <div class="pet listening"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Listening · Fn</div>
+        <div class="spec-note">The ask chip rises <b>while the key is still down</b>. These words are about to leave the Mac, and the moment to learn that is before letting go.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-listening">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px;--d:60ms;--amp:2.2"></i><i style="--h:7px;--d:0ms;--amp:3"></i><i style="--h:5px;--d:150ms;--amp:1.8"></i><i style="--h:9px;--d:210ms;--amp:2.7"></i><i style="--h:6px;--d:100ms;--amp:2"></i><i style="--h:4px;--d:180ms;--amp:3.2"></i></div>
+              <div class="transcript">what did Anil say about the terms doc<span class="caret"></span></div>
+              <div class="state-label">Listening</div>
+            </div>
+            <div class="chips">
+              <div class="chip cmd"><span class="g">▸</span>asking Mull<span class="k">Fn</span></div>
+              <div class="chip"><span class="g">◇</span>reading this window + screenshot</div>
+            </div>
+          </div>
+          <div class="pet listening"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Reading <b>· proposed</b></div>
+        <div class="spec-note">The harvest is a real step that takes real time and is the one moment worth disclosing. Today it hides inside <span class="inline">THINKING</span>.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-thinking">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">what did Anil say about the terms doc</div>
+              <div class="state-label">Reading</div>
+            </div>
+            <div class="stageline"><span class="stage-pulse"></span>reading this window</div>
+          </div>
+          <div class="pet working"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Thinking · under 1.5s</div>
+        <div class="spec-note">No counter yet. A stopwatch that restarts at 0s on every step turns a fast pipeline into a flicker, which reads as <i>less</i> confident.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-thinking">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">make this less apologetic</div>
+              <div class="state-label">Thinking</div>
+            </div>
+            <div class="stageline"><span class="stage-pulse"></span>asking the model</div>
+          </div>
+          <div class="pet working"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Thinking · counting</div>
+        <div class="spec-note">Past 1.5s the seconds appear beside the label — not bold, not tracked. They are a reassurance, not a deadline.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-thinking">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">summarize all my tasks which I need to complete</div>
+              <div class="state-label">Thinking <span class="state-elapsed">6s</span></div>
+            </div>
+            <div class="stageline"><span class="stage-pulse"></span>reading what it found</div>
+          </div>
+          <div class="pet working"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Writing <b>· renamed</b></div>
+        <div class="spec-note">Was <span class="inline">INSERTING</span>. Same phase, same static waveform; the word is now the one the rest of the product uses.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-thinking">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">and I’ll have the deck over to you by five</div>
+              <div class="state-label">Writing</div>
+            </div>
+          </div>
+          <div class="pet working"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="marks">
+  <h2>Marks — the cards that write</h2>
+  <p class="say">
+    Fresh paper, one filled button, and the undo path stated in the same breath
+    as the action. <strong>The change here is where that promise sits:</strong>
+    it moves out of the right margin and under the button it describes. Three
+    hundred pixels of separation is how an Apply ended up under a summary of
+    somebody's own notes, with <kbd>⏎</kbd> — which means Apply everywhere — one
+    reflex away.
+  </p>
+  <div class="specs two">
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Diff · streaming</div>
+        <div class="spec-note">The label holds at <span class="inline">THINKING</span> and <b>no buttons exist yet</b>. Inviting a decision on evidence that has not finished arriving is worse than making someone wait.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-thinking">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">make this less apologetic</div>
+              <div class="state-label">Thinking <span class="state-elapsed">2s</span></div>
+            </div>
+            <div class="card will">
+              <div class="card-title"><span>Edit preview · Mail</span><span class="count">writing…</span></div>
+              <div class="card-body"><del>I’m so sorry to bother you again but I was just wondering if</del><ins>Checking in on</ins> <span class="caret"></span></div>
+            </div>
+          </div>
+          <div class="pet working"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Diff · ready</div>
+        <div class="spec-note">The promise now sits under <b>Apply</b>, where the eye already is. Cancel needs no promise; it is the one button that costs nothing.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-preview">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">make this less apologetic</div>
+              <div class="state-label">Preview</div>
+            </div>
+            <div class="card will">
+              <div class="card-title"><span>Edit preview · Mail</span><span class="count">2 changes</span></div>
+              <div class="card-body"><del>I’m so sorry to bother you again but I was just wondering if</del><ins>Checking in on</ins> we still need your sign-off<del>.</del><ins> — do we?</ins></div>
+              <div class="card-actions">
+                <button class="btn primary">Apply <span class="k">⏎</span></button>
+                <button class="btn ghost">Cancel <span class="k">esc</span></button>
+              </div>
+              <div class="promise"><kbd>⌥Z</kbd> undoes this after you apply it</div>
+            </div>
+          </div>
+          <div class="pet waiting"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Diff · with a send</div>
+        <div class="spec-note">Ochre, outlined, never the filled one and never the default. <kbd>⏎</kbd> still only applies, so a press out of habit lands text and sends nothing. The promise <b>replaces</b> the undo line — the old one is not true of the button beside it.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-preview">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">reply saying they’re with legal and send it</div>
+              <div class="state-label">Preview</div>
+            </div>
+            <div class="card will">
+              <div class="card-title"><span>Edit preview · Slack</span><span class="count">1 change</span></div>
+              <div class="card-body"><ins>They’re with legal now — should be back Thursday at the latest.</ins></div>
+              <div class="card-actions">
+                <button class="btn primary">Apply <span class="k">⏎</span></button>
+                <button class="btn send">Apply &amp; send <span class="k">⌘⏎</span></button>
+                <button class="btn ghost">Cancel <span class="k">esc</span></button>
+              </div>
+              <div class="promise warnish">Sending can’t be undone. <kbd>⏎</kbd> applies only.</div>
+            </div>
+          </div>
+          <div class="pet waiting"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Send</div>
+        <div class="spec-note">Nothing here is Mull's writing — it is your own composer, read back a moment ago — so it carries no diff marks. There is no Apply, and <kbd>⏎</kbd> stays claimed and inert: releasing it would send the message the card is still asking about.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-preview">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">send it</div>
+              <div class="state-label">Preview</div>
+            </div>
+            <div class="card will">
+              <div class="card-title"><span>Send · Slack</span><span class="count">already written</span></div>
+              <div class="card-body is-quote">I’ll have the code done in two days — will ping you when the branch is up.</div>
+              <div class="card-actions">
+                <button class="btn send">Send <span class="k">⌘⏎</span></button>
+                <button class="btn ghost">Cancel <span class="k">esc</span></button>
+              </div>
+              <div class="promise warnish">Sending can’t be undone. <kbd>⏎</kbd> does nothing here.</div>
+            </div>
+          </div>
+          <div class="pet waiting"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  <div class="specs" style="margin-top:34px">
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Applied</div>
+        <div class="spec-note">1 400ms, then idle. The label takes reading green — the only outcome in the app that went entirely right.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-applied">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">make this less apologetic</div>
+              <div class="state-label">Applied</div>
+            </div>
+          </div>
+          <div class="pet done"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="acts">
+  <h2>Acts — the card that drives another app</h2>
+  <p class="say">
+    The only thing in Mull that presses buttons in somebody else's window. It is
+    on fresh paper because something <i>will</i> happen when you press Run — but
+    the promise underneath is the true one, and it is not an undo: nothing is
+    written and nothing is sent, and <kbd>esc</kbd> stops it between any two steps.
+  </p>
+  <p class="say">
+    <strong>The label is <span class="inline">PLAN</span>, not
+    <span class="inline">PREVIEW</span>.</strong> A preview is a proposal about
+    text. This is a proposal about behaviour, and the two should not share a word.
+  </p>
+  <div class="specs two">
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Plan · proposed</div>
+        <div class="spec-note">No steps yet, and that is honest: the window is a moving target, so each step is chosen against a fresh look. What <b>Run</b> approves is the goal and the budget.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-preview">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">what did Anil say about the terms doc</div>
+              <div class="state-label">Plan</div>
+            </div>
+            <div class="card will">
+              <div class="card-title"><span>Plan · Slack</span><span class="count">up to 6 steps</span></div>
+              <div class="plan-goal"><span class="n">goal</span><span class="what">open the conversation with Anil Turaga and find what he said about the terms doc</span></div>
+              <div class="card-actions">
+                <button class="btn primary">Run <span class="k">⏎</span></button>
+                <button class="btn ghost">Cancel <span class="k">esc</span></button>
+              </div>
+              <div class="promise">Read-only. Nothing is written and nothing is sent.</div>
+            </div>
+          </div>
+          <div class="pet waiting"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Plan · walking</div>
+        <div class="spec-note">Steps appear as they happen. A press reports <b>where it took you</b>, not the label it was given — a press that changed nothing used to look identical to one that worked, and the navigator pressed the same row twice.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-preview">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">what did Anil say about the terms doc</div>
+              <div class="state-label">Plan <span class="state-elapsed">4s</span></div>
+            </div>
+            <div class="card will">
+              <div class="card-title"><span>Plan · Slack</span><span class="count">step 2 of 6</span></div>
+              <div class="plan-goal"><span class="n">goal</span><span class="what">open the conversation with Anil Turaga and find what he said about the terms doc</span></div>
+              <div class="plan-step done"><span class="n">1.</span><span class="what">press “Anil Turaga” → Anil Turaga (DM) · Slack</span><span class="st">✓</span></div>
+              <div class="plan-step running"><span class="n">2.</span><span class="what">read this window</span><span class="st">…</span></div>
+              <div class="card-actions" style="margin-top:9px">
+                <button class="btn ghost">Stop <span class="k">esc</span></button>
+              </div>
+              <div class="promise">Read-only. Every step is journaled.</div>
+            </div>
+          </div>
+          <div class="pet working"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Plan · refused a step</div>
+        <div class="spec-note">The deny-list fired. A refusal is red pencil and it says the title it would not press, because a silent skip is indistinguishable from a step that never occurred to it.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-preview">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">clear out the eng-platform channel</div>
+              <div class="state-label">Plan <span class="state-elapsed">3s</span></div>
+            </div>
+            <div class="card will">
+              <div class="card-title"><span>Plan · Slack</span><span class="count">step 2 of 6</span></div>
+              <div class="plan-goal"><span class="n">goal</span><span class="what">open the #eng-platform channel and tidy it up</span></div>
+              <div class="plan-step done"><span class="n">1.</span><span class="what">press “#eng-platform” → #eng-platform · Slack</span><span class="st">✓</span></div>
+              <div class="plan-step failed"><span class="n">2.</span><span class="what">press “Leave channel” — Mull won’t press that</span><span class="st">✕</span></div>
+              <div class="card-actions" style="margin-top:9px">
+                <button class="btn ghost">Stop <span class="k">esc</span></button>
+              </div>
+              <div class="promise">Read-only. Every step is journaled.</div>
+            </div>
+          </div>
+          <div class="pet trouble"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="reads">
+  <h2>Reads — the cards that change nothing</h2>
+  <p class="say">
+    Pressed into the desk, and <strong>no filled button anywhere on them</strong>.
+    A filled button is this app's word for <i>this commits</i>, and there is
+    nothing here to commit. <kbd>⏎</kbd> and <kbd>esc</kbd> both close.
+  </p>
+  <p class="say">
+    <strong>One more proposal:</strong> the answer body is set in serif. The
+    design system casts serif for <i>anything the human said or is reading back</i>
+    — and an answer is precisely something being read back. It ships as sans today,
+    which quietly files it with the instrument's own labels.
+  </p>
+  <div class="specs two">
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Answer · arriving</div>
+        <div class="spec-note">The card opens on the first token, not up front. An empty box waiting to fill reads as a stall; the working line was already saying it better.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-thinking">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">summarize all my tasks which I need to complete</div>
+              <div class="state-label">Answer</div>
+            </div>
+            <div class="card wont">
+              <div class="card-title"><span>Answer · Notes</span></div>
+              <div class="card-body is-answer">Three tasks are still open: the ACT agent (marked <span class="caret"></span></div>
+            </div>
+          </div>
+          <div class="pet working"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Answer · read it</div>
+        <div class="spec-note">Ghost <b>Done</b> and a promise that is a flat statement of fact. This is the card the Apply button had no business being on.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-preview">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">summarize all my tasks which I need to complete</div>
+              <div class="state-label">Answer</div>
+            </div>
+            <div class="card wont">
+              <div class="card-title"><span>Answer · Notes</span></div>
+              <div class="card-body is-answer">Three tasks are still open: the ACT agent (marked “later”), converting the rag function to mcp, and wiring the real config into the agent. Two more sit under Review — the Jenkins deploy options, and the staging rollout plan with Dheeraj.</div>
+              <div class="card-actions">
+                <button class="btn ghost">Done <span class="k">⏎</span></button>
+              </div>
+              <div class="promise">Nothing was written.</div>
+            </div>
+          </div>
+          <div class="pet waiting"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Plan → answer</div>
+        <div class="spec-note">The walk is over, so the card <b>settles into the well</b>: fresh paper to recessed, Run to Done. You watch a proposal become a report. The steps stay — they are how the answer was come by.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-preview">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">what did Anil say about the terms doc</div>
+              <div class="state-label">Answer</div>
+            </div>
+            <div class="card wont">
+              <div class="card-title"><span>Answer · Slack</span><span class="count">2 steps</span></div>
+              <div class="plan-step done"><span class="n">1.</span><span class="what">press “Anil Turaga” → Anil Turaga (DM) · Slack</span><span class="st">✓</span></div>
+              <div class="plan-step done"><span class="n">2.</span><span class="what">read this window</span><span class="st">✓</span></div>
+              <div class="plan-answer">Anil said the redlines are with legal, and legal told him Thursday at the latest. He also asked separately whether you’re in the office — still unanswered.</div>
+              <div class="card-actions" style="margin-top:11px">
+                <button class="btn ghost">Done <span class="k">⏎</span></button>
+              </div>
+              <div class="promise">Nothing was written. You’re back in Prahastha Shankesi.</div>
+            </div>
+          </div>
+          <div class="pet waiting"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Answer · not in this window</div>
+        <div class="spec-note">The most valuable answer the card gives. A draft missing a fact writes around it; an answer missing a fact has to say so, because you are deciding whether to go and look yourself.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-preview">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">did Priya ever reply about pricing</div>
+              <div class="state-label">Answer</div>
+            </div>
+            <div class="card wont">
+              <div class="card-title"><span>Answer · Slack</span></div>
+              <div class="card-body is-answer">This window is a DM with Prahastha Shankesi, not Priya — and it only has two messages, both about a flaky test fix. Nothing about pricing here.</div>
+              <div class="card-actions">
+                <button class="btn ghost">Done <span class="k">⏎</span></button>
+              </div>
+              <div class="promise">Nothing was written.</div>
+            </div>
+          </div>
+          <div class="pet waiting"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="wrong">
+  <h2>When something is wrong</h2>
+  <p class="say">
+    Two faults, and they are not the same fault. <strong>Ochre is something you
+    can fix</strong> — secure input is on, a permission is missing, the model is
+    unreachable and the local rules are deciding. <strong>Red pencil is something
+    that failed</strong>. Today both wear ochre, which flattens a distinction the
+    colour system was built to make.
+  </p>
+  <div class="specs two">
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Paused · secure input</div>
+        <div class="spec-note">A password field has focus. Mull will not read it and will not type into it, and it says so before you finish speaking rather than after.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-blocked">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">and the staging password is</div>
+              <div class="state-label">Paused</div>
+            </div>
+            <div class="chips"><div class="chip warn"><span class="g">◆</span>secure input — paused</div></div>
+            <div class="notice">A password field has focus. Nothing was read and nothing will be typed.</div>
+          </div>
+          <div class="pet trouble"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Error <b>· red pencil</b></div>
+        <div class="spec-note">The engine went quiet and a watchdog ended the turn. The notice names the failure <i>and</i> what survived — your words are not lost.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-error">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">summarize this thread</div>
+              <div class="state-label">Error</div>
+            </div>
+            <div class="notice">The model said nothing for 60 seconds. Your words are in the journal — hold Fn to try again.</div>
+          </div>
+          <div class="pet trouble"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Degraded · local rules</div>
+        <div class="spec-note">The classifier timed out five times running, so the local rules decide for the next five minutes. Stated plainly: a fallback that fires silently and always is indistinguishable from a feature that does not exist.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-blocked">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px"></i><i style="--h:7px"></i><i style="--h:5px"></i><i style="--h:9px"></i><i style="--h:6px"></i><i style="--h:4px"></i></div>
+              <div class="transcript">reply to this saying I’ll have it by five</div>
+              <div class="state-label">Paused</div>
+            </div>
+            <div class="chips"><div class="chip warn"><span class="g">◆</span>local rules · the model isn’t answering</div></div>
+            <div class="notice">Mull typed what it heard rather than guess at an edit. <kbd>⌥Z</kbd> takes it back.</div>
+          </div>
+          <div class="pet trouble"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="spec">
+      <div class="spec-head">
+        <div class="spec-name">Screen Recording not granted</div>
+        <div class="spec-note">The chip is the disclosure: it says what Mull could read and what it could not, before the words leave. "No screenshot" and "a screenshot you never saw" look identical in a blank box and are not the same thing.</div>
+      </div>
+      <div class="stage">
+        <div class="grip">
+          <div class="hud is-listening">
+            <div class="hud-top">
+              <div class="orb"></div>
+              <div class="wave"><i style="--h:4px;--d:0ms;--amp:2.6"></i><i style="--h:7px;--d:90ms;--amp:1.9"></i><i style="--h:5px;--d:180ms;--amp:3.1"></i><i style="--h:9px;--d:70ms;--amp:1.6"></i><i style="--h:6px;--d:220ms;--amp:2.4"></i><i style="--h:4px;--d:140ms;--amp:3"></i></div>
+              <div class="transcript">what does this chart show<span class="caret"></span></div>
+              <div class="state-label">Listening</div>
+            </div>
+            <div class="chips">
+              <div class="chip cmd"><span class="g">▸</span>asking Mull<span class="k">Fn</span></div>
+              <div class="chip warn"><span class="g">◆</span>text only — Screen Recording is off</div>
+            </div>
+          </div>
+          <div class="pet listening"><i></i><div class="pet-shadow"></div></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</section>
+
+<section id="vocab">
+  <h2>The label, after</h2>
+  <p class="say">
+    Ten words become ten words — but sorted into four kinds, each with its own
+    colour, so the <i>form</i> tells you what kind of thing you are reading before
+    you read it. Two are renamed, one is new, and one is retired.
+  </p>
+  <table class="vocab">
+    <thead>
+      <tr><th>Label</th><th>Colour</th><th>Means</th><th>Change</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Listening</td><td>ink</td><td>The key is down and the microphone is live.</td><td>—</td></tr>
+      <tr><td class="new">Reading</td><td>ink-3</td><td>Harvesting the window, before any of it leaves the Mac.</td><td>Split out of <span class="inline">THINKING</span>, where it was invisible.</td></tr>
+      <tr><td>Thinking</td><td>ink-3</td><td>A model turn is in flight. The line below says which.</td><td>—</td></tr>
+      <tr><td>Writing</td><td>ink-3</td><td>Text is going into the app.</td><td>Renamed from <span class="inline">INSERTING</span>.</td></tr>
+      <tr><td>Preview</td><td>ink</td><td>A card that will change your document.</td><td>Now only ever means a <b>mark</b>.</td></tr>
+      <tr><td class="new">Plan</td><td>ink</td><td>A card that will press things in another app.</td><td>Was also <span class="inline">PREVIEW</span>, which said the wrong thing.</td></tr>
+      <tr><td>Answer</td><td>ink</td><td>A card that changes nothing at all.</td><td>Absorbs <span class="inline">FOUND</span>.</td></tr>
+      <tr><td class="gone">Found</td><td>—</td><td>A finished plan.</td><td>Retired — a finished plan <i>is</i> an answer, and now looks like one.</td></tr>
+      <tr><td>Applied</td><td>mem</td><td>It landed. 1 400ms, then idle.</td><td>Takes reading green; it was grey.</td></tr>
+      <tr><td>Paused</td><td>warn</td><td>Something you can fix stopped it.</td><td>—</td></tr>
+      <tr><td>Error</td><td>del</td><td>Something failed.</td><td>Was ochre. A failure is red pencil.</td></tr>
+      <tr><td>Idle</td><td>ink-3</td><td>Nothing in flight.</td><td>—</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="changes">
+  <h2>What this costs to build</h2>
+  <p class="say">
+    Every item is additive to the shipped design system — no new tokens, no new
+    fonts, no new geometry. The two that matter most are the first two, and
+    together they are the fix for the bug that started this.
+  </p>
+  <ol class="changes">
+    <li><b>A card declares its family.</b> <span class="inline">will</span> paints <span class="inline">--paper-bright</span>, <span class="inline">wont</span> paints <span class="inline">--paper-recessed</span> and refuses a filled button. Derived from the card kind, not set by each lane, so a new lane cannot forget.
+      <span class="where">src/renderer/components/Cards.tsx · src/renderer/hud.css</span></li>
+    <li><b>The promise moves under its button.</b> One line under the action row instead of <span class="inline">margin-left:auto</span> at the far right.
+      <span class="where">src/renderer/hud.css · .undo-promise → .promise</span></li>
+    <li><b>The answer body becomes serif.</b> One declaration; it currently reads as an instrument label rather than as prose.
+      <span class="where">src/renderer/hud.css · .card-body.is-answer</span></li>
+    <li><b>A finished plan settles into the well.</b> The card swaps family when the walk ends, which is also when <span class="inline">FOUND</span> stops being needed.
+      <span class="where">src/renderer/hud/view-model.ts · labelFor</span></li>
+    <li><b><span class="inline">PLAN</span> and <span class="inline">READING</span> join; <span class="inline">INSERTING</span> becomes <span class="inline">WRITING</span>; <span class="inline">FOUND</span> goes.</b>
+      <span class="where">src/renderer/hud/view-model.ts · labelFor</span></li>
+    <li><b>Error takes <span class="inline">--del</span>, Applied takes <span class="inline">--mem</span>.</b> Two selectors; the hue system already carries the meanings.
+      <span class="where">src/renderer/hud.css · .state-label</span></li>
+    <li><b>The plan card reports where a press landed</b>, which the executor already returns — the card still prints the label the model chose.
+      <span class="where">src/main/pipeline/navigate.ts · objectOf</span></li>
+  </ol>
+</section>
+
+</div>
+
+<script>
+(() => {
+  const root = document.documentElement;
+  const buttons = [...document.querySelectorAll('[data-theme-set]')];
+  const paint = (value) => {
+    if (value) root.setAttribute('data-theme', value); else root.removeAttribute('data-theme');
+    const system = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    const active = value || system;
+    buttons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeSet === active)));
+  };
+  buttons.forEach((b) => b.addEventListener('click', () => paint(b.dataset.themeSet)));
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (!root.hasAttribute('data-theme')) paint(null);
+  });
+  paint(null);
+})();
+</script>
+</body>
+</html>

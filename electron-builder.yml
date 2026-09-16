@@ -1,13 +1,71 @@
-# electron-builder config STUB — real packaging config lands in M6
-# (hardened runtime, entitlements, notarization, `binaries:` for the signed
-# Swift sidecar, DMG + electron-updater). Kept minimal so `electron-builder`
-# has a valid target once needed; not exercised in M1.
-appId: com.mull.app
+# Packaging. Exercised at M2 by `npm run notarize:dryrun` so the surprises
+# (entitlements, the unsigned sidecar, the native module) land seven weeks
+# before the release does — the whole point of the M2 dry run in docs/PLAN.md.
+#
+# Signing identity and Team ID are deliberately absent: they come from the
+# environment (CSC_NAME / CSC_LINK, APPLE_TEAM_ID) so no credential lives in the
+# repo, and an unsigned local build still works.
+
+appId: net.mull.app # placeholder — must match the Team ID's bundle prefix before the first notarised build
 productName: Mull
+copyright: © 2026
+
 directories:
   output: release
+  buildResources: build
+
 files:
-  - out/**
+  - out/**/*
+  - package.json
+  - '!**/*.map'
+
+# The Swift sidecar ships inside the bundle and is signed with the same
+# identity; `mac.binaries` is what makes electron-builder sign it rather than
+# copying it in unsigned and failing notarisation.
+extraResources:
+  - from: mull-mac/.build/release/mull-mac
+    to: mull-mac
+
 mac:
   category: public.app-category.productivity
-  target: dmg
+  # Named rather than left to the `build/icon.icns` default, because what is
+  # there is a PNG: electron-builder makes the .icns from it, and a silent
+  # fallback to Electron's own icon is the kind of thing nobody notices until
+  # the DMG is open. Regenerate with `npm run icons` after editing `icons/`.
+  icon: build/icon.png
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  binaries:
+    - Contents/Resources/mull-mac
+  target:
+    - target: dmg
+      arch: [arm64]
+  extendInfo:
+    # macOS kills the process instead of prompting when this string is missing.
+    NSMicrophoneUsageDescription: Mull listens only while you hold ⌥Space, and transcribes on this Mac.
+    # Same rule, and the string is shown verbatim in the consent dialog with the
+    # target's name filled in — so it says what will be read rather than asking
+    # for control in the abstract. Paired with the apple-events entitlement.
+    #
+    # It has to cover two different targets now: a browser, asked what tabs it
+    # has open, and System Events, asked which applications are running. macOS
+    # shows one string for both, so it names the reading rather than the reader.
+    NSAppleEventsUsageDescription: Mull reads which tabs and applications you have open, so it can tell one page from another and go back to where you were.
+    # Screen Recording needs no usage string — TCC handles that pane itself —
+    # but the app only appears in it once it has called
+    # CGRequestScreenCaptureAccess, which the Grant button now does.
+    # Menu-bar resident: no Dock icon, no window on launch.
+    LSUIElement: true
+
+dmg:
+  title: Mull
+  contents:
+    - x: 140
+      y: 180
+      type: file
+    - x: 400
+      y: 180
+      type: link
+      path: /Applications
