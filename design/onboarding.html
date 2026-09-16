@@ -210,52 +210,18 @@ button:focus-visible, [tabindex]:focus-visible {
 .traffic i { width: 10px; height: 10px; border-radius: 50%; background: var(--paper-recessed); border: 1px solid var(--hairline-soft); }
 .titlebar .app-name { font: 600 12px var(--sans); color: var(--ink-3); margin: 0 auto; transform: translateX(-21px); }
 
-/* Each page carries the hue whose MEANING it teaches, so color is never
-   decoration: page 2 is the two pencils, 3 is the ochre caution, 4 is the
-   reading green of privacy, 5 is writing ink. Page 1 shows all of them. */
 .page {
   flex: 1;
-  padding: 0 0 26px;
+  padding: 30px 40px 26px;
   display: none;
   animation: rise-in var(--t-med) var(--ease-out);
 }
 .page.active { display: block; }
-.page[data-step="1"] { --accent: var(--ink);  --accent-wash: var(--ins-wash); }
-.page[data-step="2"] { --accent: var(--del);  --accent-wash: var(--del-wash); }
-.page[data-step="3"] { --accent: var(--warn); --accent-wash: var(--warn-wash); }
-.page[data-step="4"] { --accent: var(--mem);  --accent-wash: var(--mem-wash); }
-.page[data-step="5"] { --accent: var(--ins);  --accent-wash: var(--ins-wash); }
-
-/* the colored plate the heading sits on */
-.plate {
-  padding: 26px 40px 20px;
-  background:
-    linear-gradient(to bottom, var(--accent-wash), transparent 92%);
-  border-bottom: 1px solid var(--hairline-soft);
-  position: relative;
-}
-.plate::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 3px;
-  background: var(--accent);
-}
-.page[data-step="1"] .plate::before {
-  background: linear-gradient(to right,
-    var(--mem) 0%, var(--mem) 33%,
-    var(--ins) 33%, var(--ins) 66%,
-    var(--warn) 66%);
-}
-.page[data-step="2"] .plate::before {
-  background: linear-gradient(to right, var(--del) 0 50%, var(--ins) 50% 100%);
-}
-.page-inner { padding: 20px 40px 0; }
 .step-no {
   font: 400 15px/1 var(--serif);
-  color: var(--accent, var(--ink-3));
+  color: var(--ink-3);
   font-variant-numeric: tabular-nums;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 .page h2 {
   font: 600 var(--fs-title)/1.25 var(--serif);
@@ -299,24 +265,17 @@ kbd {
 .btn[disabled]:hover { background: transparent; }
 .btn-primary[disabled]:hover { background: var(--ins); }
 
-/* inline hue words — the two pencils, named in their own color */
-em.ink-del { color: var(--del); font-style: normal; font-weight: 600; }
-em.ink-ins { color: var(--ins); font-style: normal; font-weight: 600; }
-
-/* tenets (step 1) — each on its own tinted card, one per hue */
-.tenets { display: flex; flex-direction: column; gap: 8px; margin: 16px 0 22px; }
+/* tenets (step 1) */
+.tenets { display: flex; flex-direction: column; gap: 0; margin: 18px 0 22px; border-top: 1px solid var(--hairline-soft); }
 .tenet {
   display: flex; align-items: baseline; gap: 12px;
-  padding: 11px 13px;
-  border: 1px solid var(--t-edge, var(--hairline-soft));
-  border-left: 3px solid var(--t-hue, var(--ink-3));
-  border-radius: var(--r-inner);
-  background: var(--t-wash, transparent);
+  padding: 11px 2px;
+  border-bottom: 1px solid var(--hairline-soft);
 }
-.tenet.m-mem  { --t-hue: var(--mem);  --t-wash: var(--mem-wash);  --t-edge: var(--mem-edge); }
-.tenet.m-ins  { --t-hue: var(--ins);  --t-wash: var(--ins-wash);  --t-edge: var(--ins-line); }
-.tenet.m-warn { --t-hue: var(--warn); --t-wash: var(--warn-wash); --t-edge: var(--warn-edge); }
-.tenet .t-mark { font: 500 12px var(--mono); min-width: 16px; color: var(--t-hue); }
+.tenet .t-mark { font: 500 12px var(--mono); min-width: 16px; }
+.tenet .t-mark.m-mem { color: var(--mem); }
+.tenet .t-mark.m-ins { color: var(--ins); }
+.tenet .t-mark.m-warn { color: var(--warn); }
 .tenet .t-body { color: var(--ink-2); font-size: 13px; }
 .tenet .t-body strong { color: var(--ink); font-weight: 600; }
 
@@ -505,20 +464,13 @@ em.ink-ins { color: var(--ins); font-style: normal; font-weight: 600; }
   padding: 14px 40px 16px;
   border-top: 1px solid var(--hairline-soft);
 }
-/* the tick rail is the page spectrum: each tick wears its page's hue */
 .progress-ticks { display: flex; gap: 5px; margin-right: 4px; }
 .progress-ticks i {
   width: 14px; height: 3px; border-radius: 2px;
   background: var(--paper-recessed);
   border: 0.5px solid var(--hairline-soft);
-  transition: background var(--t-med) var(--ease-out);
 }
-.progress-ticks i.done { border-color: transparent; }
-.progress-ticks i:nth-child(1).done { background: var(--ink); }
-.progress-ticks i:nth-child(2).done { background: var(--del); }
-.progress-ticks i:nth-child(3).done { background: var(--warn); }
-.progress-ticks i:nth-child(4).done { background: var(--mem); }
-.progress-ticks i:nth-child(5).done { background: var(--ins); }
+.progress-ticks i.done { background: var(--ins); border-color: var(--ins); }
 .step-count { font: 400 11px var(--sans); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .window-foot .grow { flex: 1; }
 
@@ -528,20 +480,14 @@ em.ink-ins { color: var(--ins); font-style: normal; font-weight: 600; }
 .note-card {
   background: var(--paper);
   border: 1px solid var(--hairline-soft);
-  border-left: 3px solid var(--n-hue, var(--hairline));
   border-radius: var(--r-inner);
   padding: 12px 14px;
   font: 400 12px/1.6 var(--sans);
   color: var(--ink-2);
   box-shadow: var(--shadow-row);
 }
-.note-card:nth-of-type(1) { --n-hue: var(--ink); }
-.note-card:nth-of-type(2) { --n-hue: var(--del); }
-.note-card:nth-of-type(3) { --n-hue: var(--warn); }
-.note-card:nth-of-type(4) { --n-hue: var(--mem); }
-.note-card:nth-of-type(5) { --n-hue: var(--ins); }
 .note-card b { color: var(--ink); font-weight: 600; }
-.note-card .n-step { font: 500 11px var(--mono); color: var(--n-hue, var(--ink-3)); display: block; margin-bottom: 4px; }
+.note-card .n-step { font: 500 11px var(--mono); color: var(--ink-3); display: block; margin-bottom: 4px; }
 
 @media (max-width: 1000px) {
   .board { grid-template-columns: minmax(0, 660px); }
@@ -577,26 +523,23 @@ em.ink-ins { color: var(--ins); font-style: normal; font-weight: 600; }
 
     <!-- ── Page 1 · What Mull is ─────────────────────────────────────────── -->
     <section class="page active" data-step="1">
-      <div class="plate">
-        <div class="step-no">1.</div>
-        <h2>A thinking layer for your&nbsp;Mac</h2>
-        <p class="lede">Hold <kbd>⌥&nbsp;Space</kbd> in any app — Mail, Notes, your editor — and speak.
-        Mull turns your words into clean text, placed exactly where your cursor is.
-        Ask for changes, and it shows every mark before anything lands.</p>
-      </div>
-      <div class="page-inner">
+      <div class="step-no">1.</div>
+      <h2>A thinking layer for your&nbsp;Mac</h2>
+      <p class="lede">Hold <kbd>⌥&nbsp;Space</kbd> in any app — Mail, Notes, your editor — and speak.
+      Mull turns your words into clean text, placed exactly where your cursor is.
+      Ask for changes, and it shows every mark before anything lands.</p>
 
       <div class="tenets">
-        <div class="tenet m-mem">
-          <span class="t-mark" aria-hidden="true">✓</span>
+        <div class="tenet">
+          <span class="t-mark m-mem" aria-hidden="true">✓</span>
           <span class="t-body"><strong>On-device.</strong> Your voice is transcribed on this Mac and discarded. Nothing is uploaded.</span>
         </div>
-        <div class="tenet m-ins">
-          <span class="t-mark" aria-hidden="true">✎</span>
-          <span class="t-body"><strong>Nothing changes without a preview.</strong> Edits appear as editor’s marks you approve — or don’t.</span>
+        <div class="tenet">
+          <span class="t-mark m-ins" aria-hidden="true">✎</span>
+          <span class="t-body"><strong>Nothing changes without a preview.</strong> Edits appear as editor's marks you approve — or don't.</span>
         </div>
-        <div class="tenet m-warn">
-          <span class="t-mark" aria-hidden="true">↺</span>
+        <div class="tenet">
+          <span class="t-mark m-warn" aria-hidden="true">⌥Z</span>
           <span class="t-body"><strong>Everything is undoable.</strong> Every action lands in a journal, and <kbd>⌥&nbsp;Z</kbd> takes it back.</span>
         </div>
       </div>
@@ -610,19 +553,15 @@ em.ink-ins { color: var(--ins); font-style: normal; font-weight: 600; }
           <div class="hud-state">Idle</div>
         </div>
       </div>
-      </div>
     </section>
 
     <!-- ── Page 2 · The marks ────────────────────────────────────────────── -->
     <section class="page" data-step="2">
-      <div class="plate">
-        <div class="step-no">2.</div>
-        <h2>Every change shows its&nbsp;marks</h2>
-        <p class="lede">Select text anywhere and say what you want. Mull marks it up the way an
-        editor would — <em class="ink-del">red pencil</em> for what goes, <em class="ink-ins">ink</em> for what
-        replaces it. Nothing changes until you press Apply. Try it:</p>
-      </div>
-      <div class="page-inner">
+      <div class="step-no">2.</div>
+      <h2>Every change shows its&nbsp;marks</h2>
+      <p class="lede">Select text anywhere and say what you want. Mull marks it up the way an
+      editor would — <strong>red pencil</strong> for what goes, <strong>ink</strong> for what
+      replaces it. Nothing changes until you press Apply. Try it:</p>
 
       <div class="hud is-preview" id="diffDemo">
         <div class="hud-top">
@@ -656,18 +595,14 @@ em.ink-ins { color: var(--ins); font-style: normal; font-weight: 600; }
       <p style="font: 400 12px var(--sans); color: var(--ink-3); margin: 12px 2px 0;">
         <button class="btn" id="resetDiff" type="button" style="padding: 2px 9px; font-size: 11px;">Reset demo</button>
       </p>
-      </div>
     </section>
 
     <!-- ── Page 3 · Permissions ──────────────────────────────────────────── -->
     <section class="page" data-step="3">
-      <div class="plate">
-        <div class="step-no">3.</div>
-        <h2>Three permissions, each with a&nbsp;reason</h2>
-        <p class="lede">macOS will ask you to grant these. Mull asks for nothing it can’t
-        explain — and works with whatever you grant.</p>
-      </div>
-      <div class="page-inner">
+      <div class="step-no">3.</div>
+      <h2>Three permissions, each with a&nbsp;reason</h2>
+      <p class="lede">macOS will ask you to grant these. Mull asks for nothing it can’t
+      explain — and works with whatever you grant.</p>
 
       <div class="rows" id="permRows">
         <div class="prow" data-perm="mic">
@@ -700,18 +635,14 @@ em.ink-ins { color: var(--ins); font-style: normal; font-weight: 600; }
         <span class="chip chip-warn" style="flex:none;">Secure input — paused</span>
         <span>In password fields, macOS blocks listening tools — Mull pauses itself and says so, right in the HUD.</span>
       </div>
-      </div>
     </section>
 
     <!-- ── Page 4 · The model ────────────────────────────────────────────── -->
     <section class="page" data-step="4">
-      <div class="plate">
-        <div class="step-no">4.</div>
-        <h2>Your ears, kept&nbsp;local</h2>
-        <p class="lede">Mull listens with a speech model that runs entirely on this Mac.
-        One download, then it works everywhere — on planes, on VPNs, offline.</p>
-      </div>
-      <div class="page-inner">
+      <div class="step-no">4.</div>
+      <h2>Your ears, kept&nbsp;local</h2>
+      <p class="lede">Mull listens with a speech model that runs entirely on this Mac.
+      One download, then it works everywhere — on planes, on VPNs, offline.</p>
 
       <div class="rows">
         <div class="prow" id="modelRow">
@@ -731,18 +662,14 @@ em.ink-ins { color: var(--ins); font-style: normal; font-weight: 600; }
       <div class="foot-note">
         <span>Because the model is local, the transcript never crosses the network — the privacy claim on page 1 is architecture, not policy.</span>
       </div>
-      </div>
     </section>
 
     <!-- ── Page 5 · Try it ───────────────────────────────────────────────── -->
     <section class="page" data-step="5">
-      <div class="plate">
-        <div class="step-no">5.</div>
-        <h2>Try it&nbsp;here</h2>
-        <p class="lede">A practice page. Hold the button below — it stands in for
-        <kbd>⌥&nbsp;Space</kbd> — and Mull will “hear” a sentence and place it at the caret.</p>
-      </div>
-      <div class="page-inner">
+      <div class="step-no">5.</div>
+      <h2>Try it&nbsp;here</h2>
+      <p class="lede">A practice page. Hold the button below — it stands in for
+      <kbd>⌥&nbsp;Space</kbd> — and Mull will “hear” a sentence and place it at the caret.</p>
 
       <div class="stage">
         <div class="fake-note">
@@ -771,7 +698,6 @@ em.ink-ins { color: var(--ins); font-style: normal; font-weight: 600; }
           <button class="btn btn-hold" id="holdBtn" type="button" aria-label="Hold to simulate speaking">Hold to speak</button>
           <span class="hold-hint" id="holdHint">Press and hold, then let go — like the real key.</span>
         </div>
-      </div>
       </div>
     </section>
 
