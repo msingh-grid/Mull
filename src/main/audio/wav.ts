@@ -37,6 +37,34 @@ export function peakAmplitude(samples: Float32Array): number {
   return peak
 }
 
+/**
+ * Leading and trailing silence, in ms, added before whisper sees the audio.
+ *
+ * Whisper pads every clip to 30 s internally and decodes autoregressively, so
+ * an utterance whose first phoneme is sample 0 gives the decoder no run-up and
+ * one whose last phoneme is the final sample gives it no way to know the
+ * sentence ended. Push-to-talk produces exactly that shape: the key goes down
+ * and the word starts. These are cheap — 650 ms of zeros is 20 KB in the temp
+ * WAV and costs no measurable decode time.
+ */
+export const LEAD_PAD_MS = 150
+export const TAIL_PAD_MS = 500
+
+/** Surround an utterance with silence so the decoder has a run-up and a stop. */
+export function padUtterance(
+  samples: Float32Array,
+  sampleRate: number,
+  leadMs = LEAD_PAD_MS,
+  tailMs = TAIL_PAD_MS
+): Float32Array {
+  const lead = Math.round((leadMs / 1000) * sampleRate)
+  const tail = Math.round((tailMs / 1000) * sampleRate)
+  if (lead <= 0 && tail <= 0) return samples
+  const out = new Float32Array(lead + samples.length + tail)
+  out.set(samples, lead)
+  return out
+}
+
 export function encodeWav(samples: Float32Array, sampleRate: number): Buffer {
   const pcm = floatToInt16(samples)
   const dataBytes = pcm.length * 2

@@ -1,10 +1,11 @@
 /**
  * Download the local speech model.
  *
- * Run this yourself — it is ~150 MB and nothing in the app fetches it silently:
+ * Run this yourself — it is ~466 MB and nothing in the app fetches it silently:
  *
- *   npm run fetch:model            # ggml-base.en.bin (default)
- *   npm run fetch:model -- small.en
+ *   npm run fetch:model            # ggml-small.en.bin (default)
+ *   npm run fetch:model -- base.en # smaller and ~2x faster, less accurate
+ *   npm run fetch:vad              # Silero VAD, ~900 KB, optional
  *
  * The file lands next to the app's own data so an uninstall takes it with it.
  * The fetching itself lives in src/main/services/model.ts, shared with
@@ -14,7 +15,7 @@
 import { downloadModel, humanBytes, modelStatus } from '../src/main/services/model'
 
 async function main(): Promise<void> {
-  const requested = process.argv[2] ?? 'base.en'
+  const requested = process.argv[2] ?? 'small.en'
   const before = await modelStatus(requested)
 
   if (before.installed) {
