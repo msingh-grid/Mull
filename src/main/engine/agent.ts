@@ -75,6 +75,13 @@ export interface AgentEngineOptions {
   oauthToken?: string | null
   model: string
   /**
+   * Where the `claude` binary the SDK spawns actually lives. Only needed in a
+   * packaged app — see `resolveClaudeCliPath` in `src/main/locations.ts` for
+   * why the SDK's own resolution fails silently under `app.asar`. Left unset,
+   * the SDK resolves its own default, which is correct in dev.
+   */
+  claudeCliPath?: string
+  /**
    * The routing and loop models, already resolved from `settings` by
    * `resolveEngine`. Optional so a test or a probe can build an engine with
    * nothing but a token and still get the documented defaults.
@@ -130,7 +137,8 @@ export class AgentEngine implements Engine {
     const shared = {
       oauthToken: options.oauthToken ?? null,
       log: options.log ?? ((): void => {}),
-      start: options.start
+      start: options.start,
+      claudeCliPath: options.claudeCliPath
     }
     this.edit = new AgentSession({
       ...shared,
@@ -368,6 +376,7 @@ interface AgentSessionOptions {
   oauthToken: string | null
   log: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   start?: StartQuery
+  claudeCliPath?: string
   /**
    * Whether this lane may think before answering, asked fresh each turn.
    *
@@ -413,17 +422,37 @@ class AgentSession {
       return Promise.reject(new Error(`The engine is already busy (${this.options.label}).`))
     }
     const prompts = this.ensure()
+    const session = this.session
 
     return new Promise<string>((resolve, reject) => {
       const turn: Turn = { text: '', onPartial, resolve, reject, watchdog: null }
       this.turn = turn
       this.arm(turn, FIRST_TOKEN_TIMEOUT_MS, 'said nothing')
-      prompts.push({
-        type: 'user',
-        message: { role: 'user', content },
-        parent_tool_use_id: null,
-        session_id: ''
-      } as SDKUserMessage)
+      // `ensure` may have just torn down the old subprocess and spawned a
+      // replacement in the same synchronous breath — writing the turn straight
+      // into that replacement raced its startup against the old one's
+      // shutdown, and a subprocess that died within that window surfaced only
+      // as `pump`'s generic "ended unexpectedly". `initializationResult` is a
+      // real round trip to the CLI, cached once a session is already warm, so
+      // this costs nothing on the hot path and only matters right after a spawn.
+      session!.initializationResult().then(
+        () => {
+          if (this.turn !== turn) return // superseded by the watchdog meanwhile
+          prompts.push({
+            type: 'user',
+            message: { role: 'user', content },
+            parent_tool_use_id: null,
+            session_id: ''
+          } as SDKUserMessage)
+        },
+        (err: unknown) => {
+          if (this.turn !== turn) return
+          this.turn = null
+          AgentSession.settle(turn)
+          this.reset()
+          turn.reject(err instanceof Error ? err : new Error(String(err)))
+        }
+      )
     })
   }
 
@@ -457,6 +486,16 @@ class AgentSession {
 
   reset(): void {
     this.prompts?.close()
+    // Closing `prompts` only ends Mull's own input iterable — it does not
+    // touch the subprocess. Without this, a torn-down session's `claude` CLI
+    // process is left to notice stdin EOF and exit on its own timeline, which
+    // is exactly what let a replacement subprocess spawn while the old one
+    // was still alive (see `ensure`'s thinking-mismatch branch).
+    try {
+      this.session?.close()
+    } catch (err) {
+      this.options.log('warn', `engine: ${this.options.label} session close failed`, err)
+    }
     this.prompts = null
     this.session = null
   }
@@ -496,6 +535,14 @@ class AgentSession {
        * off, for a choice between four words.
        */
       thinking: wanted ? { type: 'adaptive' } : { type: 'disabled' },
+      pathToClaudeCodeExecutable: this.options.claudeCliPath,
+      // A subprocess that dies before its first result otherwise leaves no
+      // trace beyond `pump`'s generic "ended unexpectedly" — this is the only
+      // way to see why. Mirrors `SidecarClient`'s stderr handling.
+      stderr: (data: string): void => {
+        const text = data.trim()
+        if (text) this.options.log('warn', `engine: ${this.options.label} stderr: ${text}`)
+      },
       env: this.options.oauthToken
         ? { ...process.env, CLAUDE_CODE_OAUTH_TOKEN: this.options.oauthToken }
         : { ...process.env }
@@ -554,9 +601,15 @@ class AgentSession {
           }
         }
       }
-      this.failInFlight(new Error('The engine session ended unexpectedly.'))
+      // A session `reset()` has already discarded — deliberately, for a
+      // thinking-mode restart, via `close()` — finishes its loop on its own
+      // schedule after the replacement is already live. Without this guard,
+      // that finish would fail whatever turn is *now* in flight on the new
+      // session, not the (already-settled or abandoned) turn this pump was
+      // ever reading for.
+      if (this.session === session) this.failInFlight(new Error('The engine session ended unexpectedly.'))
     } catch (err) {
-      this.failInFlight(err instanceof Error ? err : new Error(String(err)))
+      if (this.session === session) this.failInFlight(err instanceof Error ? err : new Error(String(err)))
     } finally {
       if (this.session === session) this.reset()
     }

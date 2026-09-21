@@ -1,4 +1,4 @@
-import type { AsrProvider, AsrResult } from './types'
+import type { AsrProvider, AsrResult, TranscribeOptions } from './types'
 
 /**
  * Deterministic stand-in for whisper.
@@ -14,21 +14,33 @@ export class FakeAsrProvider implements AsrProvider {
   constructor(
     private readonly phrase = 'This is a simulated transcript from the fake speech provider.',
     /** Simulated compute, ms per second of audio. */
-    private readonly msPerAudioSecond = 40
+    private readonly msPerAudioSecond = 40,
+    /**
+     * What to report as confidence. High by default so the fake exercises the
+     * ordinary path; tests drive the low-confidence branches by passing a
+     * number under the threshold in `pipeline/dictation.ts`.
+     */
+    private readonly confidence: number | null = 0.9
   ) {}
 
   async ready(): Promise<boolean> {
     return true
   }
 
-  async transcribe(pcm: Float32Array, sampleRate: number): Promise<AsrResult> {
+  /** `options` is accepted and ignored: the fake has nothing to bias. */
+  async transcribe(
+    pcm: Float32Array,
+    sampleRate: number,
+    _options?: TranscribeOptions
+  ): Promise<AsrResult> {
     const audioSeconds = pcm.length / sampleRate
     const started = Date.now()
     await new Promise((r) => setTimeout(r, Math.round(audioSeconds * this.msPerAudioSecond)))
     return {
       text: this.phrase,
       durationMs: Date.now() - started,
-      model: 'fake'
+      model: 'fake',
+      confidence: this.confidence
     }
   }
 

@@ -28,6 +28,8 @@ interface Harness {
   rows: Array<BenchDraft<DictationRow>>
   capture: { started: number; stopped: number }
   clock: { advance: (ms: number) => void }
+  /** The stand-in transcriber, so a test can watch what it was told. */
+  asr: FakeAsrProvider
   /** Everything the router handed to the edit lane. */
   sculpted: SculptRequest[]
   /** Every bare-send card the router asked for. */
@@ -45,6 +47,8 @@ function harness(options: {
   classifies?: ClassifiedIntent | 'offline'
   /** How much of the window Mull may read. Absent = nothing, as pre-M5a. */
   context?: ContextMode
+  /** What the transcriber reports about how well it heard. */
+  confidence?: number | null
 } = {}): Harness {
   const sidecar = options.sidecar ?? new FakeSidecar({ accessibility: true })
   const journal = new JournalStore(memoryDatabase())
@@ -76,10 +80,16 @@ function harness(options: {
     answer: async () => ({ text: 'not this test' })
   }
 
+  const asr = new FakeAsrProvider(
+    options.transcript ?? 'um, hello from the pipeline test.',
+    0,
+    options.confidence === undefined ? 0.9 : options.confidence
+  )
+
   const pipe = new DictationPipeline(
     {
       sidecar,
-      asr: new FakeAsrProvider(options.transcript ?? 'um, hello from the pipeline test.', 0),
+      asr,
       bench,
       insertion: new InsertionService({ sidecar }),
       journal,
@@ -119,6 +129,7 @@ function harness(options: {
   )
 
   return {
+    asr,
     pipe,
     sidecar,
     journal,
@@ -1128,3 +1139,115 @@ describe('DictationPipeline — asking, which writes nothing', () => {
     h.pipe.dispose()
   })
 })
+
+describe('telling whisper what is on screen', () => {
+  it('passes the app being spoken into as a decoding hint', async () => {
+    const h = harness()
+    const seen = vi.spyOn(h.asr, 'transcribe')
+    h.pipe.begin()
+    // The harvest starts on key-down and lands long before key-up in a real
+    // hold; here it needs a tick, because the whole utterance is microtasks.
+    await settle()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    // FakeSidecar reports TextEdit as frontmost, and that name has to reach
+    // the transcriber — proper nouns are where local ASR actually fails.
+    expect(seen.mock.calls[0]?.[2]?.prompt).toContain('TextEdit')
+    h.pipe.dispose()
+  })
+
+  it('transcribes without waiting for the harvest to land', async () => {
+    // The invariant at the top of this file: ⌥Space does not wait on anything.
+    // A harvest still in flight costs the hint, never the transcript.
+    const sidecar = new FakeSidecar({ accessibility: true })
+    vi.spyOn(sidecar, 'frontmostApp').mockReturnValue(new Promise(() => {}) as never)
+    const h = harness({ sidecar })
+    const seen = vi.spyOn(h.asr, 'transcribe')
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(seen).toHaveBeenCalledOnce()
+    expect(seen.mock.calls[0]?.[2]?.prompt).toBeUndefined()
+    h.pipe.dispose()
+  })
+
+  it('does not bias one utterance with the previous window', async () => {
+    const h = harness()
+    h.pipe.begin()
+    await settle()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    // Second hold, harvest stalled: the hint must be empty rather than stale.
+    vi.spyOn(h.sidecar, 'frontmostApp').mockReturnValue(new Promise(() => {}) as never)
+    const seen = vi.spyOn(h.asr, 'transcribe')
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(seen.mock.calls[0]?.[2]?.prompt).toBeUndefined()
+    h.pipe.dispose()
+  })
+})
+
+describe('when whisper is not sure it heard right', () => {
+  it('records the confidence of every utterance, sure or not', async () => {
+    const h = harness({ confidence: 0.92 })
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(h.rows[0]?.confidence).toBeCloseTo(0.92, 5)
+    h.pipe.dispose()
+  })
+
+  it('says so on the HUD rather than acting as if sure', async () => {
+    const h = harness({ confidence: 0.2 })
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(h.states.some((s) => s.notice?.includes('heard'))).toBe(true)
+    h.pipe.dispose()
+  })
+
+  it('still types it — ⌥Space never withholds the words', async () => {
+    const h = harness({ confidence: 0.2, transcript: 'send the deck' })
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(h.sidecar.insertions).toHaveLength(1)
+    expect(h.rows[0]).toMatchObject({ outcome: 'applied' })
+    h.pipe.dispose()
+  })
+
+  it('says nothing when the provider reports no confidence at all', async () => {
+    const h = harness({ confidence: null })
+    h.pipe.begin()
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(h.states.some((s) => s.notice?.includes('heard'))).toBe(false)
+    h.pipe.dispose()
+  })
+})
+

@@ -497,6 +497,18 @@ function SettingsWindow(): JSX.Element {
                   {model.installed ? `${model.file} · ${humanBytes(model.bytes)}` : 'not installed'}
                 </span>
               </Row>
+              <Row label="Accuracy" hint="all three run on this Mac; restart Mull to apply">
+                <select
+                  value={settings.speechModel}
+                  onChange={(event) =>
+                    void update({ speechModel: event.target.value as Settings['speechModel'] })
+                  }
+                >
+                  <option value="small.en">Accurate — small.en (466 MB)</option>
+                  <option value="base.en">Balanced — base.en (148 MB)</option>
+                  <option value="tiny.en">Fastest — tiny.en (78 MB)</option>
+                </select>
+              </Row>
               <Row label="whisper-cli" hint={model.whisperCli}>
                 <span className="mono">{model.whisperInstalled ? 'found' : 'not found'}</span>
               </Row>
@@ -509,6 +521,11 @@ function SettingsWindow(): JSX.Element {
                 Transcription runs here, on this Mac. Your audio never crosses the network, and
                 neither does dictation into an empty field. Asking Mull to change text is what
                 sends that text to a model — see Engine, above.
+              </p>
+              <p>
+                A larger model is slower to the caret but better at names — people, channels,
+                apps — which is where transcription usually goes wrong. Mull also tells the
+                model which names are on screen as you speak, whichever size you pick.
               </p>
             </>
           ) : (

@@ -28,6 +28,7 @@ import {
   capturesDir,
   credentialsPath,
   journalPath,
+  resolveClaudeCliPath,
   resolveSidecarPath,
   settingsPath
 } from './locations'
@@ -452,10 +453,22 @@ async function bootstrap(): Promise<void> {
   hudWindow = createHudWindow()
 
   sidecar = await createSidecar()
-  const selection = await selectAsrProvider()
+
+  // Settings before ASR: `speechModel` decides which whisper model is loaded,
+  // and loading the wrong one then swapping would mean a 466 MB read for
+  // nothing. SettingsStore is a synchronous file read with no dependency on
+  // anything created below it.
+  settings = new SettingsStore({ path: settingsPath(), log: logFn })
+
+  const selection = await selectAsrProvider({ speechModel: settings.get().speechModel })
   asr = selection.provider
   if (selection.degradedReason) {
     log.warn(`ASR degraded to the fake provider: ${selection.degradedReason}`)
+  }
+  if (selection.fallbackFrom) {
+    log.warn(
+      `speech model ${settings.get().speechModel} is not installed — using ${selection.fallbackFrom}`
+    )
   }
 
   const bench = new Bench(benchPath(), (err) => log.warn('bench write failed', err))
@@ -472,7 +485,6 @@ async function bootstrap(): Promise<void> {
     journal = null
   }
 
-  settings = new SettingsStore({ path: settingsPath(), log: logFn })
   permissions = new PermissionsService({
     sidecar,
     microphoneStatus: () => systemPreferences.getMediaAccessStatus('microphone'),
@@ -494,7 +506,8 @@ async function bootstrap(): Promise<void> {
       // A function, not a value: armed on the HUD a second before the user
       // speaks, and it must apply to that utterance rather than the next launch.
       thinking: () => settings?.get().thinking === true,
-      log: logFn
+      log: logFn,
+      claudeCliPath: resolveClaudeCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath })
     })
   )
   log.info('engine', { kind: engine.name, ...engineModels(), detectedLogin })
@@ -1038,7 +1051,8 @@ function reloadEngine(): void {
       // A function, not a value: armed on the HUD a second before the user
       // speaks, and it must apply to that utterance rather than the next launch.
       thinking: () => settings?.get().thinking === true,
-      log: logFn
+      log: logFn,
+      claudeCliPath: resolveClaudeCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath })
     })
   )
   log.info('engine reloaded', { kind: engine.name, ...engineModels() })
