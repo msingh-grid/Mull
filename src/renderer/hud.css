@@ -432,12 +432,22 @@
    escape hatch for the occasional hard piece of writing, not a mode anyone
    should feel invited into. Armed, it is the loudest thing here — because the
    cost is twenty seconds a turn and forgetting it is on is the failure. */
+/* The armed-before-speaking row: thinking, auto-run. One row at 480px in all
+   four combinations — the labels are kept short for exactly that reason. `wrap`
+   is the safety net for a narrower panel, not the expected layout. */
+.arms {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-top: 9px;
+}
 .think {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  margin-top: 9px;
   padding: 3px 9px;
+  white-space: nowrap;
   border-radius: var(--r-chip);
   border: 1px solid transparent;
   background: none;

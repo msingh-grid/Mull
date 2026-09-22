@@ -85,10 +85,16 @@ export class HudController {
   updateCard(card: HudCard): void {
     if (!this.card) return
     this.card = card
-    // Where a run ends. Set by `act` before the lane has drawn anything and
-    // cleared here once the lane draws the ending, so the card is answerable
-    // again the moment it stops claiming to be running — and not before.
-    if (this.running && !(card.kind === 'plan' && card.running === true)) this.running = false
+    // Where a run begins and ends. `act` sets it ahead of the card on a press,
+    // because Return auto-repeats and the gap before the lane's first draw is
+    // reachable; from then on the card is the authority, and this follows it.
+    //
+    // Following it *up* as well as down is what `settings.autoRun` needs: a run
+    // nobody pressed Run for never went through `act`, so the flag would sit
+    // false through the whole walk and ⏎ would stay live over a window the run
+    // is driving. The rule is the one the comment above always claimed — ⏎ is
+    // inert for as long as the card says something is running.
+    this.running = card.kind === 'plan' && card.running === true
     this.emit()
   }
 

@@ -13,7 +13,7 @@ function provider(name: string): AsrProvider & { disposed: number; calls: number
     },
     async transcribe(): Promise<AsrResult> {
       this.calls += 1
-      return { text: name, durationMs: 1, model: name }
+      return { text: name, durationMs: 1, model: name, confidence: null }
     },
     async dispose() {
       this.disposed += 1

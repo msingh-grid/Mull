@@ -27,6 +27,7 @@ export function Hud({
   state,
   onAction,
   onThinking,
+  onAutoRun,
   onCorrect,
   now
 }: {
@@ -34,6 +35,11 @@ export function Hud({
   onAction?: (action: HudAction) => void
   /** Arm or disarm thinking for the writing lanes. Absent in the demo HUD. */
   onThinking?: (on: boolean) => void
+  /**
+   * Arm or disarm starting a run without pressing Run. Absent in the demo HUD,
+   * which has no lane behind it to start.
+   */
+  onAutoRun?: (on: boolean) => void
   /**
    * Correct what Mull heard. Absent in the demo HUD, which has no pipeline
    * behind it to run again.
@@ -118,16 +124,48 @@ export function Hud({
 
       {view.notice ? <div className="notice">{view.notice}</div> : null}
 
-      {view.thinking && onThinking ? (
-        <button
-          type="button"
-          className={`think ${view.thinking.on ? 'is-on' : ''}`}
-          aria-pressed={view.thinking.on}
-          onClick={() => onThinking(!view.thinking?.on)}
-        >
-          <span className="dot" aria-hidden="true" />
-          {view.thinking.on ? 'thinking on — slower, for hard writing' : 'thinking'}
-        </button>
+      {/*
+        The two things you arm before speaking rather than after, on one row.
+        Both are decisions about the sentence you are on the point of saying —
+        one buys deliberation, the other spends the press that would have
+        followed — and neither is a thing anybody opens a preferences window
+        for mid-thought. They share `.think` because they are the same kind of
+        control, and the armed treatment is the same warn wash: on is the state
+        worth noticing from across the desk.
+
+        Both labels are short enough that the row holds at 480px with both
+        armed. The sentence each one used to grow into when armed ("slower, for
+        hard writing") moved to `title`: it is worth reading once and never
+        again, and paying for it in a second row of chrome — on a panel whose
+        whole argument is that it stays out of the way — was the wrong trade.
+      */}
+      {(view.thinking && onThinking) || (view.autoRun && onAutoRun) ? (
+        <div className="arms">
+          {view.thinking && onThinking ? (
+            <button
+              type="button"
+              className={`think ${view.thinking.on ? 'is-on' : ''}`}
+              aria-pressed={view.thinking.on}
+              title="Let the writing lanes deliberate before answering. Much slower — worth it for a hard piece of writing and for nothing else."
+              onClick={() => onThinking(!view.thinking?.on)}
+            >
+              <span className="dot" aria-hidden="true" />
+              {view.thinking.on ? 'thinking on · slower' : 'thinking'}
+            </button>
+          ) : null}
+          {view.autoRun && onAutoRun ? (
+            <button
+              type="button"
+              className={`think ${view.autoRun.on ? 'is-on' : ''}`}
+              aria-pressed={view.autoRun.on}
+              title="Start a run as soon as it is proposed, instead of waiting for Run. The card still opens and esc still stops it — but a misheard goal starts moving before you have read it."
+              onClick={() => onAutoRun(!view.autoRun?.on)}
+            >
+              <span className="dot" aria-hidden="true" />
+              {view.autoRun.on ? 'auto-run on · skips Run' : 'auto-run'}
+            </button>
+          ) : null}
+        </div>
       ) : null}
 
       {view.lastAction ? (

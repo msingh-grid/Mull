@@ -101,6 +101,16 @@ export interface HudState {
    * apologetic" is not, and nobody opens a preferences window between the two.
    */
   thinking: boolean
+  /**
+   * Whether a plan card starts itself instead of waiting for Run — armed from
+   * the HUD, beside `thinking`, and for the same reason.
+   *
+   * It belongs next to the utterance rather than in a preferences window: "open
+   * LinkedIn in a new tab" wants to go the moment it is said, and "reply to
+   * Anil and send it" wants reading first. Which one you are about to say is
+   * known a second before you press the key and nowhere else.
+   */
+  autoRun: boolean
   /** The open proposal, if any. Nothing applies until the user says so. */
   card: HudCard | null
 }
@@ -116,6 +126,7 @@ export const IDLE_HUD_STATE: HudState = {
   stage: null,
   stageAt: null,
   thinking: false,
+  autoRun: false,
   card: null
 }
 
@@ -155,6 +166,8 @@ export const IPC = {
   hudResetPosition: 'mull:hud:reset-position',
   /** HUD -> main: arm or disarm thinking for the writing lanes. */
   hudSetThinking: 'mull:hud:set-thinking',
+  /** HUD -> main: arm or disarm starting a run without pressing Run. */
+  hudSetAutoRun: 'mull:hud:set-auto-run',
 
   /**
    * HUD renderer -> main: the user clicked into the transcript to correct it.

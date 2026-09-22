@@ -57,6 +57,7 @@ export interface MullApi {
     open: (window: MullWindow) => Promise<void>
   }
   hudThinking: (on: boolean) => Promise<void>
+  hudAutoRun: (on: boolean) => Promise<void>
   journal: {
     /** Newest entries first, each with its change count. */
     recent: (limit?: number) => Promise<JournalEntryView[]>
@@ -162,6 +163,7 @@ const api: MullApi = {
   },
 
   hudThinking: (on) => ipcRenderer.invoke(IPC.hudSetThinking, on) as Promise<void>,
+  hudAutoRun: (on) => ipcRenderer.invoke(IPC.hudSetAutoRun, on) as Promise<void>,
 
   journal: {
     recent: (limit) => ipcRenderer.invoke(IPC.journalRecent, limit) as Promise<JournalEntryView[]>,

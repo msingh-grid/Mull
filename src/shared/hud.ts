@@ -131,6 +131,16 @@ export interface PlanCard {
   /** True once the loop is running; Run becomes unavailable and esc stops it. */
   running?: boolean
   /**
+   * Nobody pressed Run — `settings.autoRun` did.
+   *
+   * On the card because a card that starts moving on its own has to say so.
+   * The button it replaces was the user's only cue that a run had begun, and a
+   * live step list appearing unasked is indistinguishable from a bug unless the
+   * card names the reason. Says where esc is, too, since that is now the only
+   * control on it.
+   */
+  auto?: boolean
+  /**
    * What was found — the point of the whole expedition.
    *
    * Arrives last and streams in like a diff card's text, because it is written

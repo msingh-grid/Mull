@@ -126,6 +126,11 @@ export interface NavigateRequest {
   /** What was on screen when the user spoke. The first turn's evidence. */
   context?: ScreenContext | null
   routedBy?: string
+  /**
+   * Whisper was not sure it heard this. Enough to refuse `settings.autoRun` —
+   * see the same field on `AgentRequest` for why the doubt outranks the switch.
+   */
+  unsure?: boolean
 }
 
 export interface NavigateDeps {
@@ -170,6 +175,12 @@ export interface NavigateDeps {
   journal?: JournalStore
   captures?: CaptureStore
   onJournalChanged?: () => void
+  /**
+   * `settings.autoRun`, read per proposal rather than at boot — it is a toggle
+   * on the HUD itself, armed in the second before the key goes down, so the
+   * answer can be different for the next utterance than it was for this one.
+   */
+  autoRun?: () => boolean
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   sleep?: (ms: number) => Promise<void>
   maxSteps?: number
@@ -195,7 +206,9 @@ export class NavigateLane {
   }
 
   /**
-   * Put the proposal on screen. Nothing moves until the user presses Run.
+   * Put the proposal on screen. Nothing moves until the user presses Run —
+   * unless `settings.autoRun` is on, in which case the card opens already
+   * walking and esc is the whole of the user's control over it.
    *
    * Returns as soon as the card is open — the loop runs after the user decides,
    * and the panel belongs to this lane until it closes.
@@ -204,11 +217,15 @@ export class NavigateLane {
     const origin = await this.where()
     this.stopped = false
     const parent = this.deps.trace?.() ?? new Trace({ log: this.deps.log })
+    /** Read once, so the card and the walk cannot disagree mid-proposal. */
+    const auto = this.deps.autoRun?.() === true && request.unsure !== true
     parent.step('plan.propose', {
       goal: request.goal,
       app: origin.app?.name,
       window: origin.windowTitle,
-      limit: this.maxSteps
+      limit: this.maxSteps,
+      auto: auto || undefined,
+      heldForDoubt: (this.deps.autoRun?.() === true && request.unsure === true) || undefined
     })
 
     const card = (patch: Partial<PlanCard> = {}): PlanCard => ({
@@ -227,11 +244,33 @@ export class NavigateLane {
       // press, every `draw` below becomes a no-op, and Escape goes back to the
       // app being driven.
       startsRun: true,
+      auto,
       ...patch
     })
 
-    /** Has Run been pressed? What a cancel means depends entirely on it. */
+    /** Has the walk begun? What a cancel means depends entirely on it. */
     let started = false
+
+    /**
+     * Begin the walk. One function because there are now two ways in — the
+     * press and the setting — and they must not be two slightly different
+     * starts. `started` is the guard for both.
+     */
+    const start = (): void => {
+      if (started) return
+      started = true
+      // From here the card belongs to the loop, and Escape means stop.
+      const trace = parent.fork()
+      trace.step('plan.run', { goal: request.goal, auto: auto || undefined })
+      void this.walk(request, origin, card, trace).catch((err) => {
+        trace.fail('plan.threw', {}, err)
+        this.deps.hud.closeCard()
+        this.deps.hud.announce?.(
+          'error',
+          `The plan stopped: ${err instanceof Error ? err.message : String(err)}`
+        )
+      })
+    }
 
     this.deps.hud.openCard(card(), (action) => {
       if (action === 'cancel') {
@@ -270,23 +309,17 @@ export class NavigateLane {
         this.deps.hud.announce?.('applied', 'Cancelled — nothing was pressed.')
         return
       }
-      // `started` is belt and braces — `HudController` will not deliver a second
-      // apply once a run is in flight — but it costs nothing here and every
-      // future lane copying this shape gets it free.
-      if (action !== 'apply' || started) return
-      started = true
-      // Run. From here the card belongs to the loop, and Escape means stop.
-      const trace = parent.fork()
-      trace.step('plan.run', { goal: request.goal })
-      void this.walk(request, origin, card, trace).catch((err) => {
-        trace.fail('plan.threw', {}, err)
-        this.deps.hud.closeCard()
-        this.deps.hud.announce?.(
-          'error',
-          `The plan stopped: ${err instanceof Error ? err.message : String(err)}`
-        )
-      })
+      // The `started` guard inside `start` is belt and braces — `HudController`
+      // will not deliver a second apply once a run is in flight — but it costs
+      // nothing and every future lane copying this shape gets it free.
+      if (action !== 'apply') return
+      start()
     })
+
+    // After `openCard`, never before: the card is where the run reports, and a
+    // walk that began against no card would draw into nothing and leave esc
+    // pointing at the application being driven.
+    if (auto) start()
   }
 
   // -------------------------------------------------------------------------
