@@ -155,12 +155,30 @@ whisper.cpp via its `whisper-cli` binary, as a subprocess. On device, offline,
 no audio leaves the machine. The model (`ggml-small.en.bin`, ~466 MB) is fetched
 explicitly — nothing downloads it silently.
 
+Settings → Speech model offers a second one, `ggml-small.en.bin` (~490 MB):
+better on names, jargon and a noisy room, two to three times slower. Switching
+is live — the next utterance uses it — and downloading it is its own click.
+
 ### The language engine
 
 Your own Claude subscription by default, through the Agent SDK. An API key is
 the explicit escape hatch (`settings.engine: 'auto' | 'subscription' |
 'api-key'`), and `npm run bench:engine` is how you find out whether it is worth
 selecting.
+
+Signing in is a button. If this Mac already has a Claude Code login, Mull
+inherits it and asks for nothing. If it doesn't, **Settings → Engine → Sign in
+with Claude** opens your browser, you approve it there, and the token lands
+back in Mull — the same flow, and the same long-lived inference-only token,
+that `claude setup-token` produces (`src/main/engine/oauth.ts`). Pasting that
+command's output by hand still works, folded away as the fallback for a Mac
+where the browser can't come back.
+
+Signing out is a button too, and it means two different things by design. A
+token Mull minted or was given, Mull deletes. The Claude Code login it merely
+*inherited* is not Mull's to delete — signing out of that one sets
+`settings.inheritClaudeCodeLogin` false, so Mull stops reaching for it and
+Claude Code is left untouched. Settings then offers it back.
 
 ---
 
@@ -246,7 +264,8 @@ built**.
 npm install
 npm run build:sidecar     # Swift — needed before the first run, and after
                           # any change under mull-mac/
-npm run fetch:model       # ~466 MB, ggml-small.en.bin
+npm run fetch:model       # ~150 MB, ggml-base.en.bin
+npm run fetch:model -- small.en   # optional, ~490 MB — or do it from Settings
 npm run dev
 ```
 

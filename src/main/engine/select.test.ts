@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { EngineCredentials } from '@shared/engine'
 import { MODEL_IDS, type Settings } from '@shared/settings'
 import { AGENT_MODEL } from '@shared/agent'
-import { EngineHolder, resolveEngine, SignedOutEngine } from './select'
+import { EngineHolder, inheritedLogin, resolveEngine, SignedOutEngine } from './select'
 import { AgentEngine } from './agent'
 import { ApiKeyEngine } from './api-key'
 import { CLASSIFIER_MODEL } from './classify'
@@ -49,6 +49,33 @@ describe('resolveEngine — automatic', () => {
 
   it('is signed out when there is nothing at all', () => {
     expect(pick({}).name).toBe('signed-out')
+  })
+})
+
+describe('inheritedLogin', () => {
+  it('uses the Mac’s Claude Code login when the user has not said otherwise', () => {
+    expect(inheritedLogin(true, { inheritClaudeCodeLogin: true })).toBe(true)
+  })
+
+  // "Sign out" for a credential Mull does not own: stop using it, delete
+  // nothing. The detection stays true, which is what lets Settings offer it back.
+  it('stops using it once the user signs out of it', () => {
+    expect(inheritedLogin(true, { inheritClaudeCodeLogin: false })).toBe(false)
+  })
+
+  it('is false when there is no login to inherit, whatever the setting says', () => {
+    expect(inheritedLogin(false, { inheritClaudeCodeLogin: true })).toBe(false)
+  })
+
+  it('leaves the engine signed out when that login was the only credential', () => {
+    expect(pick({}, {}, inheritedLogin(true, { inheritClaudeCodeLogin: false })).name).toBe(
+      'signed-out'
+    )
+  })
+
+  it('does not touch a token the user pasted themselves', () => {
+    const detected = inheritedLogin(true, { inheritClaudeCodeLogin: false })
+    expect(pick({ oauthToken: 'token' }, {}, detected).name).toBe('agent')
   })
 })
 

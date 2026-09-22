@@ -239,14 +239,39 @@ public struct UiTargetsInfo {
     public let stoppedBy: String
     public let scanMs: Int
 
+    /// What the walk walked through. See `AXTargets.Scan` for why these exist
+    /// at all: a browser that is not showing us the page returns "complete"
+    /// with a plausible number of targets, and only the node counts tell it
+    /// apart from a small window. Defaulted so the fakes in the test suite —
+    /// and any caller that does not care — construct one without them.
+    public let nodes: Int
+    public let webNodes: Int
+    public let webAreas: Int
+    public let duplicates: Int
+    public let clipped: Int
+    public let deepest: Int
+    public let chromium: Bool
+    /// What the app said when asked to build a tree. See `ManualAccessibility`.
+    public let wake: String
+
     public init(
-        harvestId: String, targets: [UiTargetInfo], truncated: Bool, stoppedBy: String, scanMs: Int
+        harvestId: String, targets: [UiTargetInfo], truncated: Bool, stoppedBy: String,
+        scanMs: Int, nodes: Int = 0, webNodes: Int = 0, webAreas: Int = 0, duplicates: Int = 0,
+        clipped: Int = 0, deepest: Int = 0, chromium: Bool = false, wake: String = "unknown"
     ) {
         self.harvestId = harvestId
         self.targets = targets
         self.truncated = truncated
         self.stoppedBy = stoppedBy
         self.scanMs = scanMs
+        self.nodes = nodes
+        self.webNodes = webNodes
+        self.webAreas = webAreas
+        self.duplicates = duplicates
+        self.clipped = clipped
+        self.deepest = deepest
+        self.chromium = chromium
+        self.wake = wake
     }
 }
 
@@ -276,14 +301,28 @@ public struct WindowContextInfo {
     public let harvestMs: Int
     public let screenshot: ScreenshotInfo?
     public let screenshotReason: String?
+    /// Elements visited, so "this window has no text" can be told from "this
+    /// walk could not see the text". Defaulted for the same reason as
+    /// `UiTargetsInfo.nodes`.
+    public let nodes: Int
+    /// Subtrees abandoned at the depth bound, and how deep this got.
+    public let clipped: Int
+    public let deepest: Int
+    /// What the app said when asked to build a tree. See `ManualAccessibility`.
+    public let wake: String
     public init(
         blocks: [ContextBlockInfo], truncated: Bool, stoppedBy: String, harvestMs: Int,
+        nodes: Int = 0, clipped: Int = 0, deepest: Int = 0, wake: String = "unknown",
         screenshot: ScreenshotInfo?, screenshotReason: String?
     ) {
         self.blocks = blocks
         self.truncated = truncated
         self.stoppedBy = stoppedBy
         self.harvestMs = harvestMs
+        self.nodes = nodes
+        self.clipped = clipped
+        self.deepest = deepest
+        self.wake = wake
         self.screenshot = screenshot
         self.screenshotReason = screenshotReason
     }
@@ -483,6 +522,10 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
                 "truncated": .bool(false),
                 "stoppedBy": .string(reason),
                 "harvestMs": .int(0),
+                "nodes": .int(0),
+                "clipped": .int(0),
+                "deepest": .int(0),
+                "wake": .string(reason),
                 "screenshot": .null,
                 "screenshotReason": .string(reason)
             ])
@@ -512,6 +555,14 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
             "truncated": .bool(info.truncated),
             "stoppedBy": .string(info.stoppedBy),
             "harvestMs": .int(info.harvestMs),
+            // Additive, and optional in the zod schema: a sidecar built before
+            // this field existed simply omits it, and the host prints `nodes=?`
+            // rather than failing to parse. Same rule the microphone status
+            // above follows — a new field is not a protocol bump.
+            "nodes": .int(info.nodes),
+            "clipped": .int(info.clipped),
+            "deepest": .int(info.deepest),
+            "wake": .string(info.wake),
             "screenshot": info.screenshot.map { shot in
                 JSON.object([
                     "path": .string(shot.path),
@@ -544,7 +595,15 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
                 "targets": .array([]),
                 "truncated": .bool(false),
                 "stoppedBy": .string(reason),
-                "scanMs": .int(0)
+                "scanMs": .int(0),
+                "nodes": .int(0),
+                "webNodes": .int(0),
+                "webAreas": .int(0),
+                "duplicates": .int(0),
+                "clipped": .int(0),
+                "deepest": .int(0),
+                "chromium": .bool(false),
+                "wake": .string(reason)
             ])
         }
 
@@ -584,7 +643,15 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
                 }),
             "truncated": .bool(info.truncated),
             "stoppedBy": .string(info.stoppedBy),
-            "scanMs": .int(info.scanMs)
+            "scanMs": .int(info.scanMs),
+            "nodes": .int(info.nodes),
+            "webNodes": .int(info.webNodes),
+            "webAreas": .int(info.webAreas),
+            "duplicates": .int(info.duplicates),
+            "clipped": .int(info.clipped),
+            "deepest": .int(info.deepest),
+            "chromium": .bool(info.chromium),
+            "wake": .string(info.wake)
         ])
     }
 

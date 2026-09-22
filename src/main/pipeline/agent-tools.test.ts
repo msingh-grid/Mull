@@ -54,7 +54,7 @@ const sleep = async (): Promise<void> => {}
 
 function harness(
   titles: string[] = ['Search', 'Anil Turaga', 'Priya Sharma'],
-  options: { stopped?: boolean } = {}
+  options: { stopped?: boolean; targetsStoppedBy?: string; coldScans?: number } = {}
 ): {
   context: ToolContext
   sidecar: FakeSidecar
@@ -65,7 +65,9 @@ function harness(
     accessibility: true,
     targets: titles.map((title, index) => target(index, title)),
     app: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack', pid: 900 },
-    context: ['Anil: the redlines are with legal']
+    context: ['Anil: the redlines are with legal'],
+    targetsStoppedBy: options.targetsStoppedBy,
+    coldScans: options.coldScans
   })
   const rows: JournalDraft[] = []
   const amendments: Array<{ entryId: string; evidence: string }> = []
@@ -146,6 +148,71 @@ describe('look', () => {
   })
 })
 
+describe('whether a press did anything', () => {
+  /**
+   * The bug that cost more than every other one here put together.
+   *
+   * The executor compares window titles, and almost nothing changes a window
+   * title: opening a search box, focusing a field, expanding a menu, choosing a
+   * search result. Across one real log, forty-one presses and thirty-eight of
+   * them reported as "the window is still …" — including every press that had
+   * worked. The model did the only sensible thing with that and pressed Close
+   * and tried again, turning a five-step errand into twenty-five.
+   *
+   * The verdict that can actually see an overlay open compares the target
+   * lists, and it used to arrive only on a look that asked for targets. "Press
+   * the DM, then read it" asks for text.
+   */
+  it('reports the verdict even when the look only asked for text', async () => {
+    const h = harness(['Search', 'Anil Turaga', 'Priya Sharma'])
+    await look(h.context, { want: 'targets' }, sleep)
+    await press(h.context, { index: 1, expectTitle: 'Anil Turaga' })
+
+    // What the press opened: a different window entirely, sharing nothing with
+    // the three things that were there. An overlay, in other words — and one
+    // that leaves the window title alone, which is the case the executor cannot
+    // see. Swapped *after* the press, because swapping before it would move the
+    // row out from under the press and test the staleness guard instead.
+    h.sidecar.retarget(['Cancel', 'Jump to', 'Recent'])
+
+    const out = await look(h.context, { want: 'text' }, sleep)
+
+    expect(out.text).toMatch(/the window changed/)
+    expect(h.context.pressed).toBeNull()
+  })
+
+  /** And says plainly when it really did not move, which is the other half. */
+  it('says nothing moved when nothing moved', async () => {
+    const h = harness(['Search', 'Anil Turaga', 'Priya Sharma'])
+    await look(h.context, { want: 'targets' }, sleep)
+    await press(h.context, { index: 1, expectTitle: 'Anil Turaga' })
+
+    const out = await look(h.context, { want: 'text' }, sleep)
+
+    expect(out.text).toMatch(/the window did not change/)
+    expect(out.detail).toMatch(/no change/)
+  })
+
+  /**
+   * An unchanged window title is not evidence of a failed press, and the
+   * executor no longer says it is.
+   */
+  it('does not let the press itself claim the window stood still', async () => {
+    const h = harness(['Search', 'Anil Turaga'])
+    // The executor only reaches this branch when it can read a title at all,
+    // so the pretend window needs one — and it keeps it, which is the case.
+    h.sidecar.moveTo('Prahastha Shankesi (DM) - Grid Dynamics - Slack')
+    await look(h.context, { want: 'targets' }, sleep)
+    const out = await press(h.context, { index: 1, expectTitle: 'Anil Turaga' })
+
+    expect(out.ok).toBe(true)
+    expect(out.detail).toMatch(/pressed/)
+    // The wording that caused the loop. "Still called X" is a fact about the
+    // title; "the window is still X" was read as a fact about the press.
+    expect(out.detail).not.toMatch(/^Anil Turaga — the window is still/)
+  })
+})
+
 describe('find', () => {
   it('scans by itself rather than making the model call look first', async () => {
     const h = harness()
@@ -161,6 +228,89 @@ describe('find', () => {
 
     expect(out.text).toMatch(/nothing here matches/)
     expect(out.text).toMatch(/3 things/)
+  })
+
+  /**
+   * The step that turned a cold browser into a thirty-eight second loop.
+   *
+   * `find` used to run against the toolbar and report an honest *nothing here
+   * matches, there are 18 things in this window*, from which the only available
+   * conclusion is "wrong page" — so the model re-opened the URL, resetting the
+   * document it was waiting on, and went round again. A browser with no page in
+   * it has to be told apart from a page with nothing on it.
+   */
+  it('does not report a cold browser’s toolbar as a page with nothing on it', async () => {
+    const h = harness(['Search'], { targetsStoppedBy: 'browser-cold' })
+    const out = await find(h.context, { query: 'Create event' }, sleep)
+
+    expect(out.text).toMatch(/not sharing the page/)
+    expect(out.text).not.toMatch(/nothing here matches/)
+    // And it names the one remedy, because the user is the only one who can
+    // apply it.
+    expect(out.text).toMatch(/chrome:\/\/accessibility/)
+    expect(out.ok).toBe(false)
+  })
+})
+
+describe('a browser that is not showing its page', () => {
+  /**
+   * A page navigated to a moment ago has no tree yet. Waiting is the whole
+   * remedy, and the wait has to happen below the model rather than being left
+   * to it — the model's version of waiting is opening the URL again.
+   */
+  it('waits for a page that is still arriving', async () => {
+    const h = harness(['Search', 'Anil Turaga'], {
+      targetsStoppedBy: 'browser-cold',
+      coldScans: 2
+    })
+    const out = await look(h.context, { want: 'targets' }, sleep)
+
+    expect(out.text).toContain('Anil Turaga')
+    expect(out.text).not.toMatch(/not sharing the page/)
+  })
+
+  /** And gives up, rather than waiting out the run. */
+  it('says so when the page never arrives', async () => {
+    const h = harness(['Search'], { targetsStoppedBy: 'browser-cold' })
+    const out = await look(h.context, { want: 'targets' }, sleep)
+
+    expect(out.text).toMatch(/not sharing the page/)
+    expect(out.detail).toMatch(/browser-cold/)
+  })
+
+  /**
+   * The wait is bounded *and* spent once. A browser whose accessibility is off
+   * stays off, so paying two and a half seconds on every look would turn one
+   * honest refusal into a slow one repeated all run.
+   */
+  it('does not pay the wait twice for the same browser', async () => {
+    const h = harness(['Search'], { targetsStoppedBy: 'browser-cold' })
+
+    await look(h.context, { want: 'targets' }, sleep)
+    const afterFirst = h.sidecar.calls.filter((c) => c.method === 'uiTargets').length
+
+    h.context.scan = null
+    await look(h.context, { want: 'targets' }, sleep)
+    const afterSecond = h.sidecar.calls.filter((c) => c.method === 'uiTargets').length
+
+    expect(afterFirst).toBeGreaterThan(2)
+    expect(afterSecond - afterFirst).toBe(1)
+  })
+
+  /** Until the run navigates, which is a new document and a fresh wait. */
+  it('waits again once the run has gone somewhere else', async () => {
+    const { context, sidecar } = browserHarness({
+      scan: { targetsStoppedBy: 'browser-cold' }
+    })
+    const scans = (): number => sidecar.calls.filter((call) => call.method === 'uiTargets').length
+
+    await look(context, { want: 'targets' }, sleep)
+    const before = scans()
+
+    await openUrl(context, { url: 'https://calendar.google.com' })
+    await look(context, { want: 'targets' }, sleep)
+
+    expect(scans() - before).toBeGreaterThan(1)
   })
 })
 
@@ -403,9 +553,26 @@ const TABS: BrowserTab[] = [
 ]
 
 function browserHarness(
-  options: { tabs?: BrowserTab[]; fail?: BrowserFailure; front?: { bundleId: string; name: string } | null } = {}
-): { context: ToolContext; opened: string[]; switched: number[] } {
+  options: {
+    tabs?: BrowserTab[]
+    fail?: BrowserFailure
+    front?: { bundleId: string; name: string } | null
+    /** Passed through to `harness`, for the tests about a browser with no page. */
+    scan?: { targetsStoppedBy?: string; coldScans?: number }
+  } = {}
+): {
+  context: ToolContext
+  sidecar: FakeSidecar
+  opened: string[]
+  openedIn: Array<string | null>
+  /** Whether each `openUrl` asked for a new tab. See the default-tab test. */
+  newTabs: boolean[]
+  switched: number[]
+} {
   const opened: string[] = []
+  /** Which browser each `openUrl` was aimed at. `null` means "the default one". */
+  const openedIn: Array<string | null> = []
+  const newTabs: boolean[] = []
   const switched: number[] = []
   const boom = (): never => {
     throw new BrowserError(options.fail as BrowserFailure, String(options.fail))
@@ -423,15 +590,17 @@ function browserHarness(
     openUrl: async (input) => {
       if (options.fail) boom()
       opened.push(input.url)
+      openedIn.push(input.bundleId)
+      newTabs.push(input.newTab)
       return { index: 3, title: 'opened', url: input.url, active: true }
     }
   }
-  const h = harness()
+  const h = harness(undefined, options.scan)
   h.context.browser = bridge
   h.context.front =
     options.front === undefined ? { bundleId: 'com.google.Chrome', name: 'Chrome' } : options.front
   h.context.knownHosts = new Set<string>()
-  return { context: h.context, opened, switched }
+  return { context: h.context, sidecar: h.sidecar, opened, openedIn, newTabs, switched }
 }
 
 describe('tabs', () => {
@@ -621,6 +790,83 @@ describe('openUrl', () => {
       STOPPED_MESSAGE
     )
     expect(opened).toEqual([])
+  })
+})
+
+describe('which browser an address is for', () => {
+  /**
+   * The failure this exists for. Asked to open YouTube in Arc, standing in a
+   * non-browser, with Chrome as the Mac's default: `open` took the URL to
+   * Chrome and the run drove Chrome for the next fifty seconds believing it was
+   * in Arc. Nothing said otherwise.
+   *
+   * Two browsers running is a choice, and a choice is not Mull's to guess.
+   */
+  /**
+   * The default, which used to be the other way round. An unwanted tab is a tab
+   * to close; an unwanted replacement throws away the page the user was reading
+   * and cannot be undone from here — so absent means new.
+   */
+  it('opens a new tab unless the goal asked for the page to be replaced', async () => {
+    const { context, newTabs } = browserHarness()
+    await openUrl(context, { url: 'https://example.test/' })
+    await openUrl(context, { url: 'https://example.test/2', newTab: true })
+    await openUrl(context, { url: 'https://example.test/3', newTab: false })
+    expect(newTabs).toEqual([true, true, false])
+  })
+
+  it('refuses to guess when more than one browser is running', async () => {
+    const { context, opened } = browserHarness({
+      front: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack' }
+    })
+    context.knownApps = new Map([
+      ['com.tinyspeck.slackmacgap', 'Slack'],
+      ['company.thebrowser.Browser', 'Arc'],
+      ['com.google.Chrome', 'Chrome']
+    ])
+
+    const out = await openUrl(context, { url: 'https://www.youtube.com' })
+
+    expect(out.ok).toBe(false)
+    expect(out.text).toContain('Arc')
+    expect(out.text).toContain('Chrome')
+    expect(out.text).toMatch(/switchApp/)
+    // And crucially: nothing was opened anywhere.
+    expect(opened).toEqual([])
+  })
+
+  /** One browser is not a choice, so it goes there by name rather than by luck. */
+  it('opens in the only browser running, rather than in the default one', async () => {
+    const { context, opened, openedIn } = browserHarness({
+      front: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack' }
+    })
+    context.knownApps = new Map([
+      ['com.tinyspeck.slackmacgap', 'Slack'],
+      ['company.thebrowser.Browser', 'Arc']
+    ])
+
+    const out = await openUrl(context, { url: 'https://www.youtube.com' })
+
+    expect(out.ok).toBe(true)
+    expect(opened).toEqual(['https://www.youtube.com'])
+    // Named, not left to `open` and the Mac's idea of a default — which is the
+    // whole difference between landing in Arc and landing in Chrome.
+    expect(openedIn).toEqual(['company.thebrowser.Browser'])
+  })
+
+  /** Standing in a browser settles it — there is nothing to disambiguate. */
+  it('uses the browser in front without asking anyone', async () => {
+    const { context, opened, openedIn } = browserHarness()
+    context.knownApps = new Map([
+      ['com.google.Chrome', 'Chrome'],
+      ['company.thebrowser.Browser', 'Arc']
+    ])
+
+    const out = await openUrl(context, { url: 'https://www.youtube.com' })
+
+    expect(out.ok).toBe(true)
+    expect(opened).toEqual(['https://www.youtube.com'])
+    expect(openedIn).toEqual(['com.google.Chrome'])
   })
 })
 

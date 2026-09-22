@@ -77,9 +77,89 @@ public enum AXTargets {
         public let targets: [Target]
         public let truncated: Bool
         /// "complete" | "nodes" | "deadline" | "targets" | "no-window"
-        /// | "no-accessibility" | "tree-warming"
+        /// | "no-accessibility" | "tree-warming" | "browser-cold"
         public let stoppedBy: String
         public let elapsedMs: Int
+
+        // MARK: What the tree looked like
+        //
+        // Diagnostics, not data. `stoppedBy` says which rule ended the walk;
+        // these say what the walk was walking through, and that is the half
+        // that was missing when a browser kept answering with its toolbar.
+        //
+        // The failure this exists for reports `stoppedBy: "complete"` and
+        // eighteen targets, which is indistinguishable from a small window that
+        // genuinely has eighteen buttons in it. It stops being ambiguous the
+        // moment the node counts are attached: 190 nodes and no page is a
+        // browser that is not showing us the page, 3836 nodes with 2999 of
+        // them from the page is a browser that is.
+
+        /// Elements visited. Against `Budget.maxNodes`, so a walk that stopped
+        /// early can be told from one that ran out of tree.
+        public let nodes: Int
+        /// How many of those carried an `AXDOMIdentifier`.
+        ///
+        /// **Not a page detector, though it was built as one.** Chrome's own
+        /// toolbar and tab strip are WebUI, so they carry DOM identifiers too:
+        /// a Chrome window showing nothing but its own furniture measures 119
+        /// nodes of which 112 are "web". Kept because the ratio is still worth
+        /// seeing, and because the number is what proved the detector wrong.
+        public let webNodes: Int
+        /// Web *documents* in this window — nodes whose role is `AXWebArea`.
+        ///
+        /// This is the honest test `webNodes` was standing in for. A browser
+        /// rendering a page has at least one; a browser whose renderer
+        /// accessibility is off has none, however much WebUI furniture it
+        /// publishes. Zero here, in a Chromium app, means the page is not
+        /// visible to us at all.
+        public let webAreas: Int
+        /// Targets dropped as the same control seen twice. Chrome publishes its
+        /// toolbar under two sibling groups, so in a browser this is normally
+        /// large, and its being zero is itself a signal.
+        public let duplicates: Int
+        /// Subtrees abandoned at `maxDepth`. Non-zero means this scan did not
+        /// see the whole window, whatever `stoppedBy` says.
+        public let clipped: Int
+        /// The deepest level the walk reached. Against `maxDepth`, it says
+        /// whether the bound was brushed or leaned on.
+        public let deepest: Int
+        /// Does this app keep its page behind a renderer at all? A missing web
+        /// document means nothing in Finder and everything in Chrome.
+        public let chromium: Bool
+        /// What this app said when asked to build a tree: "enabled" or
+        /// "unsupported". A browser that answers "unsupported" is one Mull has
+        /// no lever on — see `AXHarvest.ManualAccessibility`.
+        public let wake: String
+
+        public init(
+            harvestId: String,
+            targets: [Target],
+            truncated: Bool,
+            stoppedBy: String,
+            elapsedMs: Int,
+            nodes: Int = 0,
+            webNodes: Int = 0,
+            webAreas: Int = 0,
+            duplicates: Int = 0,
+            clipped: Int = 0,
+            deepest: Int = 0,
+            chromium: Bool = false,
+            wake: String = "unknown"
+        ) {
+            self.harvestId = harvestId
+            self.targets = targets
+            self.truncated = truncated
+            self.stoppedBy = stoppedBy
+            self.elapsedMs = elapsedMs
+            self.nodes = nodes
+            self.webNodes = webNodes
+            self.webAreas = webAreas
+            self.duplicates = duplicates
+            self.clipped = clipped
+            self.deepest = deepest
+            self.chromium = chromium
+            self.wake = wake
+        }
     }
 
     public struct Budget {
@@ -112,7 +192,7 @@ public enum AXTargets {
         /// tokens for grew by a third, not by five times.
         public init(
             maxNodes: Int = 5000,
-            maxDepth: Int = 40,
+            maxDepth: Int = AXHarvest.defaultMaxDepth,
             maxTargets: Int = 300,
             deadline: TimeInterval = 1.5
         ) {
@@ -231,24 +311,34 @@ public enum AXTargets {
     /// Walk the frontmost window of `pid` and number everything actionable.
     ///
     /// `treeDeadline` carries the Chromium warm-up across retries exactly as
-    /// `AXHarvest.harvest` does, and for the same reason: the switch only
-    /// answers "yes" once per app, so recomputing it inside the retry would end
-    /// the wait after a single poll.
+    /// `AXHarvest.harvest` does, so the wait is bounded in total rather than
+    /// per attempt.
     public static func scan(
         pid: pid_t,
         budget: Budget = Budget(),
         treeDeadline: CFAbsoluteTime? = nil
     ) -> Scan {
         let startedAt = CFAbsoluteTimeGetCurrent()
-        let warming = treeDeadline != nil || AXHarvest.enableManualAccessibility(pid: pid)
-        let treeDeadline = treeDeadline ?? (startedAt + AXHarvest.manualAccessibilityWait)
+        // The same anchor the reading walk uses, and that is the point: a `look`
+        // reads the window and then scans it, and before this the read consumed
+        // the one-shot "I just switched it on" signal and the scan was told the
+        // tree was settled. See `AXHarvest.warmUpDeadline`.
+        let wake = AXHarvest.manualAccessibility(pid: pid)
+        let treeDeadline = treeDeadline ?? AXHarvest.warmUpDeadline(wake)
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, AXHarvest.messagingTimeout)
+        // Resolved once, up front, rather than at the single point it used to
+        // be asked. Every result carries it now, including the ones that return
+        // before the walk: "no window, and it was a browser" is a different
+        // sentence from "no window", and the log only gets to say it if the
+        // early returns know too.
+        let chromium = isChromiumBrowser(pid: pid)
 
         guard let root = AXHarvest.window(of: app) else {
             return Scan(
                 harvestId: "", targets: [], truncated: false, stoppedBy: "no-window",
-                elapsedMs: AXHarvest.elapsed(since: startedAt))
+                elapsedMs: AXHarvest.elapsed(since: startedAt), chromium: chromium,
+                wake: wake.name)
         }
 
         var targets: [Target] = []
@@ -267,6 +357,13 @@ public enum AXTargets {
         /// saying out loud rather than returning a toolbar and calling it a
         /// window. See `webContent` and the `browser-cold` result below.
         var webNodes = 0
+        /// Web documents seen. See `Scan.webAreas` — this, not `webNodes`, is
+        /// what "is the page here" actually asks.
+        var webAreas = 0
+        /// Subtrees abandoned at `maxDepth`, and how far down the walk got. See
+        /// the depth guard below for why these are worth a counter each.
+        var clipped = 0
+        var deepest = 0
 
         while let (element, depth, inChoices) = stack.popLast() {
             if visited >= budget.maxNodes {
@@ -285,6 +382,7 @@ public enum AXTargets {
 
             let node = read(element)
             if webContent(element) { webNodes += 1 }
+            if node.role == webAreaRole { webAreas += 1 }
             if let target = target(
                 from: node, index: targets.count, element: element, inChoices: inChoices,
                 choicesTaken: choicesTaken)
@@ -304,7 +402,19 @@ public enum AXTargets {
                 }
             }
 
-            guard depth < budget.maxDepth else { continue }
+            // The depth bound, and the one budget that used to leave no trace.
+            //
+            // The other three announce themselves in `stoppedBy`; this one
+            // dropped the subtree and let the walk report "complete", which is
+            // how a browser window came to answer that it had finished reading
+            // a page it had never entered. A modern web app is a long chain of
+            // nested wrappers before the first thing a person would recognise,
+            // so this is the bound a page hits, and it hit it silently.
+            guard depth < budget.maxDepth else {
+                clipped += 1
+                continue
+            }
+            deepest = max(deepest, depth)
             // Once inside a list of choices, everything below it is too. See
             // `choiceContainers`.
             let below = inChoices || choiceContainers.contains(node.role)
@@ -316,14 +426,16 @@ public enum AXTargets {
         // The same cold-Chromium wait as the reading harvest. A Slack window
         // that has never been read has no tree at all, and an empty target list
         // from one of those means "ask again", not "nothing here is clickable".
-        if warming && targets.isEmpty {
+        if let treeDeadline, targets.isEmpty {
             if CFAbsoluteTimeGetCurrent() < treeDeadline {
                 Thread.sleep(forTimeInterval: AXHarvest.manualAccessibilityPoll)
                 return scan(pid: pid, budget: budget, treeDeadline: treeDeadline)
             }
             return Scan(
                 harvestId: "", targets: [], truncated: true, stoppedBy: "tree-warming",
-                elapsedMs: AXHarvest.elapsed(since: startedAt))
+                elapsedMs: AXHarvest.elapsed(since: startedAt), nodes: visited,
+                webNodes: webNodes, webAreas: webAreas, duplicates: duplicates,
+                clipped: clipped, deepest: deepest, chromium: chromium, wake: wake.name)
         }
 
         // A browser whose renderer accessibility is asleep. It answers every
@@ -333,13 +445,28 @@ public enum AXTargets {
         // and "this browser is not showing me the page" look identical from
         // here and mean completely different things to the person asking.
         //
-        // Measured on Chrome 152: asleep it is 190 nodes and no web content;
-        // awake, 3836 nodes and 2999 of them from the page.
-        if webNodes == 0, isChromiumBrowser(pid: pid) {
+        // ### The test is web *documents*, not web nodes
+        //
+        // This used to ask `webNodes == 0`, meaning "did anything here carry an
+        // `AXDOMIdentifier`", and the answer in Chrome is always yes — because
+        // Chrome's own toolbar and tab strip are WebUI and carry them too. A
+        // Chrome window showing none of Google Calendar measures 119 nodes of
+        // which **112 are "web"**, so the guard never once fired and every cold
+        // browser was reported as an ordinary complete scan of eighteen
+        // buttons. The agent believed it, hunted for a Create button among the
+        // tab strip, decided it had navigated wrong, re-opened the URL, and
+        // went round again: twelve turns and thirty-eight seconds to do nothing.
+        //
+        // `AXWebArea` is the honest test. It is the root of a rendered
+        // document: one per page when the renderer is awake, none at all when
+        // it is not, however much furniture the browser publishes.
+        if webAreas == 0, chromium {
             return Scan(
                 harvestId: Store.shared.keep(elements: elements, pid: pid),
                 targets: targets, truncated: true, stoppedBy: "browser-cold",
-                elapsedMs: AXHarvest.elapsed(since: startedAt))
+                elapsedMs: AXHarvest.elapsed(since: startedAt), nodes: visited,
+                webNodes: webNodes, webAreas: webAreas, duplicates: duplicates,
+                clipped: clipped, deepest: deepest, chromium: chromium, wake: wake.name)
         }
 
         let harvestId = Store.shared.keep(elements: elements, pid: pid)
@@ -348,7 +475,15 @@ public enum AXTargets {
             targets: targets,
             truncated: stoppedBy != "complete",
             stoppedBy: stoppedBy,
-            elapsedMs: AXHarvest.elapsed(since: startedAt))
+            elapsedMs: AXHarvest.elapsed(since: startedAt),
+            nodes: visited,
+            webNodes: webNodes,
+            webAreas: webAreas,
+            duplicates: duplicates,
+            clipped: clipped,
+            deepest: deepest,
+            chromium: chromium,
+            wake: wake.name)
     }
 
     // MARK: - One node
@@ -519,6 +654,9 @@ public enum AXTargets {
     /// renderer, and asking for it is a cheap way to answer "is the page
     /// actually here" without knowing anything about the page. Only the
     /// presence of the attribute matters, never its value.
+    /// The role a browser gives the root of a rendered document.
+    private static let webAreaRole = "AXWebArea"
+
     private static func webContent(_ element: AXUIElement) -> Bool {
         var value: CFTypeRef?
         return AXUIElementCopyAttributeValue(element, "AXDOMIdentifier" as CFString, &value)

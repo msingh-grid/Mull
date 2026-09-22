@@ -111,7 +111,16 @@ export default function App(): JSX.Element {
       // button that is also a handle — collapsed, it is the only handle there
       // is — so its click is decided on release instead, by distance.
       const target = event.target as HTMLElement
-      if (target.closest('button:not(.pet), .diffbody, a, input')) return
+      // …and the transcript, once it is offering to be corrected: a click that
+      // started a drag would never reach the field, and a drag is not what
+      // someone aiming at a misheard name is doing.
+      if (
+        target.closest(
+          'button:not(.pet), .diffbody, a, input, textarea, .transcript.is-correctable'
+        )
+      ) {
+        return
+      }
       if (event.button !== 0) return
       dragging.current = true
       down.current = { x: event.screenX, y: event.screenY, onPet: target.closest('.pet') !== null }
@@ -169,6 +178,20 @@ export default function App(): JSX.Element {
     void bridge.hud.action(action)
   }
 
+  /**
+   * Correcting what Mull heard.
+   *
+   * Passed straight through: everything that makes this work — lending the
+   * panel the keyboard, giving the card's ⏎ and esc back for the duration,
+   * putting the caret back in the app afterwards — is main's, because it is all
+   * about windows this renderer cannot see. All that happens here is the two
+   * ends of the correction being reported.
+   */
+  const correct = {
+    begin: (): void => bridge.hud.editBegin(),
+    end: (text: string | null): void => void bridge.hud.editEnd(text)
+  }
+
   return (
     <div className="hud-stage">
       <div
@@ -195,6 +218,7 @@ export default function App(): JSX.Element {
               setState((previous) => ({ ...previous, thinking: on }))
               void window.mull?.hudThinking(on)
             }}
+            onCorrect={correct}
           />
         ) : null}
         <Pet mood={view.mood} label={view.label} expanded={panelOpen} />

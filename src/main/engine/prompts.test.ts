@@ -3,14 +3,17 @@ import type { ScreenContext } from '@shared/context'
 import type { ContextBlock } from '@shared/sidecar-api'
 import type { UiTarget } from '@shared/sidecar-api'
 import {
+  ANSWER_SYSTEM_PROMPT,
   EDIT_SYSTEM_PROMPT,
   NAVIGATE_SYSTEM_PROMPT,
+  answerPrompt,
   controlOf,
   editContent,
   editPrompt,
   navigatePrompt,
   parseNavStep,
   renderContext,
+  renderDid,
   renderTargets,
   stateOf
 } from './prompts'
@@ -236,6 +239,55 @@ describe('what a target looks like', () => {
     expect(rendered).toContain('  0 check  Notify me (on)')
     expect(rendered).toContain('  1 menu   Repeat → Never')
     expect(rendered).toContain('  2 field  Title (empty)')
+  })
+})
+
+describe('the answer turn is told what the run did', () => {
+  /**
+   * The gap this closes. The answer turn used to be handed a goal and a window
+   * and nothing else, so a thin read — a browser that had not woken, a page
+   * still loading — left "nothing happened" as the only story that fit. Three
+   * separate runs ended by telling the user *"I don't have the ability to open
+   * apps or navigate to sites myself"*, every one of them while the page Mull
+   * had just opened was on screen in front of them.
+   */
+  it('carries the completed steps beside the window', () => {
+    const prompt = answerPrompt({
+      goal: 'open YouTube in Arc',
+      context: null,
+      did: [
+        { verb: 'tabs', object: '40 tabs', ok: true },
+        { verb: 'open', object: 'www.youtube.com', ok: true }
+      ]
+    })
+    expect(prompt).toContain('<did>')
+    expect(prompt).toContain('open www.youtube.com')
+    // Even with nothing readable, the evidence that it happened is present.
+    expect(prompt).toContain('this window had no readable text')
+  })
+
+  /** A step that failed is shown as failed rather than quietly dropped. */
+  it('says which steps did not work', () => {
+    const prompt = answerPrompt({
+      goal: 'find the message',
+      did: [{ verb: 'press', object: 'Search', ok: false }]
+    })
+    expect(prompt).toMatch(/press Search\s+— did not work/)
+  })
+
+  it('leaves the block out entirely when there is nothing to report', () => {
+    expect(answerPrompt({ goal: 'read this' })).not.toContain('<did>')
+    expect(renderDid([])).toBeNull()
+  })
+
+  /**
+   * The sentence itself, pinned. It is the one thing this turn must never
+   * write, and a prompt rule that quietly disappears in an edit would take the
+   * bug back with it.
+   */
+  it('forbids writing about its own capabilities', () => {
+    expect(ANSWER_SYSTEM_PROMPT).toMatch(/never about what you can or cannot do/i)
+    expect(ANSWER_SYSTEM_PROMPT).toContain('<did>')
   })
 })
 

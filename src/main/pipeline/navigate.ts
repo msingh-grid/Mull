@@ -73,6 +73,18 @@ const TREE_ATTEMPTS = 3
 const TREE_POLL_MS = 350
 
 /**
+ * How long to keep asking a browser that is not showing us its page.
+ *
+ * The same wait, and the same reasoning, as `agent-tools.ts` — a page navigated
+ * to a moment ago has to load before it has a tree to expose, and that is not
+ * distinguishable from a browser whose renderer accessibility is off until the
+ * waiting is done. Spent once, here, immediately before the lane gives up: the
+ * step below `break`s on a cold browser, so there is no later turn to spend it.
+ */
+const COLD_ATTEMPTS = 4
+const COLD_POLL_MS = 600
+
+/**
  * How much of a window one step is allowed to look at.
  *
  * 300 rather than 120 because a browser is not a Mail window. Chrome showing
@@ -536,7 +548,19 @@ export class NavigateLane {
       stage('reading what it found')
       try {
         const said = await this.deps.engine.answer(
-          { goal: request.goal, context: found },
+          {
+            goal: request.goal,
+            context: found,
+            // The same evidence the agent lane passes, for the same reason —
+            // see `AnswerRequest.did`.
+            did: steps
+              .filter((step) => step.state !== 'running')
+              .map((step) => ({
+                verb: step.verb,
+                object: step.object,
+                ok: step.state !== 'failed'
+              }))
+          },
           (partial) => {
             answer = partial
             draw()
@@ -729,10 +753,19 @@ export class NavigateLane {
       await this.sleep(TREE_POLL_MS)
       seen = await this.deps.sidecar.uiTargets(SCAN_BUDGET)
     }
+    for (let n = 0; seen.stoppedBy === 'browser-cold' && n < COLD_ATTEMPTS; n++) {
+      await this.sleep(COLD_POLL_MS)
+      seen = await this.deps.sidecar.uiTargets(SCAN_BUDGET)
+    }
     return {
       harvestId: seen.harvestId,
       targets: seen.targets as UiTarget[],
-      stoppedBy: seen.stoppedBy
+      stoppedBy: seen.stoppedBy,
+      nodes: seen.nodes,
+      webAreas: seen.webAreas,
+      clipped: seen.clipped,
+      deepest: seen.deepest,
+      chromium: seen.chromium
     }
   }
 

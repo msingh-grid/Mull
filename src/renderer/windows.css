@@ -538,13 +538,23 @@ select:focus-visible {
 }
 
 /* The HUD mounted inside a page is an object on the desk, not a floating
-   panel — same paint, no screen-level shadow. */
+   panel — same paint, no screen-level shadow. It also takes the page's full
+   measure rather than the panel's own 480px, so every onboarding page rules
+   off at the same right edge the permission rows do — otherwise pages 1, 2
+   and 5 hug the left of a fullscreen window while 3 and 4 fill it. */
 .onboarding .hud,
 .demo-hud {
   width: 100%;
-  max-width: var(--hud-w);
+  max-width: none;
   box-shadow: var(--shadow-row);
   border: 1px solid var(--hairline);
+}
+
+/* The card now spans the page, so hold the marks themselves to a reading
+   measure — the same move .perm-reason makes inside a full-width row. */
+.onboarding .card-body,
+.onboarding .last-action > span:first-child {
+  max-width: 74ch;
 }
 
 .page-note {
@@ -592,7 +602,6 @@ select:focus-visible {
 .practice-note {
   display: block;
   width: 100%;
-  max-width: var(--hud-w);
   font: inherit;
   font-size: 13px;
   line-height: 1.6;
@@ -640,3 +649,120 @@ select:focus-visible {
   border-radius: var(--r-kbd);
   padding: 4px 9px;
 }
+
+/* ── Onboarding motion + sound (M5c) ──────────────────────────────────────────
+   Scoped to `.onboarding` on purpose. DESIGN.md §5 still governs the HUD, the
+   journal and settings — no bounce, no exit animations. This window introduces
+   rather than assists, so it is allowed to perform. Everything here collapses
+   under the global `prefers-reduced-motion` block in tokens.css.
+   ------------------------------------------------------------------------- */
+
+/* The page that framer-motion transforms. Isolating it keeps the blur and
+   scale off the window chrome, so the footer never shimmers mid-turn. */
+.page-stage {
+  transform-origin: 50% 40%;
+  will-change: transform, opacity, filter;
+}
+
+/* Permission rows stagger on entry. Done in CSS rather than by wrapping the
+   rows in motion elements, because PermissionRows is shared with Settings and
+   must stay §5-compliant there. */
+@media (prefers-reduced-motion: no-preference) {
+  .onboarding .perm-stage .perm-row {
+    animation: perm-rise 420ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .onboarding .perm-stage .perm-row:nth-child(1) { animation-delay: 60ms; }
+  .onboarding .perm-stage .perm-row:nth-child(2) { animation-delay: 120ms; }
+  .onboarding .perm-stage .perm-row:nth-child(3) { animation-delay: 180ms; }
+  .onboarding .perm-stage .perm-row:nth-child(4) { animation-delay: 240ms; }
+  .onboarding .perm-stage .perm-row:nth-child(5) { animation-delay: 300ms; }
+
+  /* The ✓ is stamped, not faded. The class only lands when polling confirms the
+     grant, so this animation fires exactly once per permission, on the turn it
+     becomes true — which is the moment worth marking. */
+  .onboarding .perm-row.is-done .st {
+    animation: stamp 460ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+}
+
+@keyframes perm-rise {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes stamp {
+  0%   { transform: scale(0.4) rotate(-12deg); opacity: 0; }
+  55%  { transform: scale(1.18) rotate(2deg);  opacity: 1; }
+  100% { transform: none;                      opacity: 1; }
+}
+
+/* Download progress. scaleX on a pre-sized track, so the bar never relayouts
+   the row it sits in. */
+.dl-track {
+  height: 3px;
+  margin-top: 7px;
+  border-radius: 2px;
+  background: var(--paper-recessed);
+  overflow: hidden;
+}
+.dl-fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--ins);
+  transform-origin: 0 50%;
+}
+
+/* Footer ticks. The filled head is one element handed between ticks by
+   layoutId, so progress travels instead of five bars recolouring in place. */
+.ticks i { position: relative; }
+.tick-head {
+  position: absolute;
+  inset: 0;
+  border-radius: 1px;
+  background: var(--ink);
+}
+
+/* Sound toggle. Sized to sit in the footer row without pushing the nav around;
+   the glyph carries the state and .sr-only carries it for screen readers. */
+.sound-toggle {
+  min-width: 30px;
+  padding-inline: 8px;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--ink-3);
+}
+.sound-toggle[aria-pressed='true'] { color: var(--ink); }
+
+/* Said out loud on page 5, because silence that is deliberate should look
+   deliberate. Sits inside the stage label, at label weight. */
+.stage-label { display: flex; align-items: baseline; gap: 10px; }
+.mic-quiet {
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--ink-3);
+  font-size: 11px;
+}
+
+/* The token-paste fallback in the engine pane. Folded shut by default and
+   marked like the journal's disclosures, so "there is another way" is visible
+   without competing with the button that is the way. */
+.fallback {
+  margin: 0 0 12px;
+  padding: 9px 0 2px;
+  border-top: 1px solid var(--hairline-soft);
+}
+.fallback > summary {
+  cursor: pointer;
+  list-style: none;
+  font-size: 12.5px;
+  color: var(--ink-3);
+}
+.fallback > summary::-webkit-details-marker { display: none; }
+.fallback > summary::before {
+  content: '▸ ';
+  color: var(--ink-3);
+}
+.fallback[open] > summary::before { content: '▾ '; }
+.fallback > summary:hover { color: var(--ink-2); }
+.fallback p { margin-top: 8px; }

@@ -41,6 +41,16 @@ export interface MullApi {
     resetPosition: () => Promise<void>
     /** Dev-only: open a FakeEngine card so the surfaces can be exercised. */
     devCard: (kind: 'diff' | 'plan') => Promise<void>
+    /**
+     * Correct what Mull heard, before deciding on the card it produced.
+     *
+     * `editBegin` asks main for the keyboard — the panel is not focusable
+     * otherwise, and the card's global ⏎ / esc would swallow the two keys the
+     * field needs. `editEnd` gives it back: a string re-runs the utterance from
+     * those words, null leaves everything as it was.
+     */
+    editBegin: () => void
+    editEnd: (text: string | null) => Promise<void>
   }
   /** Mull has no Dock icon; windows are opened by name. */
   windows: {
@@ -74,8 +84,11 @@ export interface MullApi {
     open: (key: PermissionKey) => Promise<void>
   }
   model: {
-    status: () => Promise<ModelStatus>
-    download: () => Promise<{ ok: boolean; message: string }>
+    /** Defaults to the model Settings has selected. */
+    status: (name?: string) => Promise<ModelStatus>
+    /** Every model on offer, in catalog order. */
+    list: () => Promise<ModelStatus[]>
+    download: (name?: string) => Promise<{ ok: boolean; message: string }>
     onProgress: (handler: (progress: DownloadProgress) => void) => () => void
   }
   /**
@@ -89,6 +102,13 @@ export interface MullApi {
       kind: 'subscription' | 'api-key',
       secret: string
     ) => Promise<{ ok: boolean; message: string }>
+    /**
+     * Sign in through the browser. Resolves when the browser comes back, which
+     * is however long the person takes — the pane says so while it waits.
+     */
+    signInBrowser: () => Promise<{ ok: boolean; message: string }>
+    /** Give up on a browser that never came back. */
+    cancelSignIn: () => Promise<void>
     signOut: (kind: 'subscription' | 'api-key') => Promise<unknown>
     /** One real round trip — proof the credential works, not that it saved. */
     test: () => Promise<EngineTestResult>
@@ -132,7 +152,9 @@ const api: MullApi = {
     dragMove: (pointer) => ipcRenderer.send(IPC.hudDragMove, pointer),
     dragEnd: () => ipcRenderer.send(IPC.hudDragEnd),
     resetPosition: () => ipcRenderer.invoke(IPC.hudResetPosition) as Promise<void>,
-    devCard: (kind) => ipcRenderer.invoke(IPC.devCard, kind) as Promise<void>
+    devCard: (kind) => ipcRenderer.invoke(IPC.devCard, kind) as Promise<void>,
+    editBegin: () => ipcRenderer.send(IPC.hudEditBegin),
+    editEnd: (text) => ipcRenderer.invoke(IPC.hudEditEnd, text) as Promise<void>
   },
 
   windows: {
@@ -173,9 +195,10 @@ const api: MullApi = {
   },
 
   model: {
-    status: () => ipcRenderer.invoke(IPC.modelStatus) as Promise<ModelStatus>,
-    download: () =>
-      ipcRenderer.invoke(IPC.modelDownload) as Promise<{ ok: boolean; message: string }>,
+    status: (name) => ipcRenderer.invoke(IPC.modelStatus, name) as Promise<ModelStatus>,
+    list: () => ipcRenderer.invoke(IPC.modelList) as Promise<ModelStatus[]>,
+    download: (name) =>
+      ipcRenderer.invoke(IPC.modelDownload, name) as Promise<{ ok: boolean; message: string }>,
     onProgress: (handler) => {
       const listener = (_event: unknown, progress: DownloadProgress): void => handler(progress)
       ipcRenderer.on(IPC.modelProgress, listener)
@@ -190,6 +213,9 @@ const api: MullApi = {
         ok: boolean
         message: string
       }>,
+    signInBrowser: () =>
+      ipcRenderer.invoke(IPC.engineSignInBrowser) as Promise<{ ok: boolean; message: string }>,
+    cancelSignIn: () => ipcRenderer.invoke(IPC.engineSignInCancel) as Promise<void>,
     signOut: (kind) => ipcRenderer.invoke(IPC.engineSignOut, kind) as Promise<unknown>,
     test: () => ipcRenderer.invoke(IPC.engineTest) as Promise<EngineTestResult>
   },

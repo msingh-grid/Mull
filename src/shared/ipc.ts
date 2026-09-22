@@ -156,6 +156,25 @@ export const IPC = {
   /** HUD -> main: arm or disarm thinking for the writing lanes. */
   hudSetThinking: 'mull:hud:set-thinking',
 
+  /**
+   * HUD renderer -> main: the user clicked into the transcript to correct it.
+   *
+   * Two things have to change for a panel that is never focusable to accept
+   * typing: the window takes focus for as long as the correction lasts, and the
+   * card's global ⏎ / esc are handed back so those keys mean "commit" and
+   * "abandon" in the field rather than "apply" and "cancel" on the card.
+   */
+  hudEditBegin: 'mull:hud:edit-begin',
+  /**
+   * HUD renderer -> main: the correction is over.
+   *
+   * A string re-runs the utterance from those words; null leaves the open card
+   * exactly as it was. Either way main puts focus back in the app the user was
+   * dictating into before anything else happens — insertion writes to whatever
+   * holds the caret, and the panel was holding it a moment ago.
+   */
+  hudEditEnd: 'mull:hud:edit-end',
+
   /** journal window -> main: most recent entries (newest first). */
   journalRecent: 'mull:journal:recent',
   /** any renderer -> main: undo the last undoable entry (same path as ⌥Z). */
@@ -191,7 +210,9 @@ export const IPC = {
 
   /** settings/onboarding -> main: is the speech model here? */
   modelStatus: 'mull:model:status',
-  /** onboarding -> main: fetch it. Never happens without a click. */
+  /** settings -> main: every model on offer, and which of them are on disk. */
+  modelList: 'mull:model:list',
+  /** settings/onboarding -> main: fetch one. Never happens without a click. */
   modelDownload: 'mull:model:download',
   /** main -> requesting renderer: download progress. */
   modelProgress: 'mull:model:progress',
@@ -203,6 +224,14 @@ export const IPC = {
    * nothing ever sends it back, and `engineStatus` reports presence, not value.
    */
   engineSignIn: 'mull:engine:sign-in',
+  /**
+   * settings -> main: sign in through the browser, the way `claude setup-token`
+   * does. Main opens the browser and listens on a loopback port; the token it
+   * ends up with never crosses back over this bridge.
+   */
+  engineSignInBrowser: 'mull:engine:sign-in-browser',
+  /** settings -> main: stop waiting for a browser that is not coming back. */
+  engineSignInCancel: 'mull:engine:sign-in-cancel',
   engineSignOut: 'mull:engine:sign-out',
   /** settings -> main: one real round trip, so a saved credential is proven. */
   engineTest: 'mull:engine:test',

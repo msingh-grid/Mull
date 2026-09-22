@@ -18,3 +18,8 @@ npm-debug.log*
 
 # swift sidecar build artifacts
 mull-mac/.build/
+
+## brag
+brag-output/
+.claude/skills/brag
+.agents/skills/brag

@@ -43,6 +43,71 @@ describe('ChordScope', () => {
     expect(scope.active).toBe(false)
   })
 
+  /**
+   * A global claim outranks a focused window, so ⏎ in Mull's own transcript
+   * field would apply the card instead of committing the correction. The claim
+   * is dropped for as long as the field has the caret.
+   */
+  describe('suspend, while the user is typing into the panel', () => {
+    it('hands the chords back and claims exactly them again', () => {
+      const gs = fakeShortcuts()
+      const scope = new ChordScope({ globalShortcut: gs })
+      scope.hold(() => {}, { send: true })
+      expect(gs.registered).toEqual(new Set(['Return', 'Escape', 'CommandOrControl+Return']))
+
+      scope.suspend()
+      expect(gs.registered.size).toBe(0)
+
+      scope.resume()
+      expect(gs.registered).toEqual(new Set(['Return', 'Escape', 'CommandOrControl+Return']))
+    })
+
+    it('keeps the same handler across a suspension', () => {
+      const gs = fakeShortcuts()
+      const onAction = vi.fn()
+      const scope = new ChordScope({ globalShortcut: gs })
+      scope.hold(onAction)
+
+      scope.suspend()
+      scope.resume()
+      gs.handlers.get('Return')?.()
+      expect(onAction.mock.calls).toEqual([['apply']])
+    })
+
+    /**
+     * The correction ran the utterance again, which withdrew the card. There
+     * is nothing left to claim ⏎ for, and nothing must be left registered for
+     * a `resume` that will never come.
+     */
+    it('leaves nothing behind when the card closes mid-correction', () => {
+      const gs = fakeShortcuts()
+      const scope = new ChordScope({ globalShortcut: gs })
+      const release = scope.hold(() => {})
+
+      scope.suspend()
+      release()
+      expect(gs.registered.size).toBe(0)
+      expect(scope.active).toBe(false)
+
+      scope.resume()
+      expect(gs.registered.size).toBe(0)
+    })
+
+    it('is inert with no card open, and does not double up', () => {
+      const gs = fakeShortcuts()
+      const scope = new ChordScope({ globalShortcut: gs })
+      scope.suspend()
+      scope.resume()
+      expect(gs.registered.size).toBe(0)
+
+      scope.hold(() => {})
+      scope.suspend()
+      scope.suspend()
+      scope.resume()
+      expect(gs.registered).toEqual(new Set(['Return', 'Escape']))
+    })
+  })
+
   it('routes each chord to its action', () => {
     const gs = fakeShortcuts()
     const onAction = vi.fn()

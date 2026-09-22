@@ -165,6 +165,99 @@ describe('DictationPipeline', () => {
     h.pipe.dispose()
   })
 
+  /**
+   * Whisper mishears names. The remedy is to overrule it, not to say the whole
+   * sentence again — so the words half of the loop is re-enterable.
+   */
+  describe('rerun, after the user corrects the transcript', () => {
+    it('routes the corrected words without asking ASR a second time', async () => {
+      const h = harness({ transcript: 'tell Neil the deck is ready' })
+      h.pipe.begin()
+      h.pipe.pushChunk(speech(1.2))
+      h.clock.advance(1_200)
+      h.pipe.end()
+      await settle()
+      expect(h.sidecar.insertions).toEqual(['Tell Neil the deck is ready'])
+
+      await h.pipe.rerun('Tell Neal the deck is ready')
+      await settle()
+
+      expect(h.sidecar.insertions).toEqual([
+        'Tell Neil the deck is ready',
+        'Tell Neal the deck is ready'
+      ])
+      h.pipe.dispose()
+    })
+
+    /**
+     * The same utterance, read a second way — so the recording's own numbers
+     * are carried over rather than refiled as zeroes, which would put a lie in
+     * the bench about how long a two-second hold took.
+     */
+    it('files the re-run against the original recording', async () => {
+      const h = harness({ transcript: 'tell Neil the deck is ready' })
+      h.pipe.begin()
+      h.pipe.pushChunk(speech(2))
+      h.clock.advance(2_000)
+      h.pipe.end()
+      await settle()
+
+      await h.pipe.rerun('Tell Neal the deck is ready')
+      await settle()
+
+      expect(h.rows).toHaveLength(2)
+      expect(h.rows[1]).toMatchObject({
+        outcome: 'applied',
+        captureMs: h.rows[0]?.captureMs,
+        provider: 'fake'
+      })
+      expect(h.rows[1]?.audioSeconds).toBeCloseTo(2, 1)
+      h.pipe.dispose()
+    })
+
+    it('does nothing for a correction that changes nothing, or for no words', async () => {
+      const h = harness({ transcript: 'tell Neil the deck is ready' })
+      h.pipe.begin()
+      h.pipe.pushChunk(speech(1.2))
+      h.clock.advance(1_200)
+      h.pipe.end()
+      await settle()
+
+      await h.pipe.rerun('Tell Neil the deck is ready')
+      await h.pipe.rerun('   ')
+      await settle()
+
+      expect(h.sidecar.insertions).toHaveLength(1)
+      h.pipe.dispose()
+    })
+
+    /** Nothing has been heard yet — there is no utterance to overrule. */
+    it('does nothing before anything has been said', async () => {
+      const h = harness()
+      await h.pipe.rerun('Tell Neal the deck is ready')
+      await settle()
+      expect(h.sidecar.insertions).toHaveLength(0)
+      h.pipe.dispose()
+    })
+
+    /** A live hold outranks a card the user is still poking at. */
+    it('refuses while the next utterance is already being captured', async () => {
+      const h = harness({ transcript: 'tell Neil the deck is ready' })
+      h.pipe.begin()
+      h.pipe.pushChunk(speech(1.2))
+      h.clock.advance(1_200)
+      h.pipe.end()
+      await settle()
+
+      h.pipe.begin()
+      await h.pipe.rerun('Tell Neal the deck is ready')
+      await settle()
+
+      expect(h.sidecar.insertions).toEqual(['Tell Neil the deck is ready'])
+      h.pipe.dispose()
+    })
+  })
+
   it('records stage timings for every utterance', async () => {
     const h = harness()
     h.pipe.begin()

@@ -18,7 +18,20 @@ export interface HudView {
   stateClass: string
   /** The accessible state (§8) — decoration is aria-hidden, this is not. */
   label: string
-  transcript: { text: string; ghost: boolean; caret: boolean }
+  /**
+   * What Mull heard — and, while a card is waiting on the user, something they
+   * can correct.
+   *
+   * `editable` is the one affordance on the panel with no button attached to
+   * it: the line simply becomes a field when you click it. It is offered only
+   * while a card is open, because that is the only moment there is both
+   * something to fix and something still to decide — a transcript with nothing
+   * pending is a receipt, and re-running from a receipt would re-do work the
+   * user has already accepted. A plan that is mid-walk is excluded too: those
+   * steps are being pressed in someone's window right now, and the words that
+   * chose them are no longer a proposal.
+   */
+  transcript: { text: string; ghost: boolean; caret: boolean; editable: boolean }
   /**
    * The working line: what Mull is doing, and how long it has been doing it.
    *
@@ -193,12 +206,25 @@ function labelFor(state: HudState): string {
 
 function transcriptFor(state: HudState): HudView['transcript'] {
   if (state.transcript) {
-    return { text: state.transcript, ghost: false, caret: state.partial }
+    return {
+      text: state.transcript,
+      ghost: false,
+      caret: state.partial,
+      editable: correctable(state)
+    }
   }
   // Nothing said yet: the hint in idle, a bare caret while listening (the orb
   // and waveform are already saying "live" — a second hint would be noise).
-  if (state.phase === 'idle') return { text: GHOST_HINT, ghost: true, caret: false }
-  return { text: '', ghost: false, caret: state.partial }
+  if (state.phase === 'idle') {
+    return { text: GHOST_HINT, ghost: true, caret: false, editable: false }
+  }
+  return { text: '', ghost: false, caret: state.partial, editable: false }
+}
+
+/** Is there both something to fix and something still to decide? See above. */
+function correctable(state: HudState): boolean {
+  if (state.partial || !state.card) return false
+  return !(state.card.kind === 'plan' && state.card.running === true)
 }
 
 /**

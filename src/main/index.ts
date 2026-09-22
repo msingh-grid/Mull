@@ -34,7 +34,7 @@ import {
 } from './locations'
 import { Bench } from './bench'
 import { Trace } from './trace'
-import { selectAsrProvider } from './asr'
+import { selectAsrProvider, SwitchableAsrProvider } from './asr'
 import { FakeSidecar, SidecarClient } from './services/sidecar'
 import { HotkeyService } from './services/hotkey'
 import { describeInsertionReason, InsertionService } from './services/insertion'
@@ -49,7 +49,8 @@ import {
 } from './services/hud-position'
 import { TrayPresence } from './services/tray'
 import { PermissionsService } from './services/permissions'
-import { downloadModel, modelStatus } from './services/model'
+import { downloadModel, modelPathFor, modelStatus } from './services/model'
+import { DEFAULT_SPEECH_MODEL, SPEECH_MODELS } from '@shared/model'
 import { SettingsStore } from './store/settings'
 import { JournalStore } from './store/journal'
 import { CaptureStore } from './store/captures'
@@ -70,11 +71,17 @@ import { appliedText, diffText } from './pipeline/diff'
 import { FakeEngine } from './engine/fake'
 import { AgentEngine } from './engine/agent'
 import { ApiKeyEngine } from './engine/api-key'
-import { detectClaudeCodeLogin, EngineHolder, engineStatus, resolveEngine } from './engine/select'
+import {
+  detectClaudeCodeLogin,
+  EngineHolder,
+  engineStatus,
+  inheritedLogin,
+  resolveEngine
+} from './engine/select'
+import { signInWithBrowser } from './engine/oauth'
 import { CredentialsStore, type CredentialKind } from './store/credentials'
 import type { Engine } from './engine/types'
 import type { EngineTestResult } from '@shared/engine'
-import type { AsrProvider } from './asr/types'
 import type { AboutInfo } from '@shared/about'
 import type { PermissionKey } from '@shared/permissions'
 import type { Settings } from '@shared/settings'
@@ -94,6 +101,8 @@ let chords: ChordScope | null = null
 let tray: TrayPresence | null = null
 /** The live edit engine, swappable without a relaunch. */
 let engine: EngineHolder | null = null
+/** The browser sign-in in flight, if any. One at a time — see the handler. */
+let browserSignIn: AbortController | null = null
 /**
  * The FakeEngine, kept for the two surfaces that must work with no credentials
  * at all: the tray's preview demo and onboarding page 2. Both are explicitly
@@ -128,7 +137,11 @@ let runtime = {
   sidecarVersion: null as string | null
 }
 let sidecar: SidecarApi & { dispose?: () => Promise<void> }
-let asr: AsrProvider
+let asr: SwitchableAsrProvider
+/** Why ASR fell back to the fake, or null. Re-evaluated on every reload. */
+let asrDegradedReason: string | null = null
+/** Bumped per reload, so an overtaken one drops its provider instead of installing it. */
+let asrGeneration = 0
 
 /** Windows whose renderer exists. Each M3 stage adds one. */
 const BUILT_WINDOWS: MullWindow[] = ['journal', 'settings', 'onboarding']
@@ -452,16 +465,14 @@ async function bootstrap(): Promise<void> {
   captureWindow = createCaptureWindow()
   hudWindow = createHudWindow()
 
-  sidecar = await createSidecar()
-
-  // Settings before ASR: `speechModel` decides which whisper model is loaded,
-  // and loading the wrong one then swapping would mean a 466 MB read for
-  // nothing. SettingsStore is a synchronous file read with no dependency on
-  // anything created below it.
+  // Before the ASR, because which model transcribes you is a setting now and
+  // the provider is built around its path.
   settings = new SettingsStore({ path: settingsPath(), log: logFn })
 
-  const selection = await selectAsrProvider({ speechModel: settings.get().speechModel })
-  asr = selection.provider
+  sidecar = await createSidecar()
+  const selection = await selectAsrProvider({ modelPath: selectedModelPath() })
+  asr = new SwitchableAsrProvider(selection.provider)
+  asrDegradedReason = selection.degradedReason
   if (selection.degradedReason) {
     log.warn(`ASR degraded to the fake provider: ${selection.degradedReason}`)
   }
@@ -502,7 +513,7 @@ async function bootstrap(): Promise<void> {
     resolveEngine({
       credentials: credentials.get(),
       settings: settings.get(),
-      detectedLogin,
+      detectedLogin: usableLogin(),
       // A function, not a value: armed on the HUD a second before the user
       // speaks, and it must apply to that utterance rather than the next launch.
       thinking: () => settings?.get().thinking === true,
@@ -510,7 +521,12 @@ async function bootstrap(): Promise<void> {
       claudeCliPath: resolveClaudeCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath })
     })
   )
-  log.info('engine', { kind: engine.name, ...engineModels(), detectedLogin })
+  log.info('engine', {
+    kind: engine.name,
+    ...engineModels(),
+    detectedLogin,
+    usingDetectedLogin: usableLogin()
+  })
   // Bring the subprocess up now rather than on the first edit, which is the
   // one the user is actually waiting for.
   warmEngine()
@@ -741,7 +757,7 @@ async function bootstrap(): Promise<void> {
     hotkeyMode: mode,
     hotkeyTapReason: hotkey.tapReason,
     canInstruct: hotkey.canInstruct,
-    asrProvider: selection.degradedReason ? 'fake (degraded)' : 'whisper-cli',
+    asrProvider: describeAsr(),
     sidecarVersion: runtime.sidecarVersion
   }
   tray?.setStatus(describeHotkeyMode(mode))
@@ -952,6 +968,84 @@ ipcMain.handle(IPC.hudSetThinking, (_event, on: boolean) => {
   log.info(`thinking ${on ? 'armed' : 'off'} for the writing lanes`)
 })
 
+/**
+ * Correcting what Mull heard, in the panel itself.
+ *
+ * Whisper gets names wrong — people, projects, channels — and the transcript
+ * the user is looking at is the thing the open card was built from. Saying the
+ * whole sentence again to fix one word is a bad trade, so the transcript line
+ * is a field: click it, fix the word, press ⏎, and the utterance is routed
+ * again from the corrected words.
+ *
+ * Two things have to be borrowed for the length of the correction, and both are
+ * things this app otherwise refuses to take:
+ *
+ *  - **Focus.** The HUD is deliberately never focusable (docs/DESIGN.md §7.1):
+ *    it must not take the caret from the app you are dictating into. A field
+ *    cannot be typed into without it, so focus is taken for exactly as long as
+ *    the field is open and then handed straight back — by name, to the app the
+ *    utterance was about, because insertion writes to whatever holds the caret
+ *    and "whatever holds the caret" was Mull a moment ago.
+ *  - **⏎ and esc.** They are claimed globally while a card is open, and a
+ *    global claim outranks a focused window — so without suspending it, Return
+ *    in the field would apply the card instead of committing the correction.
+ */
+let editingApp: { bundleId: string; name: string } | null = null
+
+ipcMain.on(IPC.hudEditBegin, () => {
+  if (!hudWindow || hudWindow.isDestroyed()) return
+  // The renderer only offers the field while a card is open, and main checks it
+  // again rather than trusting that: this message is the one thing in the app
+  // that can take the caret out of somebody's document, and a stale one
+  // arriving after a card closed would take it for nothing.
+  if (!hud?.hasCard) return
+  // Remembered now rather than on the way out: the state can move underneath a
+  // correction that takes a while, and the app to go back to is the one the
+  // user was in when they spoke.
+  editingApp = pipeline?.getState().app ?? null
+  hud?.setEditing(true)
+  hudWindow.setFocusable(true)
+  hudWindow.focus()
+  log.info('hud: correcting the transcript', { app: editingApp?.name ?? null })
+})
+
+ipcMain.handle(IPC.hudEditEnd, async (_event, text: string | null) => {
+  const target = editingApp
+  editingApp = null
+  if (hudWindow && !hudWindow.isDestroyed()) {
+    // Blurred first, then made unfocusable: a window that stops being
+    // focusable while it is still the key window is a state macOS has no
+    // opinion about, and the panel would keep the caret it is trying to return.
+    hudWindow.blur()
+    hudWindow.setFocusable(false)
+  }
+  hud?.setEditing(false)
+
+  // Put the caret back before anything else happens. Awaited rather than fired
+  // and forgotten: the next thing on this path may be an Apply that types into
+  // whatever is frontmost, and "whatever is frontmost" is the thing being fixed
+  // here.
+  if (target) {
+    try {
+      const result = await sidecar?.activateApp({ bundleId: target.bundleId })
+      if (result && !result.activated) {
+        log.warn('hud: could not put focus back', { app: target.name, reason: result.reason })
+      }
+    } catch (err) {
+      log.warn('hud: activateApp threw on the way out of a correction', err)
+    }
+  }
+
+  const corrected = typeof text === 'string' ? text.trim() : ''
+  if (!corrected) return
+
+  // Same withdrawal a new utterance performs — the open card was built from the
+  // words that have just been overruled, so it is answered as a cancel and
+  // lands in the journal rather than vanishing.
+  hud?.cancelOpen()
+  await pipeline?.rerun(corrected)
+})
+
 ipcMain.handle(IPC.hudResetPosition, () => resetHudPosition())
 
 /** Back to bottom centre — the way out of "I dragged it somewhere silly". */
@@ -995,8 +1089,12 @@ ipcMain.handle(IPC.settingsSet, (_event, patch: Partial<Settings>) => {
       (before.engine !== next.engine ||
         before.editModel !== next.editModel ||
         before.classifierModel !== next.classifierModel ||
-        before.agentModel !== next.agentModel)
+        before.agentModel !== next.agentModel ||
+        before.inheritClaudeCodeLogin !== next.inheritClaudeCodeLogin)
     if (reshaped) reloadEngine()
+    // The speech model is not engine-shaped — it is the local transcriber, and
+    // it lives behind its own holder for the same reason the engine does.
+    if (before && before.speechModel !== next.speechModel) void reloadAsr()
     // Every window stamps its own theme, so the change has to reach all of
     // them — including the HUD, which has its own "page in the dark" rule.
     for (const win of BrowserWindow.getAllWindows()) {
@@ -1047,7 +1145,7 @@ function reloadEngine(): void {
     resolveEngine({
       credentials: credentials.get(),
       settings: settings.get(),
-      detectedLogin,
+      detectedLogin: usableLogin(),
       // A function, not a value: armed on the HUD a second before the user
       // speaks, and it must apply to that utterance rather than the next launch.
       thinking: () => settings?.get().thinking === true,
@@ -1061,6 +1159,55 @@ function reloadEngine(): void {
   // subscription lane's harness does.
   intent?.reset()
   warmEngine()
+}
+
+/** The shared rule, asked of this process's detection and settings. */
+function usableLogin(): boolean {
+  return inheritedLogin(detectedLogin, settings?.get() ?? { inheritClaudeCodeLogin: true })
+}
+
+/** The path of whatever model Settings currently points at. */
+function selectedModelPath(): string {
+  return modelPathFor(settings?.get().speechModel ?? DEFAULT_SPEECH_MODEL)
+}
+
+/** What the About pane calls the provider in use. */
+function describeAsr(): string {
+  if (asrDegradedReason) return 'fake (degraded)'
+  return asr?.name ?? 'none'
+}
+
+/**
+ * Rebuild the ASR around the model Settings now names.
+ *
+ * Called when the setting changes and after a download finishes, so switching
+ * to `small.en` — or finally fetching it — takes effect on the next thing you
+ * say rather than after a relaunch. An utterance already in flight keeps the
+ * provider it started with; the holder only changes what the *next* one gets.
+ *
+ * A model that is not on disk degrades to the fake provider and says so in the
+ * log, exactly as an empty models directory does at boot. That is the honest
+ * outcome of choosing a model you have not downloaded, and Settings warns
+ * about it in the same breath as offering the choice.
+ */
+async function reloadAsr(): Promise<void> {
+  if (!asr) return
+  // Two clicks in quick succession would otherwise race, and the slower reload
+  // would win — leaving the app transcribing with the model the user un-picked.
+  const generation = ++asrGeneration
+  const selection = await selectAsrProvider({ modelPath: selectedModelPath() })
+  if (generation !== asrGeneration) {
+    await selection.provider.dispose()
+    return
+  }
+  asrDegradedReason = selection.degradedReason
+  await asr.swap(selection.provider)
+  runtime = { ...runtime, asrProvider: describeAsr() }
+  if (selection.degradedReason) {
+    log.warn(`ASR degraded to the fake provider: ${selection.degradedReason}`)
+  } else {
+    log.info('ASR reloaded', { model: selectedModelPath().split('/').pop() })
+  }
 }
 
 ipcMain.handle(IPC.engineStatus, async () => {
@@ -1088,6 +1235,49 @@ ipcMain.handle(IPC.engineSignIn, async (_event, kind: CredentialKind, secret: st
     log.warn(`engine: could not save the ${kind} credential`)
     return { ok: false, message }
   }
+})
+
+/**
+ * Sign in through the browser — the whole of `claude setup-token`, in-app.
+ *
+ * Only one at a time: a second click while a browser tab is already open would
+ * open another with a different `state`, and whichever the person finished
+ * would leave the other listening on a port nobody is going to visit. So the
+ * flow is held here, the second click is told what the first one is doing, and
+ * Cancel aborts the one that exists.
+ *
+ * The token is stored and the engine rebuilt in the same breath, so the next
+ * edit uses it — the same guarantee pasting a token already gives.
+ */
+ipcMain.handle(IPC.engineSignInBrowser, async () => {
+  if (!credentials) return { ok: false, message: 'Mull hasn’t finished starting up.' }
+  if (browserSignIn) {
+    return { ok: false, message: 'Already waiting — finish the sign-in in your browser.' }
+  }
+
+  const abort = new AbortController()
+  browserSignIn = abort
+  try {
+    const token = await signInWithBrowser({
+      openUrl: (url) => shell.openExternal(url),
+      signal: abort.signal,
+      log: logFn
+    })
+    credentials.set('subscription', token)
+    reloadEngine()
+    return { ok: true, message: 'Signed in with your Claude subscription.' }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    // The message is safe to log; the token, had there been one, never is.
+    log.warn(`engine: browser sign-in did not finish — ${message}`)
+    return { ok: false, message }
+  } finally {
+    browserSignIn = null
+  }
+})
+
+ipcMain.handle(IPC.engineSignInCancel, () => {
+  browserSignIn?.abort()
 })
 
 ipcMain.handle(IPC.engineSignOut, (_event, kind: CredentialKind) => {
@@ -1144,18 +1334,32 @@ ipcMain.handle(IPC.permissionsGet, () => permissions?.snapshot() ?? null)
  */
 ipcMain.handle(IPC.permissionsOpen, (_event, key: PermissionKey) => permissions?.prompt(key))
 
-ipcMain.handle(IPC.modelStatus, () => modelStatus())
+/** Defaults to the selected model, so a caller that does not care gets the live one. */
+ipcMain.handle(IPC.modelStatus, (_event, name?: string) =>
+  modelStatus(name ?? settings?.get().speechModel ?? DEFAULT_SPEECH_MODEL)
+)
+
+/** Every model on offer, in catalog order — the settings pane lists them all. */
+ipcMain.handle(IPC.modelList, () =>
+  Promise.all(SPEECH_MODELS.map((model) => modelStatus(model.id)))
+)
 
 /**
- * Download the speech model. Only ever from a click — onboarding page 4 and
+ * Download a speech model. Only ever from a click — onboarding page 4 and
  * the settings pane are the two callers, and both are explicit.
+ *
+ * If what arrived is the model Settings points at, the ASR is rebuilt around
+ * it here rather than at the next launch: the person who just waited out a
+ * 488 MB download should be able to speak into it immediately.
  */
-ipcMain.handle(IPC.modelDownload, async (event) => {
+ipcMain.handle(IPC.modelDownload, async (event, name?: string) => {
+  const wanted = name ?? settings?.get().speechModel ?? DEFAULT_SPEECH_MODEL
   try {
-    await downloadModel('base.en', (progress) => {
+    await downloadModel(wanted, (progress) => {
       if (!event.sender.isDestroyed()) event.sender.send(IPC.modelProgress, progress)
     })
-    return { ok: true, message: 'The model is ready. Reopen Mull to start using it.' }
+    if (wanted === (settings?.get().speechModel ?? DEFAULT_SPEECH_MODEL)) await reloadAsr()
+    return { ok: true, message: 'The model is ready.' }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     log.error('model download failed', err)
@@ -1165,7 +1369,7 @@ ipcMain.handle(IPC.modelDownload, async (event) => {
 
 ipcMain.handle(IPC.about, async (): Promise<AboutInfo> => {
   const snapshot = await permissions?.snapshot()
-  const model = await modelStatus()
+  const model = await modelStatus(settings?.get().speechModel ?? DEFAULT_SPEECH_MODEL)
   return {
     appVersion: app.getVersion(),
     electron: process.versions.electron ?? 'unknown',

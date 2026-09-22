@@ -6,6 +6,7 @@ import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
 import { DEFAULT_MODEL_FILE, VAD_MODEL_FILE, modelsDir, resolveWhisperCli } from '../locations'
 import { existsSync } from 'node:fs'
+import { DEFAULT_SPEECH_MODEL, SPEECH_MODELS } from '@shared/model'
 import type { DownloadProgress, ModelStatus } from '@shared/model'
 
 /**
@@ -25,13 +26,15 @@ import type { DownloadProgress, ModelStatus } from '@shared/model'
 
 const BASE_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main'
 
-/** Silero ships from a different repo than the whisper weights. */
-const VAD_BASE_URL = 'https://huggingface.co/ggml-org/whisper-vad/resolve/main'
-
+/**
+ * Name to file. The two the app offers come from the shared catalog rather
+ * than being spelled again here — a menu and a downloader that disagree about
+ * how to write `small.en` is exactly the bug this indirection removes. The
+ * rest are reachable from `npm run fetch:model -- <name>` and nowhere else.
+ */
 export const KNOWN_MODELS: Record<string, string> = {
+  ...Object.fromEntries(SPEECH_MODELS.map((model) => [model.id, model.file])),
   'tiny.en': 'ggml-tiny.en.bin',
-  'base.en': 'ggml-base.en.bin',
-  'small.en': 'ggml-small.en.bin',
   base: 'ggml-base.bin',
   small: 'ggml-small.bin',
   vad: VAD_MODEL_FILE
@@ -85,12 +88,18 @@ export function modelFileFor(name: string): string {
   return KNOWN_MODELS[name] ?? (name.endsWith('.bin') ? name : DEFAULT_MODEL_FILE)
 }
 
-export async function modelStatus(name = 'small.en'): Promise<ModelStatus> {
+/** Where a model would live, whether or not it is there yet. */
+export function modelPathFor(name: string): string {
+  return join(modelsDir(), modelFileFor(name))
+}
+
+export async function modelStatus(name: string = DEFAULT_SPEECH_MODEL): Promise<ModelStatus> {
   const file = modelFileFor(name)
   const path = join(modelsDir(), file)
   const info = await stat(path).catch(() => null)
   const cli = resolveWhisperCli()
   return {
+    name,
     file,
     path,
     installed: info !== null && info.size > MIN_MODEL_BYTES,
@@ -107,7 +116,7 @@ export async function modelStatus(name = 'small.en'): Promise<ModelStatus> {
  * chunk spends more time rendering than downloading.
  */
 export async function downloadModel(
-  name = 'small.en',
+  name: string = DEFAULT_SPEECH_MODEL,
   onProgress?: (progress: DownloadProgress) => void,
   signal?: AbortSignal
 ): Promise<string> {

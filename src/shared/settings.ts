@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { DEFAULT_SPEECH_MODEL, SPEECH_MODEL_IDS } from './model'
 
 /**
  * User settings — the shape, shared by main, preload and every renderer.
@@ -60,6 +61,17 @@ export const SettingsSchema = z.object({
    * than silently using the credential the user didn't pick.
    */
   engine: z.enum(['auto', 'subscription', 'api-key']).default('auto'),
+  /**
+   * May Mull use the Claude Code login already on this Mac?
+   *
+   * On, because a Mac that is signed in to Claude Code needs nothing pasted
+   * and nothing approved — the best thing the engine pane can say. Off is what
+   * "Sign out" means for a credential Mull does not own: the keychain item
+   * belongs to Claude Code, and deleting someone else's login because a
+   * different app has a button would be indefensible. So Mull stops reaching
+   * for it and says so, and Claude Code is left exactly as it was.
+   */
+  inheritClaudeCodeLogin: z.boolean().default(true),
   /**
    * Careful (Sonnet 5) or fast (Haiku 4.5). Default careful: an edit is
    * judgement about someone's writing, and the preview makes the judgement
@@ -192,6 +204,22 @@ export const SettingsSchema = z.object({
    * which has no tool loop.
    */
   agentModel: ModelChoiceSchema.default('opus'),
+  /**
+   * Which local speech model transcribes you.
+   *
+   * `base.en` is the default and the one onboarding fetches: 148 MB, and fast
+   * enough that the transcript is waiting by the time you stop talking.
+   * `small.en` is 488 MB and hears names, jargon and a noisy room measurably
+   * better, at two to three times the wait — a trade worth making on a fast
+   * Mac, and worth refusing on a slow one.
+   *
+   * Switching is live: the next thing you say uses the new one. A model that
+   * is not downloaded yet is still selectable — Settings says so plainly, and
+   * dictation degrades to the fake provider rather than pretending — because
+   * refusing the choice until a 488 MB download finishes is worse than showing
+   * one honest warning line.
+   */
+  speechModel: z.enum(SPEECH_MODEL_IDS).default(DEFAULT_SPEECH_MODEL),
   /**
    * Where the user dragged the HUD, in screen coordinates. Null means the
    * default bottom-centre. Clamped back onto a real display at launch, because

@@ -207,6 +207,22 @@ export class HudController {
     return this.card !== null
   }
 
+  /**
+   * The user is correcting what Mull heard, in a field on the panel itself.
+   *
+   * All this owns is the card's chords: while the field has the caret, ⏎ and
+   * esc belong to it, not to the card underneath. The window's focusability is
+   * main's business — this class has no `electron` import and is not about to
+   * grow one.
+   *
+   * Safe to leave on: a card closing releases the claim outright, so a
+   * correction that ends by re-running the utterance cannot strand it.
+   */
+  setEditing(editing: boolean): void {
+    if (editing) this.options.chords.suspend()
+    else this.options.chords.resume()
+  }
+
   private merged(): HudState {
     if (!this.card) return this.base
     // A card outranks the pipeline's phase: whatever dictation is doing, the

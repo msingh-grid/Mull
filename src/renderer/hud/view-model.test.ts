@@ -46,20 +46,64 @@ describe('hudView', () => {
     expect(hudView(state({})).transcript).toEqual({
       text: 'Hold ⌥Space to dictate · Fn to ask',
       ghost: true,
-      caret: false
+      caret: false,
+      editable: false
     })
     expect(hudView(state({ phase: 'listening', partial: true })).transcript).toEqual({
       text: '',
       ghost: false,
-      caret: true
+      caret: true,
+      editable: false
     })
   })
 
   it('shows a caret only while the transcript is still growing', () => {
     expect(hudView(state({ phase: 'listening', transcript: 'send the', partial: true })).transcript)
-      .toEqual({ text: 'send the', ghost: false, caret: true })
+      .toEqual({ text: 'send the', ghost: false, caret: true, editable: false })
     expect(hudView(state({ phase: 'thinking', transcript: 'send the deck', partial: false })).transcript)
-      .toEqual({ text: 'send the deck', ghost: false, caret: false })
+      .toEqual({ text: 'send the deck', ghost: false, caret: false, editable: false })
+  })
+
+  /**
+   * Whisper mishears names, and the card on screen was built from the misheard
+   * one. The transcript is therefore correctable — but only while there is
+   * still something to decide, because re-running from a transcript nothing is
+   * waiting on would re-do work the user has already accepted.
+   */
+  describe('correcting what Mull heard', () => {
+    it('offers the transcript for correction while a card waits on an answer', () => {
+      const view = hudView(state({ phase: 'preview', transcript: 'ask Neal', card: diffCard }))
+      expect(view.transcript.editable).toBe(true)
+    })
+
+    it('does not offer it when nothing is waiting on the user', () => {
+      for (const phase of ALL_PHASES) {
+        const view = hudView(state({ phase, transcript: 'ask Neal', card: null }))
+        expect(view.transcript.editable).toBe(false)
+      }
+    })
+
+    it('does not offer it while the transcript is still growing', () => {
+      const view = hudView(
+        state({ phase: 'preview', transcript: 'ask Ne', partial: true, card: diffCard })
+      )
+      expect(view.transcript.editable).toBe(false)
+    })
+
+    /**
+     * Mid-walk the steps are being pressed in someone else's window. The words
+     * that chose them have stopped being a proposal, and re-routing underneath
+     * a running loop would leave two pipelines writing one panel.
+     */
+    it('withdraws it while a plan is walking, and offers it again once it stops', () => {
+      const walking = state({
+        phase: 'preview',
+        transcript: 'what did Neal say',
+        card: { ...planCard, running: true }
+      })
+      expect(hudView(walking).transcript.editable).toBe(false)
+      expect(hudView(state({ ...walking, card: planCard })).transcript.editable).toBe(true)
+    })
   })
 
   it('holds the THINKING label until the card can actually be judged', () => {

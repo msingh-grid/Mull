@@ -80,6 +80,22 @@ export interface AnswerRequest {
   goal: string
   /** The window that was reached — the whole material for the answer. */
   context?: ScreenContext | null
+  /**
+   * What was actually done on the way here.
+   *
+   * Added because without it this turn was guessing. It used to be handed a
+   * goal and a window and nothing else, so when the window read thinly — a
+   * browser that had not woken, a page still loading — the only story that fit
+   * was that nothing had happened, and the model wrote the user sentences like
+   * *"I don't have the ability to open apps or navigate to sites myself — you'll
+   * need to press Cmd+T yourself"*. Three separate runs ended that way, every
+   * one of them after Mull had successfully done the thing being denied.
+   *
+   * A list of completed steps is the evidence that settles it. It is not there
+   * to be recited back to the user — the card already shows it — but so that
+   * "did this happen" stops being something to infer from a thin read.
+   */
+  did?: Array<{ verb: string; object: string; ok: boolean }>
 }
 
 /**

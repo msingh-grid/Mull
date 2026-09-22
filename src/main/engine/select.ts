@@ -122,6 +122,26 @@ export function detectClaudeCodeLogin(): boolean {
   }
 }
 
+/**
+ * May Mull use the Claude Code login on this Mac?
+ *
+ * Two questions, and both have to be yes: whether the Mac has one, and whether
+ * the user wants Mull reaching for it. The second is what "Sign out" means for
+ * a credential Mull does not own — the keychain item belongs to Claude Code,
+ * and one app deleting another's login because someone clicked its button
+ * would be indefensible. So Mull stops using it and leaves it alone.
+ *
+ * Kept apart from `resolveEngine` so the settings pane can still be told a
+ * login *exists* while the engine is told not to use it — that is the
+ * difference between offering it back and pretending it is gone.
+ */
+export function inheritedLogin(
+  detected: boolean,
+  settings: Pick<Settings, 'inheritClaudeCodeLogin'>
+): boolean {
+  return detected && settings.inheritClaudeCodeLogin !== false
+}
+
 /** The engine that cannot edit, and says which thing is missing. */
 export class SignedOutEngine implements Engine {
   readonly name = 'signed-out'

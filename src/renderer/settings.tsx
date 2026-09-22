@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState, type JSX } from 'react'
 import { createRoot } from 'react-dom/client'
 import type { AboutInfo } from '@shared/about'
-import type { ModelStatus } from '@shared/model'
+import { SPEECH_MODELS, type ModelStatus } from '@shared/model'
 import type { PermissionsSnapshot } from '@shared/permissions'
 import type { Settings } from '@shared/settings'
 import { SETUP_TOKEN_COMMAND, type EngineStatus } from '@shared/engine'
@@ -76,6 +76,7 @@ function EnginePane({
   const [message, setMessage] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
   const [copied, setCopied] = useState(false)
+  const [waitingForBrowser, setWaitingForBrowser] = useState(false)
 
   const refresh = useCallback(() => {
     void bridge?.engine.status().then(setStatus)
@@ -100,6 +101,43 @@ function EnginePane({
     refresh()
   }
 
+  /**
+   * The browser sign-in. Resolves only when the browser comes back, so the
+   * button becomes the status line for however long that takes — and offers
+   * Cancel, because the honest answer to "did it work" is sometimes no.
+   */
+  const signInWithBrowser = async (): Promise<void> => {
+    setMessage(null)
+    setWaitingForBrowser(true)
+    const result = await bridge?.engine.signInBrowser()
+    setWaitingForBrowser(false)
+    setMessage(result?.message ?? null)
+    refresh()
+  }
+
+  const cancelBrowserSignIn = async (): Promise<void> => {
+    await bridge?.engine.cancelSignIn()
+  }
+
+  /**
+   * Sign out of the Claude Code login this Mac already had.
+   *
+   * Not a deletion, and the copy says so: that credential belongs to Claude
+   * Code, and an app removing another app's keychain item because someone
+   * clicked its button would be a surprise nobody asked for. Mull stops using
+   * it, which is the part Mull is entitled to decide, and the row offers it
+   * back afterwards.
+   */
+  const useDetectedLogin = async (use: boolean): Promise<void> => {
+    await update({ inheritClaudeCodeLogin: use })
+    setMessage(
+      use
+        ? 'Using the Claude Code login on this Mac again.'
+        : 'Signed out. Mull is no longer using the Claude Code login — Claude Code still has it.'
+    )
+    refresh()
+  }
+
   const test = async (): Promise<void> => {
     setTesting(true)
     setMessage(null)
@@ -119,6 +157,19 @@ function EnginePane({
       setMessage(`Copy this and run it in a terminal: ${SETUP_TOKEN_COMMAND}`)
     }
   }
+
+  const signInControl = waitingForBrowser ? (
+    <>
+      <span className="mono">waiting for your browser…</span>
+      <button type="button" className="btn ghost" onClick={() => void cancelBrowserSignIn()}>
+        Cancel
+      </button>
+    </>
+  ) : (
+    <button type="button" className="btn primary" onClick={() => void signInWithBrowser()}>
+      Sign in with Claude
+    </button>
+  )
 
   const live =
     status === null
@@ -179,44 +230,96 @@ function EnginePane({
         misunderstanding what you asked for, and back down if the pause starts to show.
       </p>
 
-      <Row label="Claude subscription" hint={status?.hasSubscription ? 'token saved' : undefined}>
+      {/* One control, wherever it is needed: with no login at all it is the
+          whole row, and beside "Use it" once someone has signed out of the
+          Mac's own login and may want a different account entirely. */}
+      <Row
+        label="Claude subscription"
+        hint={
+          status?.hasSubscription
+            ? 'token saved'
+            : status?.detectedLogin
+              ? 'Claude Code login on this Mac'
+              : 'opens your browser'
+        }
+      >
         {status?.hasSubscription ? (
           <button type="button" className="btn ghost" onClick={() => void signOut('subscription')}>
             Sign out
           </button>
+        ) : status?.detectedLogin && settings.inheritClaudeCodeLogin ? (
+          <>
+            <span className="mono">signed in</span>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => void useDetectedLogin(false)}
+            >
+              Sign out
+            </button>
+          </>
         ) : status?.detectedLogin ? (
-          <span className="mono">already signed in</span>
+          <>
+            <button type="button" className="btn ghost" onClick={() => void useDetectedLogin(true)}>
+              Use it
+            </button>
+            {signInControl}
+          </>
         ) : (
-          <button type="button" className="btn ghost" onClick={() => void copy()}>
-            {copied ? 'Copied' : 'Copy command'}
-          </button>
+          signInControl
         )}
       </Row>
 
-      {!status?.hasSubscription && !status?.detectedLogin ? (
+      {status?.detectedLogin && !status.hasSubscription ? (
+        <p>
+          {settings.inheritClaudeCodeLogin
+            ? 'This Mac is already signed in to Claude Code, so Mull needs nothing pasted and nothing approved. Signing out here stops Mull using that login; it stays exactly where it is, and Claude Code goes on working — sign out of Claude Code itself if you want it off this Mac.'
+            : 'Mull is ignoring the Claude Code login on this Mac. Edits need a credential, so either put it back or sign in with your own token above. Dictation keeps working either way.'}
+        </p>
+      ) : null}
+
+      {!status?.hasSubscription && (!status?.detectedLogin || !settings.inheritClaudeCodeLogin) ? (
         <>
           <p>
-            Run <code>{SETUP_TOKEN_COMMAND}</code> in a terminal and paste what it prints. It uses
-            the Claude plan you already pay for; there is nothing extra to buy.
+            Sign in the way you sign in to anything else: Mull opens Claude in your browser, you
+            approve it there, and the token lands back here. It uses the Claude plan you already
+            pay for; there is nothing extra to buy, and Mull is only ever granted the ability to
+            ask a model for text.
           </p>
-          <Row label="Token">
-            <input
-              type="password"
-              className="mono"
-              value={token}
-              placeholder="sk-ant-oat…"
-              aria-label="Claude subscription token"
-              onChange={(event) => setToken(event.target.value)}
-            />
-            <button
-              type="button"
-              className="btn primary"
-              disabled={!token.trim()}
-              onClick={() => void save('subscription', token)}
-            >
-              Save
-            </button>
-          </Row>
+          {/* Folded away rather than removed: the button is the path for
+              everybody, and this is the one that still works when the browser
+              cannot come back. Both mint the same token. */}
+          <details className="fallback">
+            <summary>Paste a token instead</summary>
+            <p>
+              For a Mac where the browser can’t come back — a locked-down default browser, a
+              remote session over SSH. Run <code>{SETUP_TOKEN_COMMAND}</code> in a terminal and
+              paste what it prints; it mints exactly the same token the button does.
+            </p>
+            <Row label="Command">
+              <button type="button" className="btn ghost" onClick={() => void copy()}>
+                {copied ? 'Copied' : 'Copy command'}
+              </button>
+            </Row>
+            <Row label="Token">
+              <input
+                type="password"
+                className="mono"
+                value={token}
+                placeholder="sk-ant-oat…"
+                aria-label="Claude subscription token"
+                onChange={(event) => setToken(event.target.value)}
+              />
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={!token.trim()}
+                onClick={() => void save('subscription', token)}
+              >
+                Save
+              </button>
+            </Row>
+          </details>
         </>
       ) : null}
 
@@ -323,10 +426,172 @@ function EnginePane({
   )
 }
 
+/**
+ * The speech model pane.
+ *
+ * Two models, and the choice between them is the ordinary size-for-speed one:
+ * base hears a quiet room in a few hundred milliseconds, small hears a noisy
+ * one, unusual names and jargon measurably better and takes two to three times
+ * as long to say so. Neither is right for everybody, which is why this is a
+ * switch and not a constant.
+ *
+ * The select switches immediately — the next thing you say is transcribed by
+ * the new model, with no relaunch — and the rows below it download. Those are
+ * deliberately two actions rather than one: a 488 MB fetch on a hotel Wi-Fi is
+ * not something to start because a menu changed, and a model already on disk
+ * should switch instantly rather than pretending to do work. Choosing a model
+ * you have not downloaded is allowed and warned about in one line, because the
+ * alternative — a menu that refuses until a download finishes — hides the very
+ * thing the pane exists to offer.
+ */
+function SpeechModelPane({
+  settings,
+  update
+}: {
+  settings: Settings
+  update: (patch: Partial<Settings>) => Promise<void>
+}): JSX.Element {
+  const bridge = window.mull
+  const [models, setModels] = useState<ModelStatus[] | null>(null)
+  /** Which id is downloading right now, so progress lands in its own row. */
+  const [downloading, setDownloading] = useState<string | null>(null)
+  const [progress, setProgress] = useState<{ received: number; total: number } | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const refresh = useCallback(() => {
+    void bridge?.model.list().then(setModels)
+  }, [bridge])
+
+  useEffect(() => {
+    refresh()
+    return bridge?.model.onProgress(setProgress)
+  }, [bridge, refresh])
+
+  const download = async (name: string): Promise<void> => {
+    setMessage(null)
+    setDownloading(name)
+    setProgress({ received: 0, total: 0 })
+    const result = await bridge?.model.download(name)
+    setDownloading(null)
+    setProgress(null)
+    setMessage(result?.message ?? null)
+    refresh()
+  }
+
+  const statusFor = (id: string): ModelStatus | null =>
+    models?.find((model) => model.name === id) ?? null
+  const selected = statusFor(settings.speechModel)
+  const whisper = models?.[0] ?? null
+  const pct =
+    progress && progress.total > 0 ? Math.round((progress.received / progress.total) * 100) : null
+
+  return (
+    <section className="section">
+      <h2>Speech model</h2>
+      <p>
+        Transcription runs here, on this Mac. Your audio never crosses the network, and neither
+        does dictation into an empty field. Asking Mull to change text is what sends that text to a
+        model — see Engine, above.
+      </p>
+
+      <Row label="Model" hint="takes effect on the next thing you say">
+        <select
+          value={settings.speechModel}
+          onChange={(event) =>
+            void update({ speechModel: event.target.value as Settings['speechModel'] })
+          }
+        >
+          {SPEECH_MODELS.map((model) => (
+            <option key={model.id} value={model.id}>
+              {model.label} · ≈{model.approxMB} MB
+            </option>
+          ))}
+        </select>
+      </Row>
+
+      {models && selected && !selected.installed ? (
+        <p className="warn-line">
+          {selected.file} isn’t downloaded yet, so Mull can’t hear you with it. Download it below,
+          or pick a model that is already here.
+        </p>
+      ) : null}
+
+      <div className="perm-rows">
+        {SPEECH_MODELS.map((model) => {
+          const status = statusFor(model.id)
+          const busy = downloading === model.id
+          const inUse = settings.speechModel === model.id
+          return (
+            <div key={model.id} className={`perm-row ${status?.installed ? 'is-done' : ''}`}>
+              <span className="st" aria-hidden="true">
+                {status?.installed ? '✓' : busy ? '…' : '·'}
+              </span>
+              <div className="perm-text">
+                <div className="perm-name">
+                  {model.label}
+                  {inUse ? ' — in use' : ''}
+                </div>
+                <p className="perm-reason">
+                  {model.note}{' '}
+                  {status?.installed
+                    ? `${status.file} · ${humanBytes(status.bytes)} · on disk`
+                    : `≈${model.approxMB} MB to download`}
+                </p>
+                {busy ? (
+                  <>
+                    <p className="dl-progress mono">
+                      {pct !== null ? `${pct}% · ` : ''}
+                      {humanBytes(progress?.received ?? 0)}
+                    </p>
+                    <div className="dl-track" aria-hidden="true">
+                      <div
+                        className="dl-fill"
+                        style={{ transform: `scaleX(${pct === null ? 0.08 : Math.max(pct / 100, 0.02)})` }}
+                      />
+                    </div>
+                  </>
+                ) : null}
+              </div>
+              {status?.installed ? (
+                <span className="perm-granted">Ready</span>
+              ) : (
+                <button
+                  type="button"
+                  className={inUse ? 'btn primary' : 'btn ghost'}
+                  disabled={downloading !== null}
+                  onClick={() => void download(model.id)}
+                >
+                  {busy ? 'Downloading…' : 'Download'}
+                </button>
+              )}
+            </div>
+          )
+        })}
+      </div>
+
+      {message ? <p className="perm-reason">{message}</p> : null}
+
+      {whisper ? (
+        <>
+          <Row label="whisper-cli" hint={whisper.whisperCli}>
+            <span className="mono">{whisper.whisperInstalled ? 'found' : 'not found'}</span>
+          </Row>
+          {!whisper.whisperInstalled ? (
+            <p className="warn-line">
+              Install it with <code>brew install whisper-cpp</code>, then reopen Mull.
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p>Checking…</p>
+      )}
+    </section>
+  )
+}
+
 function SettingsWindow(): JSX.Element {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [permissions, setPermissions] = useState<PermissionsSnapshot | null>(null)
-  const [model, setModel] = useState<ModelStatus | null>(null)
   const [about, setAbout] = useState<AboutInfo | null>(null)
 
   const bridge = window.mull
@@ -341,7 +606,6 @@ function SettingsWindow(): JSX.Element {
       setSettings(next)
       applyTheme(next)
     })
-    void bridge.model.status().then(setModel)
     void bridge.about().then(setAbout)
     refreshPermissions()
 
@@ -488,50 +752,7 @@ function SettingsWindow(): JSX.Element {
           </Row>
         </section>
 
-        <section className="section">
-          <h2>Speech model</h2>
-          {model ? (
-            <>
-              <Row label="Model" hint={model.path}>
-                <span className="mono">
-                  {model.installed ? `${model.file} · ${humanBytes(model.bytes)}` : 'not installed'}
-                </span>
-              </Row>
-              <Row label="Accuracy" hint="all three run on this Mac; restart Mull to apply">
-                <select
-                  value={settings.speechModel}
-                  onChange={(event) =>
-                    void update({ speechModel: event.target.value as Settings['speechModel'] })
-                  }
-                >
-                  <option value="small.en">Accurate — small.en (466 MB)</option>
-                  <option value="base.en">Balanced — base.en (148 MB)</option>
-                  <option value="tiny.en">Fastest — tiny.en (78 MB)</option>
-                </select>
-              </Row>
-              <Row label="whisper-cli" hint={model.whisperCli}>
-                <span className="mono">{model.whisperInstalled ? 'found' : 'not found'}</span>
-              </Row>
-              {!model.whisperInstalled ? (
-                <p className="warn-line">
-                  Install it with <code>brew install whisper-cpp</code>, then reopen Mull.
-                </p>
-              ) : null}
-              <p>
-                Transcription runs here, on this Mac. Your audio never crosses the network, and
-                neither does dictation into an empty field. Asking Mull to change text is what
-                sends that text to a model — see Engine, above.
-              </p>
-              <p>
-                A larger model is slower to the caret but better at names — people, channels,
-                apps — which is where transcription usually goes wrong. Mull also tells the
-                model which names are on screen as you speak, whichever size you pick.
-              </p>
-            </>
-          ) : (
-            <p>Checking…</p>
-          )}
-        </section>
+        <SpeechModelPane settings={settings} update={update} />
 
         <EnginePane settings={settings} update={update} />
 
