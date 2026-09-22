@@ -77,6 +77,14 @@ export interface ToolContext {
   /** How many acts have been taken, so a step can be numbered. */
   steps: number
   /**
+   * Browsers this run has already waited on for a page, by bundle id.
+   *
+   * Cleared whenever the run navigates, because a new document deserves a fresh
+   * wait — see `rescan`. Lazily created like `knownHosts` below, so no caller
+   * has to construct one.
+   */
+  pageWaits?: Set<string>
+  /**
    * The browser's own tab model, when there is a browser in front.
    *
    * Null in every test that does not care and on every machine where the user
@@ -153,6 +161,18 @@ export interface ToolOutcome {
   text: string
   /** One clause for the card's step row, when this act deserves one. */
   detail?: string
+  /**
+   * What the *log* should say, when the card and the log want different things.
+   *
+   * Only `switchApp` and `chooseMenu` need it, and for a documented reason: both
+   * deliberately leave `detail` empty so the card keeps showing the model's
+   * "why" rather than overwriting it with the destination. That is right for the
+   * card and wrong for `main.log`, where it produced `act.go to n=2 ok=true` —
+   * a switch with no record of what it switched to. A run that asked for Arc and
+   * silently spent the next fifty seconds inside Chrome left no trace of the
+   * moment it changed its mind.
+   */
+  trace?: string
   /** False when the act was refused or failed — the card marks the step. */
   ok?: boolean
   /**
@@ -187,6 +207,46 @@ const READ_BUDGET = { maxChars: 6_000, screenshot: false } as const
 /** Chromium builds its tree lazily; the same handshake `captureContext` uses. */
 const TREE_ATTEMPTS = 3
 const TREE_POLL_MS = 350
+
+/**
+ * How long to keep asking a browser that is not showing us its page.
+ *
+ * Longer and slower than the tree-warming handshake above, because it is a
+ * different wait. That one is a tree being built inside a process that has
+ * already agreed to build it, and it lands in a few hundred milliseconds. This
+ * one is a document: a page that was navigated to a moment ago has to load
+ * before it has an accessibility tree to expose, and a second is not unusual.
+ *
+ * Bounded at roughly two and a half seconds, and spent at most once per app
+ * between navigations — see `pageWaits`. The alternative to bounding it is the
+ * behaviour this replaces, where a cold browser was handed over as an ordinary
+ * result and the model spent twelve turns and thirty-eight seconds discovering
+ * the page was not there.
+ */
+const COLD_ATTEMPTS = 4
+const COLD_POLL_MS = 600
+
+/**
+ * What a browser that is not showing us its page gets told, in one place.
+ *
+ * `look` said this and `find` did not, which is how the failing run went the
+ * way it did: the model asked `find "Create event"`, was told *nothing here
+ * matches, there are 18 things in this window*, and drew the only available
+ * conclusion — wrong page, navigate again. Every tool that can be the first to
+ * meet a cold browser has to say the same thing, so there is one sentence and
+ * both of them use it.
+ *
+ * It names the remedy rather than the mechanism. "Chromium builds its renderer
+ * accessibility lazily" is true and helps nobody decide what to do next.
+ */
+const PAGE_NOT_VISIBLE =
+  'this browser is not sharing the page — only its own toolbar is visible, so ' +
+  'nothing on the page itself can be read or pressed. Opening the address again ' +
+  'will not change that. The tabs tool still works: it can say what is open and ' +
+  'move between pages. If the answer needs the page itself, say so and finish — ' +
+  'and say that turning on “Native accessibility API support” at ' +
+  'chrome://accessibility is what fixes it, because the user is the only one who ' +
+  'can.'
 
 /**
  * How long between two presses of the same key.
@@ -269,37 +329,49 @@ export async function look(
        * open and still be moved between pages. That is not the whole page back,
        * but it is the difference between a dead end and a narrower road.
        */
-      parts.push(
-        '<targets>\nthis browser is not sharing the page — only its own toolbar is ' +
-          'visible, so nothing on the page itself can be pressed. The tabs tool still ' +
-          'works: it can say what is open and move between pages. If the answer needs ' +
-          'the page itself, say so and finish.\n</targets>'
-      )
+      parts.push(`<targets>\n${PAGE_NOT_VISIBLE}\n</targets>`)
     } else {
       parts.push(renderTargets(scan.targets, undefined, scan.stoppedBy))
     }
     detail = detail ? `${detail} · ${scan.targets.length} targets` : `${scan.targets.length} targets`
+    const note = treeNote(scan)
+    if (note) detail = `${detail} · ${note}`
+  }
 
-    /**
-     * Did the last press actually do anything?
-     *
-     * Asked here because here it is free — the look has both the window before
-     * and the window after already in hand. It replaces a much weaker signal:
-     * the executor compares window *titles*, which is right when a press changes
-     * windows and silent when it opens an overlay, a pane or a modal. A Slack
-     * search box opening took the list from 300 entries to 6 and left the title
-     * alone, so history said "the window is still …" and a model one step from
-     * the answer concluded it was stuck.
-     */
-    const pressed = context.pressed
-    if (pressed) {
-      context.pressed = null
-      const change = describeChange(pressed.scan, scan)
-      parts.push(change.detail)
-      // The same sentence, written onto the row that press already wrote — the
-      // evidence only exists one turn after the row does.
-      if (pressed.entryId) context.amend?.(pressed.entryId, change.detail)
-    }
+  /**
+   * Did the last press actually do anything?
+   *
+   * The only honest answer compares the window before against the window after,
+   * because that is the only comparison that can see an overlay open. The
+   * executor's title check cannot: a Slack search box opening took the list
+   * from 300 entries to 6 and left the title alone.
+   *
+   * ### Why this is no longer inside the targets branch
+   *
+   * It used to be, on the reasoning that a look which scans has the comparison
+   * in hand for free. True, but it made the evidence conditional on the model
+   * happening to ask for targets — and "press the DM, then read it" is a
+   * natural shape that asks for text. One real run pressed six times and looked
+   * with `want: 'text'` after each, so the verdict never arrived once; all the
+   * model ever heard was the executor saying the title had not changed, and it
+   * spent twenty-five turns disbelieving presses that had all worked.
+   *
+   * So a pending press now buys its own scan if the caller did not ask for one.
+   * That is one tree walk, against the three or four turns of re-pressing that
+   * saying nothing was costing.
+   */
+  const pressed = context.pressed
+  if (pressed) {
+    const after = context.scan ?? (context.scan = await rescan(context, sleep))
+    context.pressed = null
+    const change = describeChange(pressed.scan, after)
+    parts.push(change.detail)
+    // Worth a word in the trace too: the log could say what was pressed and
+    // never whether it landed.
+    detail = detail ? `${detail} · ${change.moved ? 'moved' : 'no change'}` : ''
+    // The same sentence, written onto the row that press already wrote — the
+    // evidence only exists one turn after the row does.
+    if (pressed.entryId) context.amend?.(pressed.entryId, change.detail)
   }
 
   return { text: parts.join('\n\n'), detail, ok: true }
@@ -315,6 +387,18 @@ export async function find(
   // A `find` with no scan behind it is the common opening move, and failing it
   // would teach the model to call `look` first purely as a ritual.
   const scan = context.scan ?? (context.scan = await rescan(context, sleep))
+
+  // Before looking for a match, say whether there was anything to match. A
+  // browser with no page in it has targets — its own toolbar — so `findTargets`
+  // runs happily and reports an honest, useless nothing.
+  if (scan.stoppedBy === 'browser-cold') {
+    return {
+      text: PAGE_NOT_VISIBLE,
+      detail: `“${input.query}” — no page${treeNote(scan) ? ` · ${treeNote(scan)}` : ''}`,
+      ok: false
+    }
+  }
+
   const hits = findTargets(scan.targets, input.query, input.kind)
 
   if (hits.length === 0) {
@@ -322,7 +406,10 @@ export async function find(
       text:
         `nothing here matches “${input.query}”. There are ${scan.targets.length} things ` +
         'in this window; look at them, or try a word that would appear in the label itself.',
-      detail: `“${input.query}” — nothing`,
+      // A find that matched nothing is the exact moment the question "was there
+      // anything here to match?" gets asked, so this is where the tree note
+      // earns its place.
+      detail: `“${input.query}” — nothing${treeNote(scan) ? ` · ${treeNote(scan)}` : ''}`,
       ok: true
     }
   }
@@ -643,11 +730,15 @@ export async function switchApp(
   // with the destination — so the settled card would say where the screen went
   // and no longer say why. The why is the part worth keeping; the where is
   // visible, because the user is looking at it.
+  //
+  // The *log* is a different reader, and it is not looking at the screen. See
+  // `ToolOutcome.trace`.
   return {
     text:
       `${name} is in front now. Nothing here has been looked at yet — ` +
       'look or find before pressing anything, and remember the tab tools only ' +
       'mean something in a browser.',
+    trace: name,
     ok: true
   }
 }
@@ -1023,6 +1114,8 @@ export async function switchTab(
     // Harder than a press: the document underneath is a different one entirely.
     context.scan = null
     context.pressed = null
+    // A different document deserves its own wait — see `rescan`.
+    context.pageWaits?.clear()
     return {
       text:
         `now on “${now.title}” — ${now.url}. This is a different page: ` +
@@ -1062,16 +1155,48 @@ export async function openUrl(
   const bridge = browserBridge(context, { allowAnywhere: true })
   if ('text' in bridge) return bridge
 
+  // Which browser this is actually for — the question `open` answers wrongly
+  // whenever more than one is running. See `chooseBrowser`.
+  const target = await chooseBrowser(context, bridge)
+  if ('text' in target) return target
+
   try {
     const now = await bridge.run.openUrl({
-      bundleId: bridge.bundleId || null,
+      bundleId: target.bundleId || null,
       url: input.url.trim(),
-      newTab: input.newTab === true
+      // A new tab unless the goal actually wanted the page replaced. The default
+      // used to be the other way round, and the asymmetry is the argument: an
+      // unwanted tab is a tab to close, while an unwanted replacement throws
+      // away whatever the user was reading and cannot be undone from here.
+      newTab: input.newTab !== false
     })
     context.steps += 1
     context.scan = null
     context.pressed = null
+    // The page that is arriving is allowed the full wait, even if this run has
+    // already waited on this browser once.
+    context.pageWaits?.clear()
     if (verdict.host) (context.knownHosts ??= new Set()).add(verdict.host)
+
+    /**
+     * `active: false` means the URL was handed to `open` rather than to a
+     * browser Mull can drive — so it went to whatever the system's *default*
+     * browser is, which is not necessarily the one anybody meant.
+     *
+     * Said out loud because the silence cost a whole run. See `chooseBrowser`
+     * for the guard that now stops it happening at all when there is a choice
+     * to get wrong.
+     */
+    if (!now.active) {
+      return {
+        text:
+          `opened ${now.url} in the system’s default browser — that is the window you ` +
+          'are now working in. Look before pressing anything, and say so if that is ' +
+          'the wrong browser.',
+        detail: `${verdict.host ?? now.url} · via the default browser`,
+        ok: true
+      }
+    }
     return {
       text:
         `opened ${now.url}. The page is still loading and the numbers you were shown ` +
@@ -1082,6 +1207,101 @@ export async function openUrl(
   } catch (err) {
     return refusal(err, bridge.name, 'open that')
   }
+}
+
+/**
+ * Which browser an address is actually for.
+ *
+ * `openUrl` used to answer this by not asking: if the front application was not
+ * a browser it could drive, it handed the URL to `/usr/bin/open` and macOS took
+ * it to the **default** browser. On a Mac with two browsers running that is a
+ * coin toss dressed as an action — and it lost. Asked to open YouTube in Arc,
+ * with Arc in front and Chrome as the default, it opened YouTube in Chrome and
+ * the run spent the next fifty seconds driving a window nobody had asked for.
+ *
+ * Three cases, in order:
+ *
+ *   1. **The front application is a browser Mull can drive.** That is the one
+ *      the user is looking at; use it. No ambiguity to resolve.
+ *   2. **Exactly one browser is running.** There is only one place this could
+ *      sensibly go, so go there by name rather than through `open` — which
+ *      would still consult the default and could launch a *second* browser to
+ *      show a page the user has a perfectly good window for.
+ *   3. **More than one is running.** Refuse, and say which. Guessing here is
+ *      the original bug, and the model has `switchApp` — it can put the browser
+ *      it means in front and ask again, which also makes the choice visible to
+ *      the user watching the screen move.
+ *
+ * With no app list at all — `apps` refused, or never called — this falls
+ * through to `open` and the honest sentence about the default browser. That is
+ * the old behaviour, kept for the case where there is genuinely nothing better
+ * to go on.
+ */
+async function chooseBrowser(
+  context: ToolContext,
+  bridge: { run: BrowserBridge; bundleId: string; name: string }
+): Promise<{ bundleId: string; name: string } | ToolOutcome> {
+  // Case 1: already standing in one.
+  if (bridge.bundleId && bridge.run.supports(bridge.bundleId)) {
+    return { bundleId: bridge.bundleId, name: bridge.name }
+  }
+
+  const running = await runningBrowsers(context)
+  // Case 2.
+  if (running.length === 1) return running[0] as { bundleId: string; name: string }
+
+  // Case 3.
+  if (running.length > 1) {
+    const names = running.map((browser) => browser.name).join(', ')
+    // The front app's own name, not `bridge.name` — which for a non-browser is
+    // the placeholder "the default browser" and would make this sentence say
+    // that the default browser is not a browser.
+    const here = context.front?.name ?? 'this app'
+    return {
+      text:
+        `${here} is not a browser, and ${running.length} are open — ${names} — so there ` +
+        'is no way to tell which of them this address is for. Opening it would land in ' +
+        'whichever the Mac treats as the default, which may not be the one the goal ' +
+        'named. Use switchApp to put the right browser in front, then open the address ' +
+        'there.',
+      detail: `which browser? ${names}`,
+      ok: false
+    }
+  }
+
+  // Nothing known. `openUrl` falls through to `open` and says so.
+  return { bundleId: '', name: bridge.name }
+}
+
+/**
+ * The browsers running right now, by bundle id.
+ *
+ * Reads `knownApps` first — it is what `apps` already filled in and costs
+ * nothing — and only spawns the app list when this run has not asked for one.
+ * A refusal there is not an error: the caller treats "no list" as "nothing to
+ * go on" and keeps the old behaviour.
+ */
+async function runningBrowsers(
+  context: ToolContext
+): Promise<Array<{ bundleId: string; name: string }>> {
+  const seen = new Map<string, string>()
+  for (const [bundleId, name] of context.knownApps ?? []) seen.set(bundleId, name)
+
+  if (seen.size <= 1 && context.apps) {
+    try {
+      for (const app of await context.apps.list()) seen.set(app.bundleId, app.name)
+    } catch {
+      // The consent dialog, or an app that quit mid-enumeration. Either way the
+      // answer is "we do not know", which is what an empty list means here.
+    }
+  }
+
+  const browsers: Array<{ bundleId: string; name: string }> = []
+  for (const [bundleId, name] of seen) {
+    const known = browserOf(bundleId)
+    if (known) browsers.push({ bundleId, name: known.name || name })
+  }
+  return browsers
 }
 
 // ---------------------------------------------------------------------------
@@ -1267,9 +1487,69 @@ async function rescan(context: ToolContext, sleep: (ms: number) => Promise<void>
     await sleep(TREE_POLL_MS)
     seen = await context.sidecar.uiTargets(SCAN_BUDGET)
   }
+
+  /**
+   * A browser with no page in it, asked again.
+   *
+   * Two different things arrive here looking the same. One is a page that is
+   * simply not loaded yet — `openUrl` returns the moment the address bar
+   * changes, so the first look after a navigation routinely lands before the
+   * document exists — and that one resolves by waiting. The other is a browser
+   * whose renderer accessibility is off altogether, and that one never
+   * resolves: current Chrome refuses `AXManualAccessibility` outright, so there
+   * is no lever to pull and no amount of asking will help.
+   *
+   * They are indistinguishable from here, so both get the same bounded wait and
+   * then the honest answer. Paying it once per app per navigation is what keeps
+   * the second case cheap: the `look` after that gets a single scan and the
+   * sentence saying the page is not visible, rather than this wait again.
+   */
+  if (seen.stoppedBy === 'browser-cold') {
+    const key = seen.app?.bundleId ?? 'unknown'
+    const waited = (context.pageWaits ??= new Set())
+    if (!waited.has(key)) {
+      waited.add(key)
+      for (let n = 0; seen.stoppedBy === 'browser-cold' && n < COLD_ATTEMPTS; n += 1) {
+        await sleep(COLD_POLL_MS)
+        seen = await context.sidecar.uiTargets(SCAN_BUDGET)
+      }
+    }
+  }
+
   return {
     harvestId: seen.harvestId,
     targets: seen.targets as UiTarget[],
-    stoppedBy: seen.stoppedBy
+    stoppedBy: seen.stoppedBy,
+    nodes: seen.nodes,
+    webAreas: seen.webAreas,
+    clipped: seen.clipped,
+    deepest: seen.deepest,
+    chromium: seen.chromium
   }
+}
+
+/**
+ * The half of a look the log could never see.
+ *
+ * `act.look  detail="2 blocks · 138 chars · 18 targets"  ok=true` is a true
+ * sentence about a Chrome window that was showing none of Google Calendar, and
+ * it is indistinguishable from the same sentence about a window that really
+ * does hold eighteen buttons. Reading the log afterwards, there was no way to
+ * tell which had happened — so the run looked like the model choosing badly
+ * rather than the model being handed a toolbar and told it was a page.
+ *
+ * Kept short on purpose: this goes on every look and every find, and a trace
+ * line nobody can scan is a trace line nobody reads. Silent when there is
+ * nothing to report — a native app that walked its whole tree adds one clause,
+ * and a browser with its page visible adds two.
+ */
+export function treeNote(scan: Scan): string {
+  const bits: string[] = []
+  if (scan.nodes !== undefined) bits.push(`${scan.nodes} nodes`)
+  // The one that matters. A browser with no web document in its tree is not
+  // showing us the page, however many targets it just offered.
+  if (scan.chromium) bits.push(scan.webAreas ? `${scan.webAreas} doc` : 'NO PAGE')
+  if (scan.clipped) bits.push(`clipped ${scan.clipped}@${scan.deepest}`)
+  if (scan.stoppedBy && scan.stoppedBy !== 'complete') bits.push(scan.stoppedBy)
+  return bits.join(' · ')
 }

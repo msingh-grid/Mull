@@ -1,4 +1,11 @@
-import type { JSX } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type JSX,
+  type KeyboardEvent,
+  type RefObject
+} from 'react'
 import type { HudAction, HudState } from '@shared/ipc'
 import { hudView } from '../hud/view-model'
 import { Orb, Waveform } from './atoms'
@@ -20,30 +27,73 @@ export function Hud({
   state,
   onAction,
   onThinking,
+  onCorrect,
   now
 }: {
   state: HudState
   onAction?: (action: HudAction) => void
   /** Arm or disarm thinking for the writing lanes. Absent in the demo HUD. */
   onThinking?: (on: boolean) => void
+  /**
+   * Correct what Mull heard. Absent in the demo HUD, which has no pipeline
+   * behind it to run again.
+   *
+   * `begin` asks main for the keyboard; `end` gives it back, with the corrected
+   * words or with null for "never mind". Both halves are needed because the
+   * panel is not focusable and does not own its own chords — see
+   * `services/chords.ts`.
+   */
+  onCorrect?: { begin: () => void; end: (text: string | null) => void }
   /** Injected so a statically-mounted HUD renders deterministically. */
   now?: number
 }): JSX.Element {
   const view = hudView(state, now)
+  const correcting = useCorrection(view.transcript, onCorrect)
 
   return (
     <div className={`hud ${view.stateClass}`}>
       <div className="hud-top">
         <Orb />
         <Waveform />
-        <div className="transcript" role="status" aria-live="polite">
-          {view.transcript.ghost ? (
-            <span className="ghost">{view.transcript.text}</span>
-          ) : (
-            <span>{view.transcript.text}</span>
-          )}
-          {view.transcript.caret ? <span className="caret" aria-hidden="true" /> : null}
-        </div>
+        {/*
+          The transcript, and — while a card is waiting on an answer — the one
+          thing on this panel you fix by touching it rather than by pressing
+          something. Whisper mishears names, and the card on screen was built
+          from the misheard one; clicking the line opens it for editing and ⏎
+          runs the whole utterance again from the corrected words.
+
+          No pencil, no Edit button. A button here would be a third thing
+          competing with Apply and Cancel for the same glance, to say something
+          the caret already says the moment you hover.
+        */}
+        {correcting.open ? (
+          <textarea
+            ref={correcting.ref}
+            className="transcript transcript-edit"
+            value={correcting.draft}
+            rows={2}
+            spellCheck={false}
+            aria-label="Correct what Mull heard, then press Return to run it again"
+            onChange={(event) => correcting.setDraft(event.target.value)}
+            onKeyDown={correcting.onKeyDown}
+            onBlur={correcting.commit}
+          />
+        ) : (
+          <div
+            className={`transcript${view.transcript.editable ? ' is-correctable' : ''}`}
+            role="status"
+            aria-live="polite"
+            title={view.transcript.editable ? 'Misheard? Click to correct it.' : undefined}
+            onClick={correcting.start}
+          >
+            {view.transcript.ghost ? (
+              <span className="ghost">{view.transcript.text}</span>
+            ) : (
+              <span>{view.transcript.text}</span>
+            )}
+            {view.transcript.caret ? <span className="caret" aria-hidden="true" /> : null}
+          </div>
+        )}
         <div className="state-label">
           {view.label}
           {/* The seconds tick in the label's own column rather than in the
@@ -104,4 +154,95 @@ export function Hud({
       ) : null}
     </div>
   )
+}
+
+/**
+ * The transcript, while it is being corrected.
+ *
+ * Kept here rather than in the renderer's top-level state because it is
+ * interface state and nothing else: main learns about it twice, at the start
+ * (to lend the panel the keyboard) and at the end (with the words, or without
+ * them). Between those two moments nothing outside this component needs to
+ * know, and a round trip per keystroke would make typing feel like dictation.
+ *
+ * Every way out goes through `finish`, exactly once. Return commits, Escape
+ * abandons, and losing focus commits — including the focus lost to the app the
+ * panel is about to hand the caret back to, which is why the guard is a ref and
+ * not a piece of state: the blur arrives after the re-render that closed the
+ * field.
+ */
+function useCorrection(
+  transcript: { text: string; editable: boolean },
+  onCorrect?: { begin: () => void; end: (text: string | null) => void }
+): {
+  open: boolean
+  draft: string
+  ref: RefObject<HTMLTextAreaElement | null>
+  setDraft: (text: string) => void
+  start: () => void
+  commit: () => void
+  onKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void
+} {
+  const [draft, setDraft] = useState<string | null>(null)
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const done = useRef(false)
+  const open = draft !== null && onCorrect !== undefined
+
+  // Focus and select on open. A correction is nearly always one word in a
+  // sentence, so the caret goes to the end rather than over the whole thing —
+  // selecting it all would make the first keystroke destroy what you came to
+  // fix.
+  useEffect(() => {
+    if (!open) return
+    const field = ref.current
+    if (!field) return
+    field.focus()
+    field.setSelectionRange(field.value.length, field.value.length)
+  }, [open])
+
+  // The card went away underneath the field — a new utterance, a lane that
+  // closed itself. There is nothing left to re-run against, so the correction
+  // ends without one.
+  useEffect(() => {
+    if (draft === null || transcript.editable) return
+    setDraft(null)
+    if (!done.current) {
+      done.current = true
+      onCorrect?.end(null)
+    }
+  }, [draft, transcript.editable, onCorrect])
+
+  const finish = (text: string | null): void => {
+    if (done.current) return
+    done.current = true
+    setDraft(null)
+    onCorrect?.end(text)
+  }
+
+  return {
+    open,
+    draft: draft ?? '',
+    ref,
+    setDraft,
+    start: () => {
+      if (!transcript.editable || !onCorrect || draft !== null) return
+      done.current = false
+      setDraft(transcript.text)
+      onCorrect.begin()
+    },
+    commit: () => finish(draft !== null && draft.trim() !== transcript.text ? draft : null),
+    onKeyDown: (event) => {
+      // ⇧⏎ is a newline, the way it is in every other field — a transcript can
+      // be two sentences, and the only key that runs it should be the plain one.
+      if (event.key === 'Enter' && !event.shiftKey) {
+        event.preventDefault()
+        finish(draft !== null && draft.trim() !== transcript.text ? draft : null)
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        finish(null)
+      }
+    }
+  }
 }

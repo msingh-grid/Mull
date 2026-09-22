@@ -122,6 +122,28 @@ export interface Scan {
    * second sentence rather than the first.
    */
   stoppedBy?: string
+
+  /**
+   * What the walk walked through, when the caller carried it.
+   *
+   * Diagnostics, and they exist because `stoppedBy` could not describe the
+   * failure they were added for: a Chrome window showing Google Calendar
+   * answered `complete` with eighteen targets, all of them Chrome's own
+   * toolbar, and nothing in the log could tell that from a page with eighteen
+   * buttons on it. `nodes: 119, webAreas: 0` can.
+   *
+   * All optional: a sidecar built before these fields omits them, and a
+   * diagnostic that could take accessibility down with it would be a poor
+   * trade. See `UiTargetsResultSchema`.
+   */
+  nodes?: number
+  /** Web documents in the window. Zero in a browser means the page is not visible to us. */
+  webAreas?: number
+  /** Subtrees dropped at the depth bound — the budget `stoppedBy` never names. */
+  clipped?: number
+  deepest?: number
+  /** Does this app keep its page behind a renderer at all? */
+  chromium?: boolean
 }
 
 /**
@@ -292,7 +314,25 @@ export class ActionExecutor {
         const now = await this.windowTitle()
         if (now && was && now !== was) return { ok: true, detail: `${target.title} → ${now}` }
         if (now && was && now === was) {
-          return { ok: true, detail: `${target.title} — the window is still “${now}”` }
+          /**
+           * An unchanged title is **not** evidence that the press did nothing,
+           * and saying so cost more than every other bug in this file put
+           * together. Across one log: forty-one presses, thirty-eight of them
+           * reported as "the window is still …" — including every press that
+           * had worked perfectly. Opening a search box, focusing a field,
+           * expanding a menu, selecting a search result: none of them touch the
+           * window title, and all of them were announced as failures. The model
+           * did the only sensible thing with that, which was to press Close and
+           * try again, and a five-step errand became twenty-five.
+           *
+           * So this says what was observed and stops short of what it means.
+           * The verdict comes from `describeChange` on the next look, which
+           * compares the target lists and can actually see an overlay open.
+           */
+          return {
+            ok: true,
+            detail: `${target.title} — pressed; the window is still called “${now}”`
+          }
         }
         return { ok: true, detail: target.title }
       }

@@ -147,6 +147,10 @@ public final class RealSystem: SystemActions {
             truncated: harvest.truncated,
             stoppedBy: harvest.stoppedBy,
             harvestMs: harvest.elapsedMs,
+            nodes: harvest.nodes,
+            clipped: harvest.clipped,
+            deepest: harvest.deepest,
+            wake: harvest.wake,
             screenshot: shot,
             screenshotReason: shotReason)
     }
@@ -187,7 +191,15 @@ public final class RealSystem: SystemActions {
             },
             truncated: scan.truncated,
             stoppedBy: scan.stoppedBy,
-            scanMs: scan.elapsedMs)
+            scanMs: scan.elapsedMs,
+            nodes: scan.nodes,
+            webNodes: scan.webNodes,
+            webAreas: scan.webAreas,
+            duplicates: scan.duplicates,
+            clipped: scan.clipped,
+            deepest: scan.deepest,
+            chromium: scan.chromium,
+            wake: scan.wake)
     }
 
     public func pressTarget(

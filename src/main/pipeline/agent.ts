@@ -341,7 +341,13 @@ export class AgentLane {
         shown.state = outcome.ok === false ? 'failed' : 'done'
         if (outcome.detail) shown.object = outcome.detail
       }
-      trace.step(`act.${verb}`, { n: steps.length, detail: outcome.detail, ok: outcome.ok !== false })
+      trace.step(`act.${verb}`, {
+      n: steps.length,
+      // `trace` for the two acts that keep `detail` empty on purpose. See
+      // `ToolOutcome.trace`.
+      detail: outcome.trace ?? outcome.detail,
+      ok: outcome.ok !== false
+    })
       draw()
       return outcome.text
     }
@@ -462,7 +468,19 @@ export class AgentLane {
       stage('reading what it found')
       try {
         const said = await this.deps.engine.answer(
-          { goal: request.goal, context: context.read },
+          {
+            goal: request.goal,
+            context: context.read,
+            // What was actually done, so this turn does not have to infer it
+            // from a window that may have read badly. See `AnswerRequest.did`.
+            did: steps
+              .filter((step) => step.state !== 'running')
+              .map((step) => ({
+                verb: step.verb,
+                object: step.object,
+                ok: step.state !== 'failed'
+              }))
+          },
           (partial) => {
             answer = partial
             draw()

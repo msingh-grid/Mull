@@ -53,10 +53,38 @@ public enum AXHarvest {
         public let blocks: [Block]
         /// True when any budget stopped the walk before the tree ran out.
         public let truncated: Bool
-        /// Which one: "complete" | "nodes" | "chars" | "deadline".
+        /// Which one: "complete" | "nodes" | "chars" | "deadline"
+        /// | "no-window" | "tree-warming".
         public let stoppedBy: String
         /// How long it actually took, so the host can put it in the ledger.
         public let elapsedMs: Int
+        /// Elements visited. The counterpart to `blocks.count`, and the pair is
+        /// what makes an empty read readable: two blocks out of 190 nodes is a
+        /// window with nothing in it, two blocks out of 3800 is a window whose
+        /// text this walk could not see.
+        public let nodes: Int
+        /// Subtrees abandoned at `maxDepth` — the budget that does not appear
+        /// in `stoppedBy`. See the depth guard in the walk.
+        public let clipped: Int
+        /// The deepest level reached, against `maxDepth`.
+        public let deepest: Int
+        /// What this app said when asked to build a tree: "enabled" or
+        /// "unsupported". See `ManualAccessibility`.
+        public let wake: String
+
+        public init(
+            blocks: [Block], truncated: Bool, stoppedBy: String, elapsedMs: Int, nodes: Int = 0,
+            clipped: Int = 0, deepest: Int = 0, wake: String = "unknown"
+        ) {
+            self.blocks = blocks
+            self.truncated = truncated
+            self.stoppedBy = stoppedBy
+            self.elapsedMs = elapsedMs
+            self.nodes = nodes
+            self.clipped = clipped
+            self.deepest = deepest
+            self.wake = wake
+        }
     }
 
     /// The four bounds. Defaults chosen against a Slack window, the deepest
@@ -72,7 +100,7 @@ public enum AXHarvest {
 
         public init(
             maxNodes: Int = 3000,
-            maxDepth: Int = 40,
+            maxDepth: Int = AXHarvest.defaultMaxDepth,
             maxChars: Int = 12_000,
             deadline: TimeInterval = 0.35,
             maxBlockChars: Int = 2_000
@@ -83,6 +111,23 @@ public enum AXHarvest {
             self.deadline = deadline
             self.maxBlockChars = maxBlockChars
         }
+    }
+
+    /// The depth bound both walks use, and the one lever this file exposes to
+    /// the environment.
+    ///
+    /// `MULL_AX_MAX_DEPTH=200 npx tsx scripts/probe-page.ts --app "Google Chrome"`
+    /// is how the question *is this window deep or is it empty* gets answered in
+    /// one run instead of one rebuild. Read per call rather than cached: a probe
+    /// that had to restart the sidecar to change it would be a worse instrument.
+    ///
+    /// The default stays where it was measured. This is an instrument, not a
+    /// setting — nothing in the app sets it.
+    public static var defaultMaxDepth: Int {
+        guard let raw = ProcessInfo.processInfo.environment["MULL_AX_MAX_DEPTH"],
+            let value = Int(raw), value > 0
+        else { return 40 }
+        return value
     }
 
     /// How long any single AX message may block before the walk gives up on it.
@@ -139,31 +184,35 @@ public enum AXHarvest {
     public static func harvest(
         pid: pid_t,
         budget: Budget = Budget(),
-        /// How long to keep waiting for a freshly-enabled Chromium tree. Set on
-        /// the first call and carried through the retries, so the wait is
-        /// bounded in total rather than per attempt. Nil on the first call.
+        /// How long to keep waiting for a freshly-enabled Chromium tree. Nil on
+        /// the first call, when it is computed from the warm-up anchor; carried
+        /// through the retries so the wait is bounded in total rather than per
+        /// attempt.
         treeDeadline: CFAbsoluteTime? = nil
     ) -> Harvest {
         let startedAt = CFAbsoluteTimeGetCurrent()
-        // Carried, not recomputed: `enableManualAccessibility` only answers
-        // "yes" once per app, so asking it again inside the retry would say no
-        // and end the wait after a single poll. That bug made the whole thing
-        // look like it did not work.
-        let warming = treeDeadline != nil || enableManualAccessibility(pid: pid)
-        let treeDeadline = treeDeadline ?? (startedAt + manualAccessibilityWait)
+        // Both derived from one anchor — the moment the switch was thrown — so
+        // recomputing them is stable and the answer does not depend on which
+        // walk asked first. See `warmUpDeadline`.
+        let wake = manualAccessibility(pid: pid)
+        let treeDeadline = treeDeadline ?? warmUpDeadline(wake)
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, messagingTimeout)
 
         guard let root = window(of: app) else {
             return Harvest(
                 blocks: [], truncated: false, stoppedBy: "no-window",
-                elapsedMs: elapsed(since: startedAt))
+                elapsedMs: elapsed(since: startedAt), nodes: 0, wake: wake.name)
         }
 
         var blocks: [Block] = []
         var chars = 0
         var visited = 0
         var stoppedBy = "complete"
+        /// Subtrees abandoned at `maxDepth`, and how far down this got. The
+        /// depth guard is the one bound that never reached `stoppedBy`.
+        var clipped = 0
+        var deepest = 0
         // Explicit stack rather than recursion: the depth bound is a number
         // here, not a hope about the call stack.
         var stack: [(element: AXUIElement, depth: Int)] = [(root, 0)]
@@ -191,7 +240,13 @@ public enum AXHarvest {
                 blocks.append(block)
             }
 
-            guard depth < budget.maxDepth else { continue }
+            // Counted rather than merely obeyed — see `Harvest.clipped`. A walk
+            // that stops here reports "complete" and has read none of the page.
+            guard depth < budget.maxDepth else {
+                clipped += 1
+                continue
+            }
+            deepest = max(deepest, depth)
             // Reversed, because popLast() is the cheap end of the array and
             // reading order is first-child-first.
             for child in node.children.reversed() {
@@ -209,7 +264,7 @@ public enum AXHarvest {
         // harvest after that is the 30ms one. It is paid during the hold, with
         // the user still speaking, which is the one moment there is time to
         // spend.
-        if warming && blocks.count <= 1 {
+        if let treeDeadline, blocks.count <= 1 {
             if CFAbsoluteTimeGetCurrent() < treeDeadline {
                 Thread.sleep(forTimeInterval: manualAccessibilityPoll)
                 return harvest(pid: pid, budget: budget, treeDeadline: treeDeadline)
@@ -220,18 +275,56 @@ public enum AXHarvest {
             // "ask me again in a moment" deserve different answers.
             return Harvest(
                 blocks: blocks, truncated: true, stoppedBy: "tree-warming",
-                elapsedMs: elapsed(since: startedAt))
+                elapsedMs: elapsed(since: startedAt), nodes: visited, clipped: clipped,
+                deepest: deepest, wake: wake.name)
         }
 
         return Harvest(
             blocks: blocks,
             truncated: stoppedBy != "complete",
             stoppedBy: stoppedBy,
-            elapsedMs: elapsed(since: startedAt))
+            elapsedMs: elapsed(since: startedAt),
+            nodes: visited,
+            clipped: clipped,
+            deepest: deepest,
+            wake: wake.name)
     }
 
-    /// Apps whose accessibility tree has already been switched on this launch.
-    private static var manualAccessibility: Set<pid_t> = []
+    /// What happened when an app was asked to build an accessibility tree, and
+    /// when it was asked.
+    ///
+    /// The `when` is the half that was missing. The old version of this was a
+    /// `Set<pid_t>` and a Bool meaning *did I just switch it on*, which is true
+    /// for exactly one caller — and `windowContext` runs before `uiTargets`
+    /// inside a single `look`, so the scan was always the second caller and
+    /// never knew it was reading a tree that had not arrived yet. A moment is
+    /// shareable; "I was first" is not.
+    public enum ManualAccessibility {
+        /// The switch is on, and this is when it was thrown.
+        case enabled(at: CFAbsoluteTime)
+        /// The app has no such attribute. Every native app answers this way and
+        /// nothing is lost — they have no renderer to wake. Chrome answering
+        /// this way is the whole bug: measured on Chrome 152,
+        /// `AXManualAccessibility` is not in its attribute list at all and the
+        /// set fails `-25205 kAXErrorAttributeUnsupported`, so Mull has no lever
+        /// on that window and used to have no way of noticing.
+        case unsupported(AXError)
+
+        /// One word for the log and the wire. See `Scan.wake`.
+        public var name: String {
+            switch self {
+            case .enabled: return "enabled"
+            case .unsupported: return "unsupported"
+            }
+        }
+    }
+
+    /// Per app, remembered for the life of the sidecar.
+    ///
+    /// Refusals are remembered as well as successes. An attribute that is not
+    /// implemented does not become implemented, and asking again on every scan
+    /// is a round trip spent learning nothing.
+    private static var manualAccessibilityState: [pid_t: ManualAccessibility] = [:]
     /// How long to block waiting for a Chromium tree that was just switched on.
     ///
     /// Short, and deliberately shorter than the tree usually takes. The
@@ -266,24 +359,41 @@ public enum AXHarvest {
     /// first asks Mull to read that app, is a fair trade; doing it on every
     /// keystroke would not be.
     ///
-    /// Returns false for apps that are not Chromium: they have no such
-    /// attribute, the write fails harmlessly, and nothing is remembered.
+    /// Apps that are not Chromium refuse this, harmlessly — they have no
+    /// renderer to wake. The refusal is still recorded, because an app that
+    /// refuses once refuses always, and because a browser that refuses is worth
+    /// saying out loud.
     ///
     /// Internal rather than private because `AXTargets` walks the same tree for
     /// a different purpose and meets the same cold Chromium window. One switch,
-    /// one record of having thrown it — two copies would ask twice and remember
-    /// separately, and the second asker would never see the `true` that starts
-    /// the warm-up wait.
+    /// one record of when it was thrown.
     @discardableResult
-    static func enableManualAccessibility(pid: pid_t) -> Bool {
-        if manualAccessibility.contains(pid) { return false }
+    static func manualAccessibility(pid: pid_t) -> ManualAccessibility {
+        if let known = manualAccessibilityState[pid] { return known }
         let app = AXUIElementCreateApplication(pid)
         let result = AXUIElementSetAttributeValue(
             app, "AXManualAccessibility" as CFString, kCFBooleanTrue)
-        guard result == .success else { return false }
-        manualAccessibility.insert(pid)
-        return true
+        let state: ManualAccessibility =
+            result == .success ? .enabled(at: CFAbsoluteTimeGetCurrent()) : .unsupported(result)
+        manualAccessibilityState[pid] = state
+        return state
     }
+
+    /// Is this app's tree still arriving, and until when?
+    ///
+    /// Nil when there is nothing to wait for: the app refused the switch, or the
+    /// switch was thrown long enough ago that whatever was coming has come.
+    ///
+    /// Anchored to the moment the switch was thrown rather than to the caller
+    /// asking, which is what lets the reading walk and the target walk of one
+    /// `look` both sit inside the same warm-up. A window read at 600ms and
+    /// scanned at 640ms is one window; either both are early or neither is.
+    static func warmUpDeadline(_ state: ManualAccessibility) -> CFAbsoluteTime? {
+        guard case .enabled(let at) = state else { return nil }
+        let deadline = at + manualAccessibilityWait
+        return CFAbsoluteTimeGetCurrent() < deadline ? deadline : nil
+    }
+
 
     // MARK: - One node
 

@@ -43,6 +43,8 @@ No single reliable mechanism — shipping apps use a **tiered strategy with a pe
 
 **Hostile apps & workarounds:**
 - **Electron/Chromium:** AX tree disabled until you set `AXManualAccessibility` = true; `AXSelectedText` writes buggy ([electron#36337](https://github.com/electron/electron/issues/36337)). Read via AX, insert via paste.
+- **Chrome specifically — the line above no longer holds** (measured Chrome 152, Sept 2026). `AXManualAccessibility` is not in Chrome's attribute list at all: the set fails `-25205 kAXErrorAttributeUnsupported`, as does `AXEnhancedUserInterface` (`-25208`), on both the application and the window element. There is **no in-process lever** to wake Chrome's renderer accessibility. A cold Chrome window answers with its own furniture — 119 nodes, 18 targets, no `AXWebArea` — and that is indistinguishable from a small page unless you check for a web document. The user-side remedy is "Native accessibility API support" at `chrome://accessibility`. Electron apps (Slack, Discord, VS Code) still honour `AXManualAccessibility` and are unaffected.
+- **Detecting it:** count `AXWebArea`, **not** `AXDOMIdentifier`. Chrome's own toolbar and tab strip are WebUI, so 112 of those 119 nodes carry DOM identifiers — a DOM-identifier test can never tell a cold browser from a live page.
 - **Browsers:** contenteditable lies about value/selection; Google Docs handled by paste + keystrokes only.
 - **Terminals:** no AX text semantics; paste-only insertion; context from screen text (Terminal.app exposes contents via AX; others need OCR).
 - **Secure input:** `EnableSecureEventInput` blocks taps/synthesis — detect via `IsSecureEventInputEnabled()` and visibly disable (Wispr does this).

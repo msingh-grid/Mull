@@ -161,6 +161,26 @@ export interface DictationDeps {
 /** Below this peak the recording is room tone; don't pay for ASR. */
 const SILENCE_PEAK = 0.006
 
+/**
+ * One utterance, as the half of the loop that deals in words sees it.
+ *
+ * `text` is the only field a correction changes. The rest describes the
+ * recording — how long the key was held, how long transcription took, which
+ * model answered — and is carried unchanged into a re-run, because a corrected
+ * name does not make it a different utterance. Filing the second pass under a
+ * fresh set of zeroes would put a lie in the bench.
+ */
+interface Utterance {
+  text: string
+  captureMs: number
+  audioSeconds: number
+  asrMs: number
+  cleanupMs: number
+  removedFillers: string[]
+  model: string
+  keyUpAt: number
+}
+
 type Phase = 'idle' | 'capturing' | 'processing'
 
 export class DictationPipeline {
@@ -177,6 +197,13 @@ export class DictationPipeline {
   private intent: HotkeyIntent = 'dictate'
   /** One per utterance, from key-down. Every step of this loop reports to it. */
   private trace: Trace = new Trace()
+  /**
+   * The last utterance to get as far as having words.
+   *
+   * Kept past the end of the run because the panel can still be showing a card
+   * built from it, and the user can still tell Mull it misheard — see `rerun`.
+   */
+  private said: Utterance | null = null
   private readonly now: () => number
   private readonly log: NonNullable<DictationDeps['log']>
 
@@ -471,295 +498,21 @@ export class DictationPipeline {
       // forty milliseconds is a flicker, not information.
       if (this.intent === 'instruct') this.stage('working out what you meant')
 
-      // Second secure-input check: focus can move while we were transcribing.
-      const secure = await this.deps.sidecar.secureInputState({})
-      if (secure.active) {
-        this.phase = 'idle'
-        // The user said something and nothing happened: that is exactly the
-        // case the journal exists to explain.
-        this.journal({
-          intent: { kind: 'dictate', text },
-          app: this.state.app,
-          before: null,
-          after: null,
-          strategyUsed: null,
-          status: 'cancelled',
-          summary: `Dictation withheld · secure input · “${summarise(text)}”`,
-          verified: null,
-          caret: null,
-          undoable: false
-        })
-        this.setState({
-          phase: 'blocked',
-          notice: 'Secure input turned on while Mull was listening — nothing was inserted.'
-        })
-        return
-      }
-
-      // ---- Routing ---------------------------------------------------------
-      // Read the invariant at the top of this file before changing anything
-      // here. `IntentRouter` answers synchronously when there is nothing an
-      // edit could act on, which is the case this loop must never slow down;
-      // only an utterance with text in front of it can reach the model.
-      const routed = await this.decide(text)
-      if (routed) {
-        this.trace.step('route', {
-          kind: routed.route.kind,
-          by: routed.by,
-          classifyMs: routed.classifyMs ?? undefined,
-          fellBackTo: routed.fallbackReason ?? undefined
-        })
-      } else {
-        // ⌥Space, or no router at all. Neither asks anything; both type.
-        this.trace.step('route', { kind: 'dictate', by: 'key' })
-      }
-      /**
-       * Remember what this was, before it has happened.
-       *
-       * Opened here rather than on completion because a run can take half a
-       * minute, and the user may well say the next thing before it lands — a
-       * memory that only recorded finished work would be missing precisely the
-       * turn they are following up on. `close` fills in the outcome when it
-       * arrives; see `announce` and the applied branch below.
-       */
-      this.deps.turns?.open({
-        said: text,
-        route: routed?.route.kind ?? 'dictate',
-        app: this.state.app?.name ?? null
-      })
-      let hint: string | null = null
-
-      // A bare send writes nothing at all, so it never reaches the insertion
-      // path below — the words were a command, not a message.
-      if (routed?.route.kind === 'send' && this.deps.sculpt) {
-        this.phase = 'idle'
-        this.trace.step('lane.send', { chars: routed.snapshot.field?.text.length ?? 0 })
-        this.stage('reading the box')
-        await this.deps.sculpt.sendOnly({
-          app: this.state.app ?? routed.snapshot.app,
-          text: routed.snapshot.field?.text ?? '',
-          transcript: text,
-          routedBy: routed.by
-        })
-        return
-      }
-
-      // The answer is somewhere else in this app. Nothing is written here and
-      // nothing moves yet — the lane puts a proposal on screen and the user
-      // presses Run. Only the model can choose this route (see `router.ts`).
-      if (routed?.route.kind === 'navigate' && this.deps.navigate) {
-        this.phase = 'idle'
-        this.trace.step('lane.navigate', { goal: routed.route.goal })
-        this.stage('planning')
-        await this.deps.navigate.propose({
-          goal: routed.route.goal,
-          transcript: text,
-          app: this.state.app ?? routed.snapshot.app,
-          context: routed.snapshot.context,
-          routedBy: routed.by
-        })
-        return
-      }
-
-      // A question about the window in front of them. Nothing is written and
-      // nothing can be: the lane's card has no Apply, because "summarize my
-      // tasks" is a request to know something, not a request for text. See
-      // `pipeline/ask.ts` for what this route cost before it existed.
-      if (routed?.route.kind === 'ask' && this.deps.ask) {
-        this.phase = 'idle'
-        this.trace.step('lane.ask', {
-          question: routed.route.question,
-          screen: routed.snapshot.context?.chars ?? 0
-        })
-        this.stage('reading what it saw')
-        await this.deps.ask.run({
-          question: routed.route.question,
-          transcript: text,
-          app: this.state.app ?? routed.snapshot.app,
-          context: routed.snapshot.context,
-          routedBy: routed.by
-        })
-        return
-      }
-
-      if (
-        (routed?.route.kind === 'edit' || routed?.route.kind === 'compose') &&
-        this.deps.sculpt
-      ) {
-        const target = editTarget(
-          routed.snapshot,
-          routed.route.kind === 'compose' ? 'draft' : routed.route.target
-        )
-        if (target.ok) {
-          // Did they ask for it to be sent? Read off their own transcript, here,
-          // rather than taken from the classifier's answer — see `wantsSend`.
-          // The instruction is cleaned of the same phrase so the draft does not
-          // end up with "and send it" written into it.
-          const wish = wantsSend(text)
-          // Idle before handing off: the lane owns the panel from here, and a
-          // new utterance must be able to interrupt it.
-          this.phase = 'idle'
-          this.stage(routed.route.kind === 'compose' ? 'writing a draft' : 'editing')
-          this.trace.step(`lane.${routed.route.kind}`, {
-            target: target.target.kind,
-            before: target.target.text.length,
-            send: wish.send || undefined
-          })
-          await this.deps.sculpt.run({
-            instruction: wish.send
-              ? wantsSend(routed.route.instruction).without
-              : routed.route.instruction,
-            send: wish.send,
-            transcript: text,
-            target: target.target,
-            app: this.state.app ?? routed.snapshot.app,
-            // The same window the routing decision was made from — read at
-            // key-down, never re-read. An edit is a promise about what the user
-            // was looking at when they spoke.
-            context: routed.snapshot.context,
-            routedBy: routed.by,
-            classifyMs: routed.classifyMs
-          })
-          return
-        }
-        // Understood, but unable — the field is too long to rewrite whole, or
-        // the app will not accept the write. Type the words (so nothing the
-        // user said is lost) and say what stopped the edit.
-        hint = target.message
-      }
-
-      this.setState({ phase: 'inserting' })
-      const insertStart = this.now()
-      // Normally resolved during the hold, off the critical path. A very short
-      // utterance can outrun it — and the strategy, the journal entry and undo
-      // all key off the app, so it is worth one round trip to know.
-      const target = this.state.app ?? (await this.resolveApp())
-      const inserted = await this.deps.insertion.insert(text, target)
-      const insertMs = this.now() - insertStart
-
-      this.phase = 'idle'
-
-      const appName = target?.name ?? 'this app'
-      const summary = `Dictation · ${appName} · “${summarise(text)}”`
-
-      if (!inserted.inserted) {
-        const notice = describeInsertionReason(inserted.reason)
-        // Every strategy the chain tried and why each refused — the one case
-        // where the interesting information is the list of failures, not the
-        // outcome.
-        this.trace.fail('insert.failed', {
-          app: target?.name,
-          reason: inserted.reason,
-          tried: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(',')
-        })
-        this.journal({
-          intent: { kind: 'dictate', text },
-          app: target,
-          before: null,
-          after: null,
-          strategyUsed: null,
-          status: 'failed',
-          summary: `${summary} — not inserted`,
-          verified: null,
-          caret: null,
-          undoable: false
-        })
-        this.setState({ phase: 'error', notice, partial: false })
-        this.deps.bench.record({
-          kind: 'dictation',
-          provider: this.deps.asr.name,
-          model: result.model,
-          chars: text.length,
-          app: this.state.app?.bundleId ?? null,
-          outcome: 'failed',
-          reason: inserted.reason ?? 'unknown',
-          strategy: null,
-          attempts: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(','),
-          captureMs,
-          audioSeconds,
-          asrMs,
-          cleanupMs,
-          insertMs,
-          totalMs: this.now() - keyUpAt
-        })
-        return
-      }
-
-      // Not cleared here: the phase is still `inserting` at this point, and
-      // blanking the line before the phase leaves would emit exactly the state
-      // this whole mechanism exists to prevent — a working phase with nothing
-      // to say. Leaving `inserting` clears it (see `setState`).
-      this.trace.step('insert.done', {
-        strategy: inserted.strategyUsed,
-        verified: inserted.verified,
-        chars: text.length,
-        ms: insertMs
-      })
-
-      const entry = this.journal({
-        intent: { kind: 'dictate', text },
-        app: target,
-        before: null,
-        after: text,
-        strategyUsed: inserted.strategyUsed,
-        status: 'applied',
-        summary,
-        verified: inserted.verified,
-        caret: inserted.caret,
-        // Undo removes exactly these characters, so it is offered only when the
-        // sidecar read them back and can say where they end.
-        undoable: inserted.verified === true && inserted.caret !== null
-      })
-
-      // Dictation does not go through `announce`, so it closes its own turn.
-      // The words themselves are the outcome — there is nothing else to say
-      // about typing, and "I said this and it was typed" is what a follow-up
-      // needs to know.
-      this.deps.turns?.close(`typed: ${text}`)
-      this.setState({
-        phase: 'applied',
-        partial: false,
-        notice: hint,
-        lastAction: {
-          summary,
-          at: this.now(),
-          chars: text.length,
-          entryId: entry?.id ?? null,
-          undoable: entry?.undoable ?? false
-        }
-      })
-      this.log('info', 'dictation applied', {
-        chars: text.length,
-        removedFillers,
-        asrMs,
-        insertMs,
-        strategy: inserted.strategyUsed,
-        verified: inserted.verified
-      })
-
-      this.deps.bench.record({
-        kind: 'dictation',
-        provider: this.deps.asr.name,
-        model: result.model,
-        chars: text.length,
-        app: this.state.app?.bundleId ?? null,
-        outcome: 'applied',
-        routedBy: routed?.by,
-        classifyMs: routed?.classifyMs ?? null,
-        strategy: inserted.strategyUsed,
-        attempts: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(','),
+      // Everything past this point is decided by the *words*, not by the audio
+      // — which is what makes it re-enterable when the user corrects a name
+      // whisper heard wrong. See `rerun`.
+      const said: Utterance = {
+        text,
         captureMs,
         audioSeconds,
         asrMs,
         cleanupMs,
-        insertMs,
-        totalMs: this.now() - keyUpAt
-      })
-
-      this.lingerTimer = setTimeout(() => {
-        this.lingerTimer = null
-        if (this.phase === 'idle') this.toIdle()
-      }, this.deps.appliedLingerMs ?? 1_400)
+        removedFillers,
+        model: result.model,
+        keyUpAt
+      }
+      this.said = said
+      await this.route(text, said)
     } catch (err) {
       this.phase = 'idle'
       const message = err instanceof Error ? err.message : String(err)
@@ -780,6 +533,360 @@ export class DictationPipeline {
         insertMs: 0,
         totalMs: this.now() - keyUpAt
       })
+    }
+  }
+
+  /**
+   * The half of an utterance that is about words rather than about audio.
+   *
+   * Split out so it can be entered twice. Whisper mishears names — a person's,
+   * a project's, a channel's — and until now the only remedy was to say the
+   * whole thing again, because by the time the panel showed you what it heard,
+   * that text had already been routed and the card built from it. Correcting
+   * the transcript on the panel re-enters here with the fixed words and the
+   * same `meta`, so the second pass is the first pass with one thing changed.
+   *
+   * It deliberately does *not* re-read the window. The focus snapshot, the
+   * selection and the screen context were taken while the user was speaking,
+   * and an edit is a promise about the text they were looking at then — not
+   * about whatever is in front of them once they have finished typing into
+   * Mull's own panel.
+   */
+  private async route(text: string, meta: Utterance): Promise<void> {
+    // Second secure-input check: focus can move while we were transcribing.
+    const secure = await this.deps.sidecar.secureInputState({})
+    if (secure.active) {
+      this.phase = 'idle'
+      // The user said something and nothing happened: that is exactly the
+      // case the journal exists to explain.
+      this.journal({
+        intent: { kind: 'dictate', text },
+        app: this.state.app,
+        before: null,
+        after: null,
+        strategyUsed: null,
+        status: 'cancelled',
+        summary: `Dictation withheld · secure input · “${summarise(text)}”`,
+        verified: null,
+        caret: null,
+        undoable: false
+      })
+      this.setState({
+        phase: 'blocked',
+        notice: 'Secure input turned on while Mull was listening — nothing was inserted.'
+      })
+      return
+    }
+
+    // ---- Routing ---------------------------------------------------------
+    // Read the invariant at the top of this file before changing anything
+    // here. `IntentRouter` answers synchronously when there is nothing an
+    // edit could act on, which is the case this loop must never slow down;
+    // only an utterance with text in front of it can reach the model.
+    const routed = await this.decide(text)
+    if (routed) {
+      this.trace.step('route', {
+        kind: routed.route.kind,
+        by: routed.by,
+        classifyMs: routed.classifyMs ?? undefined,
+        fellBackTo: routed.fallbackReason ?? undefined
+      })
+    } else {
+      // ⌥Space, or no router at all. Neither asks anything; both type.
+      this.trace.step('route', { kind: 'dictate', by: 'key' })
+    }
+    /**
+     * Remember what this was, before it has happened.
+     *
+     * Opened here rather than on completion because a run can take half a
+     * minute, and the user may well say the next thing before it lands — a
+     * memory that only recorded finished work would be missing precisely the
+     * turn they are following up on. `close` fills in the outcome when it
+     * arrives; see `announce` and the applied branch below.
+     */
+    this.deps.turns?.open({
+      said: text,
+      route: routed?.route.kind ?? 'dictate',
+      app: this.state.app?.name ?? null
+    })
+    let hint: string | null = null
+
+    // A bare send writes nothing at all, so it never reaches the insertion
+    // path below — the words were a command, not a message.
+    if (routed?.route.kind === 'send' && this.deps.sculpt) {
+      this.phase = 'idle'
+      this.trace.step('lane.send', { chars: routed.snapshot.field?.text.length ?? 0 })
+      this.stage('reading the box')
+      await this.deps.sculpt.sendOnly({
+        app: this.state.app ?? routed.snapshot.app,
+        text: routed.snapshot.field?.text ?? '',
+        transcript: text,
+        routedBy: routed.by
+      })
+      return
+    }
+
+    // The answer is somewhere else in this app. Nothing is written here and
+    // nothing moves yet — the lane puts a proposal on screen and the user
+    // presses Run. Only the model can choose this route (see `router.ts`).
+    if (routed?.route.kind === 'navigate' && this.deps.navigate) {
+      this.phase = 'idle'
+      this.trace.step('lane.navigate', { goal: routed.route.goal })
+      this.stage('planning')
+      await this.deps.navigate.propose({
+        goal: routed.route.goal,
+        transcript: text,
+        app: this.state.app ?? routed.snapshot.app,
+        context: routed.snapshot.context,
+        routedBy: routed.by
+      })
+      return
+    }
+
+    // A question about the window in front of them. Nothing is written and
+    // nothing can be: the lane's card has no Apply, because "summarize my
+    // tasks" is a request to know something, not a request for text. See
+    // `pipeline/ask.ts` for what this route cost before it existed.
+    if (routed?.route.kind === 'ask' && this.deps.ask) {
+      this.phase = 'idle'
+      this.trace.step('lane.ask', {
+        question: routed.route.question,
+        screen: routed.snapshot.context?.chars ?? 0
+      })
+      this.stage('reading what it saw')
+      await this.deps.ask.run({
+        question: routed.route.question,
+        transcript: text,
+        app: this.state.app ?? routed.snapshot.app,
+        context: routed.snapshot.context,
+        routedBy: routed.by
+      })
+      return
+    }
+
+    if (
+      (routed?.route.kind === 'edit' || routed?.route.kind === 'compose') &&
+      this.deps.sculpt
+    ) {
+      const target = editTarget(
+        routed.snapshot,
+        routed.route.kind === 'compose' ? 'draft' : routed.route.target
+      )
+      if (target.ok) {
+        // Did they ask for it to be sent? Read off their own transcript, here,
+        // rather than taken from the classifier's answer — see `wantsSend`.
+        // The instruction is cleaned of the same phrase so the draft does not
+        // end up with "and send it" written into it.
+        const wish = wantsSend(text)
+        // Idle before handing off: the lane owns the panel from here, and a
+        // new utterance must be able to interrupt it.
+        this.phase = 'idle'
+        this.stage(routed.route.kind === 'compose' ? 'writing a draft' : 'editing')
+        this.trace.step(`lane.${routed.route.kind}`, {
+          target: target.target.kind,
+          before: target.target.text.length,
+          send: wish.send || undefined
+        })
+        await this.deps.sculpt.run({
+          instruction: wish.send
+            ? wantsSend(routed.route.instruction).without
+            : routed.route.instruction,
+          send: wish.send,
+          transcript: text,
+          target: target.target,
+          app: this.state.app ?? routed.snapshot.app,
+          // The same window the routing decision was made from — read at
+          // key-down, never re-read. An edit is a promise about what the user
+          // was looking at when they spoke.
+          context: routed.snapshot.context,
+          routedBy: routed.by,
+          classifyMs: routed.classifyMs
+        })
+        return
+      }
+      // Understood, but unable — the field is too long to rewrite whole, or
+      // the app will not accept the write. Type the words (so nothing the
+      // user said is lost) and say what stopped the edit.
+      hint = target.message
+    }
+
+    this.setState({ phase: 'inserting' })
+    const insertStart = this.now()
+    // Normally resolved during the hold, off the critical path. A very short
+    // utterance can outrun it — and the strategy, the journal entry and undo
+    // all key off the app, so it is worth one round trip to know.
+    const target = this.state.app ?? (await this.resolveApp())
+    const inserted = await this.deps.insertion.insert(text, target)
+    const insertMs = this.now() - insertStart
+
+    this.phase = 'idle'
+
+    const appName = target?.name ?? 'this app'
+    const summary = `Dictation · ${appName} · “${summarise(text)}”`
+
+    if (!inserted.inserted) {
+      const notice = describeInsertionReason(inserted.reason)
+      // Every strategy the chain tried and why each refused — the one case
+      // where the interesting information is the list of failures, not the
+      // outcome.
+      this.trace.fail('insert.failed', {
+        app: target?.name,
+        reason: inserted.reason,
+        tried: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(',')
+      })
+      this.journal({
+        intent: { kind: 'dictate', text },
+        app: target,
+        before: null,
+        after: null,
+        strategyUsed: null,
+        status: 'failed',
+        summary: `${summary} — not inserted`,
+        verified: null,
+        caret: null,
+        undoable: false
+      })
+      this.setState({ phase: 'error', notice, partial: false })
+      this.deps.bench.record({
+        kind: 'dictation',
+        provider: this.deps.asr.name,
+        model: meta.model,
+        chars: text.length,
+        app: this.state.app?.bundleId ?? null,
+        outcome: 'failed',
+        reason: inserted.reason ?? 'unknown',
+        strategy: null,
+        attempts: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(','),
+        captureMs: meta.captureMs,
+        audioSeconds: meta.audioSeconds,
+        asrMs: meta.asrMs,
+        cleanupMs: meta.cleanupMs,
+        insertMs,
+        totalMs: this.now() - meta.keyUpAt
+      })
+      return
+    }
+
+    // Not cleared here: the phase is still `inserting` at this point, and
+    // blanking the line before the phase leaves would emit exactly the state
+    // this whole mechanism exists to prevent — a working phase with nothing
+    // to say. Leaving `inserting` clears it (see `setState`).
+    this.trace.step('insert.done', {
+      strategy: inserted.strategyUsed,
+      verified: inserted.verified,
+      chars: text.length,
+      ms: insertMs
+    })
+
+    const entry = this.journal({
+      intent: { kind: 'dictate', text },
+      app: target,
+      before: null,
+      after: text,
+      strategyUsed: inserted.strategyUsed,
+      status: 'applied',
+      summary,
+      verified: inserted.verified,
+      caret: inserted.caret,
+      // Undo removes exactly these characters, so it is offered only when the
+      // sidecar read them back and can say where they end.
+      undoable: inserted.verified === true && inserted.caret !== null
+    })
+
+    // Dictation does not go through `announce`, so it closes its own turn.
+    // The words themselves are the outcome — there is nothing else to say
+    // about typing, and "I said this and it was typed" is what a follow-up
+    // needs to know.
+    this.deps.turns?.close(`typed: ${text}`)
+    this.setState({
+      phase: 'applied',
+      partial: false,
+      notice: hint,
+      lastAction: {
+        summary,
+        at: this.now(),
+        chars: text.length,
+        entryId: entry?.id ?? null,
+        undoable: entry?.undoable ?? false
+      }
+    })
+    this.log('info', 'dictation applied', {
+      chars: text.length,
+      removedFillers: meta.removedFillers,
+      asrMs: meta.asrMs,
+      insertMs,
+      strategy: inserted.strategyUsed,
+      verified: inserted.verified
+    })
+
+    this.deps.bench.record({
+      kind: 'dictation',
+      provider: this.deps.asr.name,
+      model: meta.model,
+      chars: text.length,
+      app: this.state.app?.bundleId ?? null,
+      outcome: 'applied',
+      routedBy: routed?.by,
+      classifyMs: routed?.classifyMs ?? null,
+      strategy: inserted.strategyUsed,
+      attempts: inserted.attempts.map((a) => `${a.strategy}:${a.reason ?? 'ok'}`).join(','),
+      captureMs: meta.captureMs,
+      audioSeconds: meta.audioSeconds,
+      asrMs: meta.asrMs,
+      cleanupMs: meta.cleanupMs,
+      insertMs,
+      totalMs: this.now() - meta.keyUpAt
+    })
+
+    this.lingerTimer = setTimeout(() => {
+      this.lingerTimer = null
+      if (this.phase === 'idle') this.toIdle()
+    }, this.deps.appliedLingerMs ?? 1_400)
+  }
+
+  /**
+   * Run it again, from words the user corrected on the panel.
+   *
+   * The audio is not touched and ASR is not asked twice: the recording said
+   * what it said, and the user is overruling it. Everything the bench and the
+   * journal need about the utterance — how long it ran, how long transcription
+   * took, which model — is the original utterance's, because it is the same
+   * utterance; only the reading of it has changed.
+   *
+   * Refused unless the loop is at rest. A correction arrives from a click on a
+   * card, and a card only exists between utterances — but the panel is not the
+   * only thing that can start one, and a re-run that raced a live hold would be
+   * two pipelines writing the same HUD.
+   */
+  async rerun(text: string): Promise<void> {
+    const said = this.said
+    const words = text.trim()
+    if (!said || !words || this.phase !== 'idle') return
+    if (words === said.text) return
+
+    this.phase = 'processing'
+    // A new trace, forked from the original so the two readings of one
+    // utterance can be read beside each other rather than hunted for
+    // separately.
+    this.trace = this.trace.fork()
+    this.trace.step('asr.corrected', { was: said.text, said: words })
+    this.said = { ...said, text: words }
+    this.setState({
+      phase: 'thinking',
+      transcript: words,
+      partial: false,
+      notice: null,
+      card: null
+    })
+    this.stage(this.intent === 'instruct' ? 'working out what you meant' : 'writing')
+
+    try {
+      await this.route(words, this.said)
+    } catch (err) {
+      this.phase = 'idle'
+      const message = err instanceof Error ? err.message : String(err)
+      this.log('error', 'dictation failed after correction', message)
+      this.setState({ phase: 'error', partial: false, notice: `Couldn’t finish: ${message}` })
     }
   }
 

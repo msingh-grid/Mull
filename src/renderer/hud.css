@@ -318,6 +318,43 @@
   color: var(--ink-3);
   font-style: italic;
 }
+
+/* ── Correcting what Mull heard ───────────────────────────────────────────── */
+/* Whisper gets names wrong, and the card on screen was built from the wrong
+   one. The remedy is the line itself, not a button beside it: while a card is
+   waiting, the transcript takes a text caret and a faint rule under it — the
+   paper's own "you can write here", borrowed from the diff card's ground — and
+   clicking it opens the field in place. Nothing moves when it does: the field
+   inherits the transcript's type, size and clamp, so the correction happens
+   where the words already are. */
+.transcript.is-correctable {
+  cursor: text;
+  border-bottom: 1px dashed transparent;
+  transition: border-color var(--t-fast) ease;
+}
+.transcript.is-correctable:hover {
+  border-bottom-color: var(--hairline);
+}
+.transcript-edit {
+  display: block;
+  width: 100%;
+  resize: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-family: var(--serif);
+  font-size: var(--fs-transcript);
+  line-height: var(--lh-transcript);
+  /* The one place the panel departs from its own ink: a live caret in the
+     colour of writing, because this *is* writing. */
+  caret-color: var(--ins);
+  border-bottom: 1px solid var(--ins-line);
+  outline: none;
+  overflow: hidden;
+}
 .caret {
   display: inline-block;
   width: 1.5px;

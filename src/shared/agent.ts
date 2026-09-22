@@ -540,7 +540,9 @@ export const OpenUrlInputSchema = z.object({
   newTab: z
     .boolean()
     .optional()
-    .describe('true to open beside what is there; false or absent replaces the current tab')
+    .describe(
+      'absent or true opens a new tab beside what is there; false replaces the page showing'
+    )
 })
 
 /**
@@ -895,7 +897,7 @@ export function checkMenuCommand(menu: string, name: string): MenuVerdict {
  * than windows-of-tabs, and a bridge that half-works against it would be worse
  * than one that says plainly that it cannot.
  */
-export const BROWSERS: Readonly<Record<string, { name: string; dialect: 'chromium' | 'safari' }>> = {
+export const BROWSERS: Readonly<Record<string, { name: string; dialect: Dialect }>> = {
   'com.google.Chrome': { name: 'Chrome', dialect: 'chromium' },
   'com.google.Chrome.beta': { name: 'Chrome Beta', dialect: 'chromium' },
   'com.google.Chrome.canary': { name: 'Chrome Canary', dialect: 'chromium' },
@@ -904,13 +906,40 @@ export const BROWSERS: Readonly<Record<string, { name: string; dialect: 'chromiu
   'com.vivaldi.Vivaldi': { name: 'Vivaldi', dialect: 'chromium' },
   'com.operasoftware.Opera': { name: 'Opera', dialect: 'chromium' },
   'com.apple.Safari': { name: 'Safari', dialect: 'safari' },
-  'com.apple.SafariTechnologyPreview': { name: 'Safari Technology Preview', dialect: 'safari' }
+  'com.apple.SafariTechnologyPreview': { name: 'Safari Technology Preview', dialect: 'safari' },
+  /**
+   * Arc, which is Chromium underneath and scriptable nothing like it.
+   *
+   * Its absence here was a real failure rather than a missing nicety. `openUrl`
+   * falls back to `/usr/bin/open` for anything not in this table, macOS hands
+   * that to the *default* browser, and on the machine where this was found that
+   * was Chrome — so "open my Arc browser and find a video on YouTube" switched
+   * to Arc, opened YouTube in Chrome, and spent the rest of the run driving the
+   * wrong window. Nothing said the two had parted company.
+   *
+   * It needs its own dialect because it shares no vocabulary with Chrome's: a
+   * window has a read-only `active tab` rather than a settable `active tab
+   * index`, and a tab is switched to by telling it to `select`. See `ARC`.
+   */
+  'company.thebrowser.Browser': { name: 'Arc', dialect: 'arc' }
 }
+
+/**
+ * How a browser is spoken to.
+ *
+ * Three, not two, and the third is the reminder that "Chromium" is a fact about
+ * a renderer and not about a scripting dictionary. Arc is as Chromium as Chrome
+ * is and agrees with it on none of the vocabulary here — which is also why the
+ * Swift side's `chromiumBrowsers` and this table are different lists answering
+ * different questions, and must not be collapsed into one.
+ */
+export type Dialect = 'chromium' | 'safari' | 'arc'
+
 
 /** Is the thing in front of us something whose tabs can be read? */
 export function browserOf(
   bundleId: string | null | undefined
-): { name: string; dialect: 'chromium' | 'safari' } | null {
+): { name: string; dialect: Dialect } | null {
   if (!bundleId) return null
   return BROWSERS[bundleId] ?? null
 }

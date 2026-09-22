@@ -393,6 +393,16 @@ export interface FakeSidecarOptions {
   targets?: Array<string | UiTarget>
   /** Stop the pretend scan early, as a budget or a cold tree would. */
   targetsStoppedBy?: string
+  /**
+   * How many scans report `browser-cold` before the page shows up.
+   *
+   * A browser that is merely slow and one whose renderer accessibility is off
+   * answer identically for the first second or so, and the host is supposed to
+   * treat them the same way — wait, bounded, then say so. `coldScans: 2` is the
+   * first; leaving it undefined alongside `targetsStoppedBy: 'browser-cold'` is
+   * the second, which never warms.
+   */
+  coldScans?: number
 }
 
 /**
@@ -552,10 +562,24 @@ export class FakeSidecar implements SidecarApi {
     if (this.overrides.secureInput) return empty('secure-input')
     if (!this.overrides.accessibility) return empty('no-accessibility')
 
-    const stoppedBy = this.overrides.targetsStoppedBy ?? 'complete'
+    let stoppedBy = this.overrides.targetsStoppedBy ?? 'complete'
     if (stoppedBy === 'tree-warming' && !this.targetsWarmed) {
       this.targetsWarmed = true
       return empty('tree-warming')
+    }
+    if (stoppedBy === 'browser-cold') {
+      // A cold browser is not an empty window: it answers with its own toolbar,
+      // which is exactly why the caller cannot tell it from a real page. So the
+      // targets come back as usual and only `stoppedBy` gives it away.
+      const cold = this.overrides.coldScans
+      if (cold === undefined || this.coldScansSeen < cold) {
+        this.coldScansSeen += 1
+        return { ...empty('browser-cold'), targets: this.furniture(), chromium: true, webAreas: 0 }
+      }
+      // The page arrived. A scan that has warmed is an ordinary scan, and
+      // leaving `browser-cold` on it would make "still waiting" and "here it
+      // is" the same answer — which is the confusion this whole option models.
+      stoppedBy = 'complete'
     }
 
     const source = this.liveTargets ?? this.overrides.targets ?? []
@@ -588,6 +612,28 @@ export class FakeSidecar implements SidecarApi {
     }
   }
   private targetsWarmed = false
+  private coldScansSeen = 0
+
+  /**
+   * What a browser hands back when it is not showing the page: its own
+   * furniture. Named rather than left as an empty list because the whole
+   * failure this models is that the list looks perfectly reasonable.
+   */
+  private furniture(): UiTarget[] {
+    return ['Back', 'Forward', 'Reload', 'New tab'].map((title, index) => ({
+      index,
+      role: 'AXButton',
+      subrole: null,
+      title,
+      help: null,
+      value: null,
+      frame: null,
+      actions: ['AXPress'],
+      enabled: true,
+      focused: false,
+      kind: 'press' as const
+    }))
+  }
 
   /** Every press and focus the executor asked for, in order. */
   targetActions: Array<{

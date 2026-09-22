@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { AppleScriptBrowser, BrowserError, parseTabs, type RunScript } from './browser'
+import {
+  AppleScriptBrowser,
+  BrowserError,
+  capTabs,
+  parseTabs,
+  type BrowserTab,
+  type RunScript
+} from './browser'
 
 /**
  * The AppleScript bridge, without AppleScript.
@@ -68,7 +75,7 @@ describe('reading what is open', () => {
   })
 })
 
-describe('the two dialects', () => {
+describe('the three dialects', () => {
   /**
    * Safari's dictionary predates Chrome's and agrees with it on nothing that
    * matters here: a tab has a `name` rather than a `title`, and the window
@@ -96,6 +103,70 @@ describe('the two dialects', () => {
     expect(script).not.toContain('active tab index')
   })
 
+  /**
+   * Arc, which is the reason this describe block is no longer called "the two
+   * dialects". It is Chromium underneath and shares none of Chrome's scripting
+   * vocabulary: no `active tab index` anywhere, a tab told to `select`, and
+   * identity carried by `id` because a tab has no position of its own.
+   *
+   * Being absent from the table was not a missing nicety. `openUrl` falls back
+   * to `open` for anything it does not know, macOS hands that to the default
+   * browser, and a run asked for Arc spent its whole life in Chrome.
+   */
+  it('asks Arc for an active tab by identity, never by index', async () => {
+    const { run, calls } = spy()
+    await new AppleScriptBrowser({ run }).tabs('company.thebrowser.Browser')
+    const script = (calls[0]?.script ?? []).join('\n')
+    expect(script).toContain('id of active tab of front window')
+    expect(script).toContain('title of every tab of front window')
+    expect(script).not.toContain('active tab index')
+  })
+
+  it('switches an Arc tab by telling it to select', async () => {
+    const { run, calls } = spy()
+    await new AppleScriptBrowser({ run }).switchTab('company.thebrowser.Browser', 2)
+    const script = (calls[0]?.script ?? []).join('\n')
+    expect(script).toContain('tell tab i of front window to select')
+    expect(script).not.toContain('set active tab index')
+  })
+
+  /**
+   * The runtime failure `osacompile` cannot catch, pinned as a text assertion
+   * because that is the only place it can be caught cheaply. Arc hands back a
+   * window object that stops being a specifier the moment it is stored:
+   * `set w to front window` compiles and then every use of `w` fails -1700.
+   * Every reference has to say `front window` again.
+   */
+  it('never stores Arc’s window in a variable', async () => {
+    const { run, calls } = spy()
+    const arc = new AppleScriptBrowser({ run })
+    await arc.tabs('company.thebrowser.Browser')
+    await arc.switchTab('company.thebrowser.Browser', 2)
+    await arc.openUrl({ bundleId: 'company.thebrowser.Browser', url: 'https://x.test/', newTab: false })
+    for (const call of calls) {
+      expect(call.script.join('\n')).not.toMatch(/set w to front window/)
+    }
+  })
+
+  /**
+   * A new tab in Arc has exactly one spelling that works. `make new tab at end
+   * of tabs of front window` compiles, is ignored — Arc's `make` declares no
+   * insertion location — and quietly produces a Little Arc, the floating window
+   * that Arc's own AppleScript cannot see afterwards. Only `tell front window
+   * to make new tab` lands in the window you are looking at.
+   */
+  it('opens an Arc tab the one way that is not a Little Arc', async () => {
+    const { run, calls } = spy()
+    await new AppleScriptBrowser({ run }).openUrl({
+      bundleId: 'company.thebrowser.Browser',
+      url: 'https://x.test/',
+      newTab: true
+    })
+    const script = (calls[0]?.script ?? []).join('\n')
+    expect(script).toContain('tell front window to make new tab with properties {URL:u}')
+    expect(script).not.toMatch(/make new tab at end of/)
+  })
+
   it('refuses an app that is not a browser rather than guessing a dialect', async () => {
     const { run } = spy()
     const browser = new AppleScriptBrowser({ run })
@@ -104,6 +175,40 @@ describe('the two dialects', () => {
     await expect(browser.tabs('com.tinyspeck.slackmacgap')).rejects.toMatchObject({
       reason: 'not-scriptable'
     })
+  })
+})
+
+describe('the cap on how many tabs are reported', () => {
+  const tab = (index: number, active = false): BrowserTab => ({
+    index,
+    title: `tab ${index}`,
+    url: `https://example.test/${index}`,
+    active
+  })
+
+  it('keeps the first forty when the one showing is among them', () => {
+    const all = Array.from({ length: 60 }, (_, i) => tab(i + 1, i === 3))
+    const kept = capTabs(all)
+    expect(kept).toHaveLength(40)
+    expect(kept.find((t) => t.active)?.index).toBe(4)
+  })
+
+  /**
+   * The failure: an Arc window with 42 tabs and the active one at position 41.
+   * A plain slice reported forty tabs with none of them marked as showing, so a
+   * run that had just navigated was told it was nowhere — and said so to the
+   * user while the page sat on screen in front of them.
+   */
+  it('keeps the one showing even when it falls past the cap', () => {
+    const all = Array.from({ length: 42 }, (_, i) => tab(i + 1, i === 40))
+    const kept = capTabs(all)
+    expect(kept).toHaveLength(40)
+    expect(kept.find((t) => t.active)?.index).toBe(41)
+  })
+
+  it('leaves a short list alone', () => {
+    const all = [tab(1), tab(2, true)]
+    expect(capTabs(all)).toEqual(all)
   })
 })
 

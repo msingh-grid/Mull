@@ -42,5 +42,11 @@ export interface EngineTestResult {
   firstTokenMs: number | null
 }
 
-/** The command that mints a subscription token, shown with a copy button. */
+/**
+ * The command that mints a subscription token, shown with a copy button.
+ *
+ * The fallback now rather than the path: Settings runs the same OAuth flow in
+ * the browser (`src/main/engine/oauth.ts`) and ends up with the same token.
+ * This stays for the Mac where the browser cannot redirect back.
+ */
 export const SETUP_TOKEN_COMMAND = 'claude setup-token'

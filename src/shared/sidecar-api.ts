@@ -200,6 +200,26 @@ export const WindowContextResultSchema = z.object({
   stoppedBy: z.string(),
   harvestMs: z.number().int().nonnegative(),
   /**
+   * Elements the walk visited.
+   *
+   * Optional because it is additive: a sidecar binary built before this field
+   * existed omits it, and a host that refused to parse that would turn a
+   * missing diagnostic into no accessibility at all. `npm run build:sidecar` is
+   * a separate manual step from `npm run dev`, so a stale binary is not a
+   * hypothetical — see the note in `services/browser.ts`.
+   *
+   * Paired with `blocks.length` it answers the question an empty read cannot
+   * answer alone: two blocks out of 190 nodes is a window with nothing in it,
+   * two blocks out of 3800 is a window whose text this walk could not see.
+   */
+  nodes: z.number().int().nonnegative().optional(),
+  /** Subtrees abandoned at the depth bound — the budget `stoppedBy` never names. */
+  clipped: z.number().int().nonnegative().optional(),
+  /** The deepest level the walk reached, against that bound. */
+  deepest: z.number().int().nonnegative().optional(),
+  /** What the app said when asked to build a tree: 'enabled' | 'unsupported'. */
+  wake: z.string().optional(),
+  /**
    * A JPEG on disk, not bytes on the wire. Base64 in an ndjson line is a third
    * bigger than the file and lands in the log; the host reads this path, sends
    * it, and deletes it.
@@ -292,7 +312,65 @@ export const UiTargetsResultSchema = z.object({
    * want opposite responses from the user.
    */
   stoppedBy: z.string(),
-  scanMs: z.number().int().nonnegative()
+  scanMs: z.number().int().nonnegative(),
+
+  /**
+   * What the walk walked through, and how much of it was a web page.
+   *
+   * All four are optional for the same reason `nodes` above is: they are
+   * additive fields on an unchanged verb, and a sidecar that predates them
+   * should degrade to "unknown" rather than to "no accessibility".
+   *
+   * They exist because `stoppedBy` alone could not describe the failure that
+   * prompted them. A Chrome window showing Google Calendar answered
+   * `stoppedBy: 'complete'` with eighteen targets — the tab strip, Back,
+   * Reload, New Tab — which is indistinguishable from a small window that
+   * genuinely holds eighteen buttons. With `nodes: 190, webNodes: 0` beside it,
+   * it is not ambiguous at all.
+   */
+  /** Elements visited, against the scan's `maxNodes`. */
+  nodes: z.number().int().nonnegative().optional(),
+  /**
+   * How many of those carried an `AXDOMIdentifier`.
+   *
+   * **Not a page detector**, though it was built as one: Chrome's own toolbar
+   * and tab strip are WebUI and carry DOM identifiers, so a Chrome window
+   * showing none of the page still measures 112 "web" nodes out of 119. Use
+   * `webAreas`. This one is kept because the ratio is diagnostic.
+   */
+  webNodes: z.number().int().nonnegative().optional(),
+  /**
+   * Web *documents* — nodes whose role is `AXWebArea`. The honest test: a
+   * browser rendering a page has at least one, a browser whose renderer
+   * accessibility is off has none however much furniture it publishes.
+   */
+  webAreas: z.number().int().nonnegative().optional(),
+  /** Targets dropped as the same control seen twice. Large in a live browser. */
+  duplicates: z.number().int().nonnegative().optional(),
+  /**
+   * Subtrees abandoned at `maxDepth`, and how deep the walk got.
+   *
+   * The depth bound is the only budget that never reached `stoppedBy`: it drops
+   * the subtree and lets the walk finish, so a window read to a depth of 40 and
+   * no further reports itself "complete". A non-zero `clipped` is that walk
+   * saying it stopped early after all.
+   */
+  clipped: z.number().int().nonnegative().optional(),
+  deepest: z.number().int().nonnegative().optional(),
+  /** Is this an app that keeps its page behind a renderer at all? */
+  chromium: z.boolean().optional(),
+  /**
+   * What the app said when asked to build an accessibility tree:
+   * 'enabled' — the switch was thrown and the tree is being built;
+   * 'unsupported' — the app has no such attribute.
+   *
+   * Native apps answer 'unsupported' and nothing is lost: they have no renderer
+   * to wake. A **browser** answering 'unsupported' is the interesting case —
+   * current Chrome does, so Mull has no lever on that window at all, and a
+   * `browser-cold` scan from one of those will not warm however long it is
+   * asked again.
+   */
+  wake: z.string().optional()
 })
 
 /**
