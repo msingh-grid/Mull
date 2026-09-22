@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest'
-import { concatFloat32, encodeWav, floatToInt16, peakAmplitude } from './wav'
+import {
+  concatFloat32,
+  encodeWav,
+  floatToInt16,
+  LEAD_PAD_MS,
+  padUtterance,
+  peakAmplitude,
+  TAIL_PAD_MS
+} from './wav'
 
 describe('concatFloat32', () => {
   it('joins chunks in order', () => {
@@ -50,5 +58,35 @@ describe('encodeWav', () => {
     expect(wav.length).toBe(44 + 3 * 2)
     expect(wav.readUInt32LE(4)).toBe(36 + 3 * 2)
     expect(wav.readUInt32LE(40)).toBe(3 * 2)
+  })
+})
+
+describe('padUtterance', () => {
+  it('surrounds the utterance with silence so the decoder has a run-up and a stop', () => {
+    const sr = 16_000
+    const speech = Float32Array.from([0.5, -0.5, 0.25])
+    const padded = padUtterance(speech, sr)
+
+    const lead = Math.round((LEAD_PAD_MS / 1000) * sr)
+    const tail = Math.round((TAIL_PAD_MS / 1000) * sr)
+    expect(padded.length).toBe(lead + speech.length + tail)
+    expect(padded[lead]).toBe(0.5)
+    expect(padded[lead + 2]).toBe(0.25)
+  })
+
+  it('pads with true silence, not with a copy of the signal', () => {
+    const padded = padUtterance(Float32Array.from([1, 1, 1]), 16_000)
+    expect(padded[0]).toBe(0)
+    expect(padded[padded.length - 1]).toBe(0)
+  })
+
+  it('leaves the samples alone when asked for no padding', () => {
+    const speech = Float32Array.from([0.1, 0.2])
+    expect(padUtterance(speech, 16_000, 0, 0)).toBe(speech)
+  })
+
+  it('does not change the peak, so the silence gate still sees the same audio', () => {
+    const speech = Float32Array.from([0.4, -0.7, 0.2])
+    expect(peakAmplitude(padUtterance(speech, 16_000))).toBeCloseTo(peakAmplitude(speech), 6)
   })
 })

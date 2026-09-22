@@ -19,6 +19,14 @@ files:
   - package.json
   - '!**/*.map'
 
+# The Agent SDK spawns this as a subprocess on every turn, and a spawned
+# path has to resolve on the real filesystem — app.asar is one file, not a
+# directory, so a path built through it fails with ENOTDIR. This puts a real
+# copy next to the archive; src/main/locations.ts (resolveClaudeCliPath)
+# is what points the SDK at that copy instead of its own in-asar default.
+asarUnpack:
+  - node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/**
+
 # The Swift sidecar ships inside the bundle and is signed with the same
 # identity; `mac.binaries` is what makes electron-builder sign it rather than
 # copying it in unsigned and failing notarisation.

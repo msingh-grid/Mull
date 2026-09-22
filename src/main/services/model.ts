@@ -1,9 +1,10 @@
 import { createWriteStream } from 'node:fs'
 import { mkdir, rename, stat, unlink } from 'node:fs/promises'
+import { statSync } from 'node:fs'
 import { join } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { Readable } from 'node:stream'
-import { DEFAULT_MODEL_FILE, modelsDir, resolveWhisperCli } from '../locations'
+import { DEFAULT_MODEL_FILE, VAD_MODEL_FILE, modelsDir, resolveWhisperCli } from '../locations'
 import { existsSync } from 'node:fs'
 import { DEFAULT_SPEECH_MODEL, SPEECH_MODELS } from '@shared/model'
 import type { DownloadProgress, ModelStatus } from '@shared/model'
@@ -35,7 +36,49 @@ export const KNOWN_MODELS: Record<string, string> = {
   ...Object.fromEntries(SPEECH_MODELS.map((model) => [model.id, model.file])),
   'tiny.en': 'ggml-tiny.en.bin',
   base: 'ggml-base.bin',
-  small: 'ggml-small.bin'
+  small: 'ggml-small.bin',
+  vad: VAD_MODEL_FILE
+}
+
+/**
+ * Fallback order when the preferred model is not on disk.
+ *
+ * Exists because the default moved from base.en to small.en after M5: an
+ * install that predates the change has only `ggml-base.en.bin`, and reporting
+ * "not installed" would drop that user onto `FakeAsrProvider` — speech
+ * silently replaced by a canned sentence — over an upgrade they never asked
+ * for. Best first, so a fresh install that has both still gets small.en.
+ */
+const FALLBACK_ORDER = ['small.en', 'base.en', 'tiny.en', 'small', 'base'] as const
+
+function isUsable(file: string): boolean {
+  const path = join(modelsDir(), file)
+  if (!existsSync(path)) return false
+  try {
+    return statSync(path).size > MIN_MODEL_BYTES
+  } catch {
+    return false
+  }
+}
+
+/**
+ * The model that will actually be loaded: the requested one when it is on
+ * disk, otherwise the best installed alternative, otherwise the requested one
+ * so the caller reports it as the thing to download.
+ */
+export function resolveInstalledModelFile(preferred = 'small.en'): string {
+  const wanted = modelFileFor(preferred)
+  if (isUsable(wanted)) return wanted
+  for (const name of FALLBACK_ORDER) {
+    const file = modelFileFor(name)
+    if (isUsable(file)) return file
+  }
+  return wanted
+}
+
+/** Absolute path to whichever model `resolveInstalledModelFile` picked. */
+export function resolveModelPath(preferred = 'small.en'): string {
+  return join(modelsDir(), resolveInstalledModelFile(preferred))
 }
 
 /** Below this a file is a stub or a failed download, not a model. */
@@ -87,7 +130,8 @@ export async function downloadModel(
 
   await mkdir(dir, { recursive: true })
 
-  const response = await fetch(`${BASE_URL}/${file}`, { signal })
+  const base = file === VAD_MODEL_FILE ? VAD_BASE_URL : BASE_URL
+  const response = await fetch(`${base}/${file}`, { signal })
   if (!response.ok || !response.body) {
     throw new Error(`Download failed: HTTP ${response.status} ${response.statusText}`)
   }

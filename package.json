@@ -5,6 +5,7 @@
   "description": "Mull — macOS voice-first thinking layer (M1 skeleton)",
   "main": "out/main/index.js",
   "scripts": {
+    "postinstall": "install-electron",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "build:sidecar": "cd mull-mac && swift build -c release",
@@ -14,8 +15,10 @@
     "check:applescript": "tsx scripts/check-applescript.ts",
     "icons": "electron scripts/make-icons.cjs",
     "fetch:model": "tsx scripts/fetch-model.ts",
+    "fetch:vad": "tsx scripts/fetch-model.ts vad",
     "smoke": "tsx scripts/smoke.ts",
     "bench:engine": "tsx scripts/bench-engine.ts",
+    "probe:asr": "tsx scripts/probe-asr.ts",
     "notarize:dryrun": "tsx scripts/notarize-dryrun.ts",
     "pack:local": "npm run build:sidecar && npm run build && tsx scripts/pack-local.ts",
     "test": "vitest run"

@@ -58,10 +58,12 @@ export interface ResolveEngineOptions {
    */
   thinking?: () => boolean
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
+  /** See `resolveClaudeCliPath` in `src/main/locations.ts`. Only the subscription (agent) lane needs it. */
+  claudeCliPath?: string
 }
 
 export function resolveEngine(options: ResolveEngineOptions): Engine {
-  const { credentials, settings, detectedLogin, log, thinking } = options
+  const { credentials, settings, detectedLogin, log, thinking, claudeCliPath } = options
   const model = MODELS[settings.editModel]
   // Resolved here and passed in, rather than read from settings inside the
   // engines: an engine that reaches for a store is an engine that cannot be
@@ -77,7 +79,8 @@ export function resolveEngine(options: ResolveEngineOptions): Engine {
       classifierModel,
       agentModel,
       log,
-      thinking
+      thinking,
+      claudeCliPath
     })
   const apiKey = (): Engine =>
     new ApiKeyEngine({ apiKey: credentials.apiKey as string, model, classifierModel })

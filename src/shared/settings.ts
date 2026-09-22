@@ -78,6 +78,22 @@ export const SettingsSchema = z.object({
    * cheap to check. The bench (`npm run bench:engine`) is what tells you
    * whether fast is worth it on your machine.
    */
+  /**
+   * Which local whisper model transcribes speech.
+   *
+   * Nothing here reaches a network at transcription time — all three run
+   * on-device via `whisper-cli`. This is purely a latency/accuracy dial, and
+   * it exists because the default moved up to `small.en`: measured on an M4
+   * Pro a short utterance costs ~294 ms on base.en against ~674 ms on
+   * small.en, and on a slower Mac that difference is the whole reason ⌥Space
+   * feels like typing rather than like waiting.
+   *
+   * Only the English-only models are offered. Mull's prompts, the filler list
+   * in `pipeline/cleanup.ts` and the send-phrase tables in `pipeline/router.ts`
+   * are all English, so a multilingual model would transcribe a language the
+   * rest of the pipeline cannot route.
+   */
+  speechModel: z.enum(['tiny.en', 'base.en', 'small.en']).default('small.en'),
   editModel: z.enum(['sonnet', 'haiku']).default('sonnet'),
   /**
    * How Mull decides dictate-vs-edit.

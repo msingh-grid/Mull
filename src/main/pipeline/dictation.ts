@@ -9,6 +9,8 @@ import {
 } from '@shared/ipc'
 import type { SidecarApi } from '@shared/sidecar-api'
 import type { AsrProvider } from '../asr/types'
+import { MAX_PROMPT_CHARS } from '../asr/whisper-cli'
+import { buildAsrPrompt } from './asr-prompt'
 import type { Bench } from '../bench'
 import { concatFloat32, peakAmplitude } from '../audio/wav'
 import { cleanTranscript, summarise } from './cleanup'
@@ -193,6 +195,16 @@ export class DictationPipeline {
   private lingerTimer: NodeJS.Timeout | null = null
   /** Read during the hold; resolved by the time a normal utterance ends. */
   private focusPromise: Promise<FocusSnapshot> | null = null
+  /**
+   * The harvest, once it has landed — read, never awaited, by the ASR path.
+   *
+   * `focusPromise` cannot be awaited before transcribing: that would put the
+   * accessibility read on the critical path of ⌥Space, which is the one thing
+   * this file promises never to do. Reading whatever has arrived by then costs
+   * nothing and is almost always everything, because the harvest starts on
+   * key-down and ASR starts on key-up.
+   */
+  private lastFocus: FocusSnapshot | null = null
   /** Which key started this utterance. See `begin`. */
   private intent: HotkeyIntent = 'dictate'
   /** One per utterance, from key-down. Every step of this loop reports to it. */
@@ -320,6 +332,10 @@ export class DictationPipeline {
   begin(intent: HotkeyIntent = 'dictate'): void {
     if (this.phase !== 'idle') return
     this.intent = intent
+    // Cleared, not left to be overwritten: this utterance's harvest may not
+    // land before ASR reads it, and biasing whisper toward the *previous*
+    // window's channel names is worse than biasing it toward nothing.
+    this.lastFocus = null
     if (this.lingerTimer) {
       clearTimeout(this.lingerTimer)
       this.lingerTimer = null
@@ -350,6 +366,7 @@ export class DictationPipeline {
       // it has to be accountable, and an utterance abandoned halfway is exactly
       // the case where nobody would otherwise look.
       this.seeing = snapshot.context
+      this.lastFocus = snapshot
       this.trace.step('focus.read', {
         app: snapshot.app?.name,
         field: snapshot.field?.text.length ?? 0,
@@ -476,8 +493,15 @@ export class DictationPipeline {
 
     try {
       const asrStart = this.now()
-      const result = await this.deps.asr.transcribe(pcm, this.sampleRate)
+      // Whatever the parallel harvest has produced by now — the app being
+      // spoken into, the channel names in the window. Never awaited; see
+      // `lastFocus`.
+      const prompt = buildAsrPrompt(this.lastFocus, MAX_PROMPT_CHARS)
+      const result = await this.deps.asr.transcribe(pcm, this.sampleRate, {
+        prompt: prompt || undefined
+      })
       const asrMs = this.now() - asrStart
+      const unsure = result.confidence !== null && result.confidence < LOW_CONFIDENCE
 
       const cleanStart = this.now()
       const { text, removedFillers } = cleanTranscript(result.text)
@@ -490,9 +514,19 @@ export class DictationPipeline {
         ms: asrMs,
         chars: text.length,
         fillers: removedFillers || undefined,
+        confidence: result.confidence ?? undefined,
+        unsure: unsure || undefined,
+        promptChars: prompt.length || undefined,
         said: text
       })
       this.setState({ transcript: text })
+      if (unsure) {
+        this.log('warn', `dictation: low confidence transcript (${result.confidence?.toFixed(2)})`)
+        // Said plainly rather than hedged, and shown on the same HUD the
+        // approval card is about to occupy, so the doubt is in front of the
+        // user at the moment they decide whether to press Run.
+        this.setState({ notice: 'Not sure Mull heard that right — check before running.' })
+      }
       // Only the instruct key waits on anything past this point; ⌥Space is
       // already on its way to the caret, and naming a stage it will leave in
       // forty milliseconds is a flicker, not information.

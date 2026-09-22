@@ -152,7 +152,7 @@ backoff, and `init` is replayed before anything else goes out.
 ### Speech
 
 whisper.cpp via its `whisper-cli` binary, as a subprocess. On device, offline,
-no audio leaves the machine. The model (`ggml-base.en.bin`, ~150 MB) is fetched
+no audio leaves the machine. The model (`ggml-small.en.bin`, ~466 MB) is fetched
 explicitly — nothing downloads it silently.
 
 Settings → Speech model offers a second one, `ggml-small.en.bin` (~490 MB):
@@ -308,7 +308,7 @@ for the full table of what works without one.
 | `npm run notarize:dryrun` | Check notarisation readiness without uploading |
 
 There are also probe scripts under `scripts/` — `probe-targets`, `probe-harvest`,
-`probe-agent`, `probe-router` — which drive the real sidecar against real
+`probe-agent`, `probe-router`, `probe-asr` — which drive the real sidecar against real
 applications. See [testing](#how-this-codebase-is-tested).
 
 ---
@@ -377,7 +377,7 @@ is, usually including what was tried first and why it failed. The densest are:
 
 ## How this codebase is tested
 
-**829 tests across 46 files**, all under Vitest, none of them needing a Mac, a
+**863 tests across 49 files**, all under Vitest, none of them needing a Mac, a
 subprocess, or a permission dialog. `FakeSidecar` stands in for Swift; the
 AppleScript runner and every bridge take an injected `run`.
 
@@ -415,6 +415,8 @@ measurement that produced them rather than as the conclusion alone.
 
 | | |
 |---|---|
+| `docs/USER-GUIDE.md` | **using Mull** — every feature, key, setting and message |
+| `docs/DEVELOPER-GUIDE.md` | **working on Mull** — setup, the repo map, testing, packaging, conventions |
 | `docs/DESIGN-BRIEF.md` | what Mull is, and how each surface must behave |
 | `docs/DESIGN.md` | the frozen design system — type, colour, geometry |
 | `docs/05-electron-architecture.md` | why Electron, and the process split |

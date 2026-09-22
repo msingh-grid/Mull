@@ -28,6 +28,7 @@ import {
   capturesDir,
   credentialsPath,
   journalPath,
+  resolveClaudeCliPath,
   resolveSidecarPath,
   settingsPath
 } from './locations'
@@ -475,6 +476,11 @@ async function bootstrap(): Promise<void> {
   if (selection.degradedReason) {
     log.warn(`ASR degraded to the fake provider: ${selection.degradedReason}`)
   }
+  if (selection.fallbackFrom) {
+    log.warn(
+      `speech model ${settings.get().speechModel} is not installed — using ${selection.fallbackFrom}`
+    )
+  }
 
   const bench = new Bench(benchPath(), (err) => log.warn('bench write failed', err))
 
@@ -511,7 +517,8 @@ async function bootstrap(): Promise<void> {
       // A function, not a value: armed on the HUD a second before the user
       // speaks, and it must apply to that utterance rather than the next launch.
       thinking: () => settings?.get().thinking === true,
-      log: logFn
+      log: logFn,
+      claudeCliPath: resolveClaudeCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath })
     })
   )
   log.info('engine', {
@@ -1142,7 +1149,8 @@ function reloadEngine(): void {
       // A function, not a value: armed on the HUD a second before the user
       // speaks, and it must apply to that utterance rather than the next launch.
       thinking: () => settings?.get().thinking === true,
-      log: logFn
+      log: logFn,
+      claudeCliPath: resolveClaudeCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath })
     })
   )
   log.info('engine reloaded', { kind: engine.name, ...engineModels() })

@@ -420,7 +420,7 @@ function PageModel(): JSX.Element {
             <p className="perm-reason">
               {status?.installed
                 ? `${status.file} · ${mb(status.bytes)} · already here`
-                : '≈148 MB · saved to Application Support, removable anytime'}
+                : '≈466 MB · saved to Application Support, removable anytime'}
             </p>
             {progress ? (
               <>
