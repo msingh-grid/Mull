@@ -39,7 +39,11 @@ const targets = (...titles: string[]): UiTarget[] =>
     kind: 'press' as const
   }))
 
-function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil Turaga')) {
+function harness(
+  steps: NavStep[],
+  listed: UiTarget[] = targets('Search', 'Anil Turaga'),
+  options: { autoRun?: boolean } = {}
+) {
   const sidecar = new FakeSidecar({
     accessibility: true,
     targets: listed,
@@ -141,6 +145,7 @@ function harness(steps: NavStep[], listed: UiTarget[] = targets('Search', 'Anil 
   const lane = new NavigateLane({
     sidecar,
     engine,
+    autoRun: () => options.autoRun === true,
     executor: new ActionExecutor({ sidecar, sleep: async () => {}, journal }),
     sleep: async () => {},
     journal: journal as unknown as JournalStore,
@@ -478,6 +483,45 @@ describe('what the journal keeps', () => {
     expect(h.amendments).toHaveLength(1)
     expect(h.amendments[0]?.id).toBe(h.stepRows()[0]?.id)
     expect(h.stepRows()[0]?.detail?.evidence).toContain('5 things to press became 2')
+  })
+})
+
+/**
+ * `settings.autoRun` — the same walk, begun by the setting instead of the press.
+ *
+ * The step lane gets it as well as the tool-calling one on purpose: they put up
+ * the same card and the user's complaint is about the card, not about which of
+ * the two is behind it.
+ */
+describe('auto-run', () => {
+  it('walks without a press, and marks the card as having started itself', async () => {
+    const h = harness([{ verb: 'press', index: 1, label: 'Anil Turaga' }, { verb: 'read' }], undefined, {
+      autoRun: true
+    })
+    await h.lane.propose(request)
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.last().auto).toBe(true)
+    expect(h.last().steps.map((step) => step.verb)).toEqual(['press', 'read'])
+    expect(h.sidecar.targetActions[0]).toEqual({ verb: 'press', index: 1 })
+  })
+
+  it('still waits for Run when whisper was not sure what it heard', async () => {
+    const h = harness([{ verb: 'press', index: 1, label: 'Anil Turaga' }, { verb: 'read' }], undefined, {
+      autoRun: true
+    })
+    await h.lane.propose({ ...request, unsure: true })
+
+    expect(h.last().auto).toBe(false)
+    expect(h.sidecar.targetActions).toEqual([])
+  })
+
+  it('leaves the card waiting when the switch is off', async () => {
+    const h = harness([{ verb: 'press', index: 1, label: 'Anil Turaga' }])
+    await h.lane.propose(request)
+
+    expect(h.last().auto).toBe(false)
+    expect(h.sidecar.targetActions).toEqual([])
   })
 })
 

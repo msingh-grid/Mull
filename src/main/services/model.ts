@@ -26,6 +26,9 @@ import type { DownloadProgress, ModelStatus } from '@shared/model'
 
 const BASE_URL = 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main'
 
+/** Silero ships from a different repo than the whisper weights. */
+const VAD_BASE_URL = 'https://huggingface.co/ggml-org/whisper-vad/resolve/main'
+
 /**
  * Name to file. The two the app offers come from the shared catalog rather
  * than being spelled again here — a menu and a downloader that disagree about

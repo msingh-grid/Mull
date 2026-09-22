@@ -85,8 +85,8 @@ export interface SculptLaneLike {
  *
  * Narrowed to one method for the same reason `SculptLaneLike` is: dictation
  * must not be able to reach anything that presses a key. All this can do is put
- * a proposal on screen; the loop starts when the user presses Run, inside the
- * lane, where this file cannot see it.
+ * a proposal on screen; the loop starts inside the lane — on the user's press,
+ * or on `settings.autoRun` — where this file cannot see it either way.
  */
 export interface NavigateLaneLike {
   propose(request: {
@@ -95,6 +95,8 @@ export interface NavigateLaneLike {
     app: { bundleId: string; name: string } | null
     context?: ScreenContext | null
     routedBy?: string
+    /** Whisper was not sure it heard this; the lane will not auto-run it. */
+    unsure?: boolean
   }): Promise<void>
 }
 
@@ -164,6 +166,25 @@ export interface DictationDeps {
 const SILENCE_PEAK = 0.006
 
 /**
+ * Below this mean per-token probability, say so rather than act as if sure.
+ *
+ * Whisper is not calibrated, so this is a relative signal: it separates "heard
+ * it" from "guessed", which is the distinction that matters when a transcript
+ * is about to become a goal string for an agent rather than text on screen.
+ * 0.6 is a starting point, not a measurement — every utterance now writes its
+ * confidence to bench.jsonl precisely so this number can be replaced by one
+ * derived from real holds.
+ *
+ * What crossing it does is deliberately small. Every Fn route already ends on
+ * a card the user has to press — navigate and the agent loop on Run, an edit
+ * on Apply, a send on its own commit — so the approval step this would
+ * otherwise add already exists. What was missing was any reason to look
+ * closely at the card, and that is what the notice supplies. ⌥Space types it
+ * either way: that lane never waits and never asks.
+ */
+const LOW_CONFIDENCE = 0.6
+
+/**
  * One utterance, as the half of the loop that deals in words sees it.
  *
  * `text` is the only field a correction changes. The rest describes the
@@ -180,6 +201,13 @@ interface Utterance {
   cleanupMs: number
   removedFillers: string[]
   model: string
+  /**
+   * Mean per-token probability, or null when the provider cannot say. Carried
+   * here rather than read at the bench-record site because the two are on
+   * opposite sides of `route`, and a re-run after a corrected name is the same
+   * hold — it reports the confidence of the audio, not of the fixed words.
+   */
+  confidence: number | null
   keyUpAt: number
 }
 
@@ -543,6 +571,7 @@ export class DictationPipeline {
         cleanupMs,
         removedFillers,
         model: result.model,
+        confidence: result.confidence,
         keyUpAt
       }
       this.said = said
@@ -672,7 +701,11 @@ export class DictationPipeline {
         transcript: text,
         app: this.state.app ?? routed.snapshot.app,
         context: routed.snapshot.context,
-        routedBy: routed.by
+        routedBy: routed.by,
+        // Carried rather than re-derived: the doubt belongs to the recording,
+        // and this is the one lane where it changes what happens rather than
+        // only what the HUD says. See `LOW_CONFIDENCE`.
+        unsure: meta.confidence !== null && meta.confidence < LOW_CONFIDENCE
       })
       return
     }
@@ -860,6 +893,7 @@ export class DictationPipeline {
       chars: text.length,
       app: this.state.app?.bundleId ?? null,
       outcome: 'applied',
+      confidence: meta.confidence,
       routedBy: routed?.by,
       classifyMs: routed?.classifyMs ?? null,
       strategy: inserted.strategyUsed,

@@ -218,6 +218,10 @@ export default function App(): JSX.Element {
               setState((previous) => ({ ...previous, thinking: on }))
               void window.mull?.hudThinking(on)
             }}
+            onAutoRun={(on) => {
+              setState((previous) => ({ ...previous, autoRun: on }))
+              void window.mull?.hudAutoRun(on)
+            }}
             onCorrect={correct}
           />
         ) : null}

@@ -58,7 +58,7 @@ type Move =
 
 function harness(
   script: Move[],
-  options: { ended?: AgentRunResult['ended']; listed?: UiTarget[] } = {}
+  options: { ended?: AgentRunResult['ended']; listed?: UiTarget[]; autoRun?: boolean } = {}
 ) {
   const sidecar = new FakeSidecar({
     accessibility: true,
@@ -127,6 +127,7 @@ function harness(
   const lane = new AgentLane({
     sidecar,
     engine,
+    autoRun: () => options.autoRun === true,
     executor: new ActionExecutor({ sidecar, sleep: async () => {}, journal }),
     sleep: async () => {},
     journal: journal as unknown as JournalStore,
@@ -337,6 +338,84 @@ describe('Run', () => {
     expect(h.sidecar.activated).toContain('com.tinyspeck.slackmacgap')
     expect(h.runRow()).toBeTruthy()
     expect(h.last().note).toMatch(/the subprocess died/)
+  })
+})
+
+/**
+ * `settings.autoRun` — the press the card asks for, spent in advance.
+ *
+ * What is being checked here is that it is the *same* start: one walker, the
+ * same card, the same journal row, and esc still meaning stop rather than
+ * decline. The only thing that moved is who began it.
+ */
+describe('auto-run', () => {
+  it('goes without a press, and says on the card that nobody pressed anything', async () => {
+    const h = harness(
+      [
+        { tool: 'find', query: 'Anil' },
+        { tool: 'press', index: 1, title: 'Anil Turaga' },
+        { tool: 'look', want: 'text' },
+        { tool: 'done', found: true, because: 'the conversation is open' }
+      ],
+      { autoRun: true }
+    )
+    await h.lane.propose(request)
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.played).toEqual(['find', 'press', 'look', 'done'])
+    expect(h.last().auto).toBe(true)
+    expect(h.runRow()?.status).toBe('applied')
+  })
+
+  it('starts exactly one walk, however many applies arrive after it', async () => {
+    const h = harness([{ tool: 'look', want: 'both' }, { tool: 'done', found: true, because: 'read it' }], {
+      autoRun: true
+    })
+    await h.lane.propose(request)
+    h.run()
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.played).toEqual(['look', 'done'])
+  })
+
+  it('esc is a stop rather than a decline, because the run already began', async () => {
+    const h = harness([{ tool: 'look', want: 'both' }, { tool: 'done', found: true, because: 'read it' }], {
+      autoRun: true
+    })
+    await h.lane.propose(request)
+    h.cancel()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.rows.some((row) => row.summary.startsWith('Declined ·'))).toBe(false)
+  })
+
+  /**
+   * The doubt outranks the switch. `unsure` is set when whisper's mean token
+   * probability came in under `LOW_CONFIDENCE`, and the HUD has just told the
+   * user to check before running — which is not a thing they can do if it has
+   * already gone.
+   */
+  it('still waits for Run when whisper was not sure what it heard', async () => {
+    const h = harness([{ tool: 'press', index: 1, title: 'Anil Turaga' }, { tool: 'done', found: true, because: 'open' }], {
+      autoRun: true
+    })
+    await h.lane.propose({ ...request, unsure: true })
+
+    expect(h.played).toEqual([])
+    expect(h.last().auto).toBe(false)
+
+    h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+    expect(h.played).toEqual(['press', 'done'])
+  })
+
+  it('leaves the card waiting when the switch is off', async () => {
+    const h = harness([{ tool: 'look', want: 'both' }])
+    await h.lane.propose(request)
+
+    expect(h.played).toEqual([])
+    expect(h.last().auto).toBe(false)
   })
 })
 

@@ -54,6 +54,14 @@ export interface HudView {
    * are worse than not being there.
    */
   thinking: { on: boolean } | null
+  /**
+   * The auto-run toggle: armed, and whether it is worth showing at all.
+   *
+   * Same rule as `thinking`, for the same reason — it is a decision about the
+   * sentence you are about to say, and once a card is up it is either too late
+   * or describing a run already walking.
+   */
+  autoRun: { on: boolean } | null
   chips: HudChip[]
   card: HudCard | null
   lastAction: {
@@ -91,6 +99,9 @@ export function hudView(state: HudState, now = Date.now()): HudView {
     // Kept visible while armed even outside idle, so nobody leaves it on by
     // accident and wonders why everything got slow.
     thinking: state.phase === 'idle' || state.thinking ? { on: state.thinking } : null,
+    // Armed is kept visible outside idle for a sharper version of thinking's
+    // reason: the cost of forgetting this one on is a run that goes by itself.
+    autoRun: state.phase === 'idle' || state.autoRun ? { on: state.autoRun } : null,
     chips: state.chips,
     card,
     // The ghost row is an idle-only affordance: while Mull is working, the

@@ -322,3 +322,33 @@ describe('the thinking toggle', () => {
     }
   })
 })
+
+/**
+ * Its neighbour on the same row, and the same shape for the same reason: what
+ * you are about to say decides it, and you know that a second before the key
+ * goes down. Armed, it spends the Run press a plan card would otherwise ask
+ * for — so the visible-while-on rule matters more here than it does for
+ * thinking, where the cost is only seconds.
+ */
+describe('the auto-run toggle', () => {
+  it('is offered when idle, where the decision is actually made', () => {
+    expect(hudView(state({ phase: 'idle', autoRun: false })).autoRun).toEqual({ on: false })
+  })
+
+  it('gets out of the way while Mull is working', () => {
+    expect(hudView(state({ phase: 'thinking', autoRun: false })).autoRun).toBeNull()
+    expect(hudView(state({ phase: 'listening', autoRun: false })).autoRun).toBeNull()
+  })
+
+  it('stays visible while it is armed, whatever Mull is doing', () => {
+    for (const phase of ['listening', 'thinking', 'preview'] as const) {
+      expect(hudView(state({ phase, autoRun: true })).autoRun).toEqual({ on: true })
+    }
+  })
+
+  it('is independent of thinking — one armed does not arm the other', () => {
+    const view = hudView(state({ phase: 'idle', thinking: true, autoRun: false }))
+    expect(view.thinking).toEqual({ on: true })
+    expect(view.autoRun).toEqual({ on: false })
+  })
+})

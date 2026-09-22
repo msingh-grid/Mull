@@ -121,7 +121,12 @@ function PlanCardView({
 }): JSX.Element {
   const family = cardFamily(card)
   const over = family === 'wont'
-  const scope = [card.app, card.limit && !over ? `up to ${card.limit} steps` : null]
+  // `auto` sits in the title rather than replacing the promise line, which is
+  // carrying the clause that matters most ("nothing is submitted"). It is here
+  // at all because a card that starts walking with nobody pressing anything
+  // has to account for itself — see `PlanCard.auto`.
+  const auto = card.auto === true && !over
+  const scope = [card.app, card.limit && !over ? `up to ${card.limit} steps` : null, auto ? 'auto' : null]
     .filter(Boolean)
     .join(' · ')
   return (
@@ -163,13 +168,20 @@ function PlanCardView({
       */}
       {card.answer ? <div className="plan-answer">{card.answer}</div> : null}
       <div className="card-actions">
-        {card.running || over ? null : (
+        {/*
+          No Run on an auto-run card even before the first draw arrives. The
+          walk has already been started by the time this renders, so the button
+          would be an offer to do something that is happening — and ⏎ on it is
+          claimed and inert (`HudController.act`), which is a button that
+          visibly does nothing.
+        */}
+        {card.running || over || auto ? null : (
           <Btn kind="primary" hint="⏎" onClick={() => onAction?.('apply')}>
             Run
           </Btn>
         )}
         <Btn hint={over ? '⏎' : 'esc'} onClick={() => onAction?.('cancel')}>
-          {card.running ? 'Stop' : over ? 'Done' : 'Cancel'}
+          {card.running || auto ? 'Stop' : over ? 'Done' : 'Cancel'}
         </Btn>
       </div>
       <div className="promise">{card.note ?? 'each step journaled'}</div>

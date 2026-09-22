@@ -391,6 +391,23 @@ describe('HudController — a run', () => {
     expect(onAction).toHaveBeenCalledTimes(1)
   })
 
+  /**
+   * `settings.autoRun`: the lane starts the walk itself, so no press ever
+   * reaches `act` and the flag it used to set was never set. The card became
+   * the only thing that knew a run was in flight — so it is what the flag now
+   * follows, and ⏎ over a window the run is driving is inert either way.
+   */
+  it('swallows ⏎ over a run nobody pressed Run for', () => {
+    const h = harness()
+    const onAction = vi.fn()
+    h.controller.openCard(plan, onAction)
+    h.controller.updateCard(walking)
+
+    h.fire('Return')
+    expect(onAction).not.toHaveBeenCalled()
+    expect(h.controller.hasCard).toBe(true)
+  })
+
   it('keeps the card up when esc stops a run, so the stop is readable', () => {
     const h = harness()
     const onAction = vi.fn()

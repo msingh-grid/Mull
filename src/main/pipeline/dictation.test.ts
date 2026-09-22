@@ -36,6 +36,8 @@ interface Harness {
   sends: Array<{ app: unknown; text: string; transcript: string }>
   /** Every question the router handed to the lane that writes nothing. */
   asked: Array<{ question: string; transcript: string }>
+  /** Every goal the router handed to the lane that goes and looks. */
+  navigated: Array<{ goal: string; unsure?: boolean }>
 }
 
 function harness(options: {
@@ -66,6 +68,7 @@ function harness(options: {
   const sculpted: SculptRequest[] = []
   const sends: Array<{ app: unknown; text: string; transcript: string }> = []
   const asked: Array<{ question: string; transcript: string }> = []
+  const navigated: Array<{ goal: string; unsure?: boolean }> = []
   // A classifier that answers whatever the test says, or an engine that is
   // down so the local rules have to decide.
   const engine: Engine = {
@@ -111,6 +114,13 @@ function harness(options: {
             }
           }
         : undefined,
+      navigate: options.sculpt
+        ? {
+            propose: async (request) => {
+              navigated.push({ goal: request.goal, unsure: request.unsure })
+            }
+          }
+        : undefined,
         intent: options.sculpt ? new IntentRouter({ engine, now: () => clockMs }) : undefined,
       screenContext: options.context ? () => ({ mode: options.context as ContextMode }) : undefined,
       onState: (s) => states.push({ ...s }),
@@ -139,7 +149,8 @@ function harness(options: {
     clock: { advance: (ms) => { clockMs += ms } },
     sculpted,
     sends,
-    asked
+    asked,
+    navigated
   }
 }
 
@@ -1303,6 +1314,61 @@ describe('when whisper is not sure it heard right', () => {
     await settle()
 
     expect(h.rows[0]?.confidence).toBeCloseTo(0.92, 5)
+    h.pipe.dispose()
+  })
+
+  /** A readable window, without which a navigate route falls back to dictation. */
+  const withWindow = (): FakeSidecar =>
+    new FakeSidecar({
+      accessibility: true,
+      context: ['Anil: the redlines are with legal', 'Anil: should land Thursday']
+    })
+
+  /**
+   * The notice says "check before running", and `settings.autoRun` is the one
+   * thing that would take the checking away — so the doubt travels with the
+   * goal and the lane declines to start itself. Asserted here because this is
+   * where the confidence is known; what the lane does with it is in
+   * `navigate.test.ts` and `agent.test.ts`.
+   */
+  it('tells the lane that goes and looks when it was not sure it heard', async () => {
+    const h = harness({
+      sidecar: withWindow(),
+      sculpt: true,
+      context: 'text',
+      confidence: 0.2,
+      transcript: 'what did Anil say about the terms doc',
+      classifies: { kind: 'navigate', goal: 'what did Anil say about the terms doc' }
+    })
+    h.pipe.begin('instruct')
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    // Sentence-cased by the cleanup pass, as every transcript is.
+    expect(h.navigated).toEqual([
+      { goal: 'What did Anil say about the terms doc', unsure: true }
+    ])
+    h.pipe.dispose()
+  })
+
+  it('and says so when it heard cleanly, so the run is allowed to start itself', async () => {
+    const h = harness({
+      sidecar: withWindow(),
+      sculpt: true,
+      context: 'text',
+      confidence: 0.95,
+      transcript: 'what did Anil say about the terms doc',
+      classifies: { kind: 'navigate', goal: 'what did Anil say about the terms doc' }
+    })
+    h.pipe.begin('instruct')
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(h.navigated[0]?.unsure).toBe(false)
     h.pipe.dispose()
   })
 

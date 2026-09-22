@@ -595,6 +595,9 @@ async function bootstrap(): Promise<void> {
     journal: journal ?? undefined,
     captures,
     onJournalChanged: notifyJournalChanged,
+    // Read per proposal, like `agentLoop` at the dispatch below: the user can
+    // flip it in the settings pane between one utterance and the next.
+    autoRun: () => settings?.get().autoRun === true,
     hud: {
       openCard: (card, onAction) => hud?.openCard(card, onAction),
       updateCard: (card) => hud?.updateCard(card),
@@ -639,6 +642,9 @@ async function bootstrap(): Promise<void> {
     journal: journal ?? undefined,
     captures,
     onJournalChanged: notifyJournalChanged,
+    // Read per proposal, like `agentLoop` at the dispatch below: the user can
+    // flip it in the settings pane between one utterance and the next.
+    autoRun: () => settings?.get().autoRun === true,
     hud: {
       openCard: (card, onAction) => hud?.openCard(card, onAction),
       updateCard: (card) => hud?.updateCard(card),
@@ -735,7 +741,10 @@ async function bootstrap(): Promise<void> {
   // The toggle is persisted, so the panel has to open showing what is actually
   // armed. Without this it reads `false` on every launch while the engine reads
   // the saved value — a switch that disagrees with the thing it switches.
-  pipeline.patchState({ thinking: settings.get().thinking === true })
+  pipeline.patchState({
+    thinking: settings.get().thinking === true,
+    autoRun: settings.get().autoRun === true
+  })
 
   if (selection.degradedReason) {
     pushHudState({ ...pipeline.getState(), notice: selection.degradedReason })
@@ -966,6 +975,23 @@ ipcMain.handle(IPC.hudSetThinking, (_event, on: boolean) => {
   settings?.set({ thinking: on === true })
   pushHudState({ ...(pipeline?.getState() ?? IDLE_HUD_STATE), thinking: on === true })
   log.info(`thinking ${on ? 'armed' : 'off'} for the writing lanes`)
+})
+
+/**
+ * Arm or disarm starting a run without pressing Run.
+ *
+ * Persisted like `thinking`, and read per proposal by both plan lanes rather
+ * than captured at boot — see their `autoRun` dep. `patchState` rather than a
+ * bare `pushHudState` so the value survives the pipeline's next draw; the
+ * thinking handler above predates `patchState` and gets away with it only
+ * because the engine, not the panel, is what reads its answer.
+ */
+ipcMain.handle(IPC.hudSetAutoRun, (_event, on: boolean) => {
+  settings?.set({ autoRun: on === true })
+  if (!pipeline?.patchState({ autoRun: on === true })) {
+    pushHudState({ ...(pipeline?.getState() ?? IDLE_HUD_STATE), autoRun: on === true })
+  }
+  log.info(`auto-run ${on ? 'armed' : 'off'} — plans ${on ? 'start themselves' : 'wait for Run'}`)
 })
 
 /**

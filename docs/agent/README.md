@@ -313,6 +313,18 @@ to nothing. Every scan is fresh; the previous scan's indices are dead.
 per click is a dialog nobody reads by the fourth one, and it tells the user less
 than watching the steps appear does. Escape stops it between any two steps.
 
+**And `settings.autoRun` spends that press in advance** (off by default). With it
+on, `propose()` opens the card and starts the walk in the same breath: the card
+is the report rather than the question, it says `auto` in its title and offers
+Stop instead of Run, and Escape is the whole of the user's control over it. Every
+other seam is untouched — same closed vocabulary, same journal row per act, same
+`AgentKeySchema` with no Return in it — and one refusal was added rather than
+removed: a transcript whisper was not confident of (`unsure`, from
+`LOW_CONFIDENCE` in `pipeline/dictation.ts`) still waits for the press, because
+the HUD has just told the user to check before running and auto-run is precisely
+what would take the checking away. The trade being accepted is real and worth
+naming: a misrouted or misheard goal now moves before anyone has read it.
+
 ### 2.2 What one turn is sent
 
 `navigatePrompt` (`prompts.ts:257`):

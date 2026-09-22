@@ -85,6 +85,15 @@ export interface AgentRequest {
   /** What was on screen when the user spoke. The first turn's evidence. */
   context?: ScreenContext | null
   routedBy?: string
+  /**
+   * Whisper was not sure it heard this. Enough to refuse `settings.autoRun`.
+   *
+   * The doubt and the switch answer each other: the low-confidence notice says
+   * "check before running", and auto-run is precisely what would take the
+   * checking away. So a doubtful transcript still opens a card and still waits
+   * — one press, on the utterance where the press is worth something.
+   */
+  unsure?: boolean
 }
 
 /** What the lane needs to run one goal. Mirrors `NavigateDeps`. */
@@ -160,6 +169,12 @@ export interface AgentDeps {
   journal?: JournalStore
   captures?: CaptureStore
   onJournalChanged?: () => void
+  /**
+   * `settings.autoRun`, read per proposal rather than at boot — it is a toggle
+   * on the HUD itself, armed in the second before the key goes down, so the
+   * answer can be different for the next utterance than it was for this one.
+   */
+  autoRun?: () => boolean
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   sleep?: (ms: number) => Promise<void>
   trace?: () => Trace
@@ -176,21 +191,28 @@ export class AgentLane {
   }
 
   /**
-   * Put the proposal on screen. Nothing moves until the user presses Run.
+   * Put the proposal on screen. Nothing moves until the user presses Run —
+   * unless `settings.autoRun` is on, in which case the card opens already
+   * walking and esc is the whole of the user's control over it.
    *
    * The card cannot list the steps in advance any more — the model decides them
    * as it goes — so it names the goal, the app and the budget, and Run approves
    * those. That is what Run always actually approved; the old card merely looked
-   * as though it were promising more.
+   * as though it were promising more, and it is why the switch is defensible:
+   * what the press approved is printed on a card that stays up either way.
    */
   async propose(request: AgentRequest): Promise<void> {
     const origin = await this.where()
     this.stopped = false
     const parent = this.deps.trace?.() ?? new Trace({ log: this.deps.log })
+    /** Read once, so the card and the walk cannot disagree mid-proposal. */
+    const auto = this.deps.autoRun?.() === true && request.unsure !== true
     parent.step('agent.propose', {
       goal: request.goal,
       app: origin.app?.name,
-      window: origin.windowTitle
+      window: origin.windowTitle,
+      auto: auto || undefined,
+      heldForDoubt: (this.deps.autoRun?.() === true && request.unsure === true) || undefined
     })
 
     const card = (patch: Partial<PlanCard> = {}): PlanCard => ({
@@ -211,10 +233,32 @@ export class AgentLane {
       // Run starts something that reports back onto this card. Without it the
       // card closes on the press and takes Escape with it.
       startsRun: true,
+      auto,
       ...patch
     })
 
     let started = false
+
+    /**
+     * Begin the walk. One function because there are now two ways in — the
+     * press and the setting — and they must not be two slightly different
+     * starts. `started` is the guard for both: a second apply delivered into
+     * an auto-run already in flight has to be a no-op, not a second walker.
+     */
+    const start = (): void => {
+      if (started) return
+      started = true
+      const trace = parent.fork()
+      trace.step('agent.run', { goal: request.goal, auto: auto || undefined })
+      void this.walk(request, origin, card, trace).catch((err) => {
+        trace.fail('agent.threw', {}, err)
+        this.deps.hud.closeCard()
+        this.deps.hud.announce?.(
+          'error',
+          `The run stopped: ${err instanceof Error ? err.message : String(err)}`
+        )
+      })
+    }
 
     this.deps.hud.openCard(card(), (action) => {
       if (action === 'cancel') {
@@ -236,19 +280,14 @@ export class AgentLane {
         this.deps.hud.announce?.('applied', 'Cancelled — nothing was pressed.')
         return
       }
-      if (action !== 'apply' || started) return
-      started = true
-      const trace = parent.fork()
-      trace.step('agent.run', { goal: request.goal })
-      void this.walk(request, origin, card, trace).catch((err) => {
-        trace.fail('agent.threw', {}, err)
-        this.deps.hud.closeCard()
-        this.deps.hud.announce?.(
-          'error',
-          `The run stopped: ${err instanceof Error ? err.message : String(err)}`
-        )
-      })
+      if (action !== 'apply') return
+      start()
     })
+
+    // After `openCard`, never before: the card is where the run reports, and a
+    // walk that began against no card would draw into nothing and leave esc
+    // pointing at the application being driven.
+    if (auto) start()
   }
 
   // -------------------------------------------------------------------------

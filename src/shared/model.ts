@@ -21,7 +21,13 @@ export const SPEECH_MODEL_IDS = ['base.en', 'small.en'] as const
 
 export type SpeechModelId = (typeof SPEECH_MODEL_IDS)[number]
 
-export const DEFAULT_SPEECH_MODEL: SpeechModelId = 'base.en'
+/**
+ * `small.en`, matching `DEFAULT_MODEL_FILE`, `scripts/fetch-model.ts` and the
+ * fallback order in `services/model.ts` — the default moved up after M5 on the
+ * measurement in that commit, and an install that predates it keeps whatever
+ * it already has rather than re-downloading.
+ */
+export const DEFAULT_SPEECH_MODEL: SpeechModelId = 'small.en'
 
 export interface SpeechModelChoice {
   id: SpeechModelId

@@ -78,22 +78,6 @@ export const SettingsSchema = z.object({
    * cheap to check. The bench (`npm run bench:engine`) is what tells you
    * whether fast is worth it on your machine.
    */
-  /**
-   * Which local whisper model transcribes speech.
-   *
-   * Nothing here reaches a network at transcription time — all three run
-   * on-device via `whisper-cli`. This is purely a latency/accuracy dial, and
-   * it exists because the default moved up to `small.en`: measured on an M4
-   * Pro a short utterance costs ~294 ms on base.en against ~674 ms on
-   * small.en, and on a slower Mac that difference is the whole reason ⌥Space
-   * feels like typing rather than like waiting.
-   *
-   * Only the English-only models are offered. Mull's prompts, the filler list
-   * in `pipeline/cleanup.ts` and the send-phrase tables in `pipeline/router.ts`
-   * are all English, so a multilingual model would transcribe a language the
-   * rest of the pipeline cannot route.
-   */
-  speechModel: z.enum(['tiny.en', 'base.en', 'small.en']).default('small.en'),
   editModel: z.enum(['sonnet', 'haiku']).default('sonnet'),
   /**
    * How Mull decides dictate-vs-edit.
@@ -185,6 +169,36 @@ export const SettingsSchema = z.object({
    */
   agentLoop: z.boolean().default(false),
   /**
+   * Start a run the moment it is proposed, instead of waiting for Run.
+   *
+   * Armed from the panel rather than from this pane, beside `thinking` and for
+   * the same reason: which kind of thing you are about to say is known in the
+   * second before the key goes down and nowhere else. Persisted here because a
+   * toggle that forgets itself on relaunch is worse than no toggle.
+   *
+   * The plan card is the one card in the app whose button is not an answer —
+   * it *starts* something, and everything that follows reports back onto the
+   * same card with esc still meaning stop. So the press it asks for buys less
+   * than it looks like it does: it approves a goal and a budget that are both
+   * already printed on the card, and it does it after a spoken instruction
+   * whose whole point was not touching the keyboard. "Open LinkedIn in a new
+   * tab" ends with a hand on ⏎, which is the flow this switch exists to close.
+   *
+   * **What it does not change.** Nothing about the run itself: the vocabulary
+   * is the same closed one, `AgentKeySchema` still has no Return in it, every
+   * act is still journaled, and esc still stops it between any two acts. The
+   * card still opens and still says what is being driven — it simply does not
+   * wait to be told to begin.
+   *
+   * **What it does change, and it is worth saying plainly.** A misrouted or
+   * misheard goal now moves the mouse before anyone has read it. That is the
+   * whole trade, which is why this is off by default and why a transcript
+   * whisper was not sure of refuses to auto-run — see `unsure` on the two lane
+   * requests. The diff, send and answer cards are untouched: this reaches only
+   * the card whose button starts a loop.
+   */
+  autoRun: z.boolean().default(false),
+  /**
    * Which model drives that loop.
    *
    * Deliberately its own setting rather than `editModel`'s, because the two
@@ -207,11 +221,10 @@ export const SettingsSchema = z.object({
   /**
    * Which local speech model transcribes you.
    *
-   * `base.en` is the default and the one onboarding fetches: 148 MB, and fast
-   * enough that the transcript is waiting by the time you stop talking.
-   * `small.en` is 488 MB and hears names, jargon and a noisy room measurably
-   * better, at two to three times the wait — a trade worth making on a fast
-   * Mac, and worth refusing on a slow one.
+   * `small.en` is the default and the one onboarding fetches: 488 MB, and it
+   * hears names, jargon and a noisy room measurably better. `base.en` is 148 MB
+   * and two to three times faster to answer — a trade worth refusing on a fast
+   * Mac, and worth making on a slow one.
    *
    * Switching is live: the next thing you say uses the new one. A model that
    * is not downloaded yet is still selectable — Settings says so plainly, and
