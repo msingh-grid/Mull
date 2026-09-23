@@ -47,7 +47,8 @@ the handshake in `Verbs.swift` is strict equality, and a mismatch fails `init`
 and takes the whole sidecar down (not a partial degrade).
 
 `scripts/probe-*.ts` (`probe-targets`, `probe-harvest`, `probe-agent`,
-`probe-router`, `probe-asr`) drive the real sidecar against real applications and print
+`probe-router`, `probe-asr`, `probe-skills`, `probe-overlay`, `probe-findmiss`)
+drive the real sidecar against real applications and print
 numbers rather than pass/fail — they exist because several architecture
 decisions here came from measurements that contradicted the obvious guess (see
 README "How this codebase is tested"). Run them manually when touching
@@ -71,7 +72,10 @@ src/
     pipeline/      one file per lane (dictation, sculpt=edit, ask, navigate, agent) + the executor
     engine/        which model serves a turn (classify/navigate/answer/transform/compose), and every prompt
     services/      hotkeys, HUD, insertion, undo, AppleScript bridges, sidecar client
-    store/         SQLite journal, captures, settings, credentials
+    store/         SQLite journal, captures, settings, credentials, and the
+                   two things Mull keeps between utterances: `turns.ts` (the
+                   last few things you said, so a follow-up has a subject) and
+                   `skills.ts` (what previous agent runs learned about each app)
   renderer/        HUD, journal, settings, onboarding (React) — non-activating floating panel
   preload/         the IPC surface, and nothing else
 

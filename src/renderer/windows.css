@@ -333,6 +333,30 @@ body.window {
   color: var(--ink-2);
 }
 
+/* ── What Mull has learned ───────────────────────────────────────────────── */
+/* One block per application, so a list of a dozen notes reads as a few short
+   lists rather than as one long one. */
+.skill-app {
+  margin-top: 10px;
+}
+.skill-app-name {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+/* `do` and `avoid` are the whole vocabulary, and telling them apart at a glance
+   is most of what makes the list readable. */
+.skill-kind {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-3);
+}
+.skill-kind.avoid {
+  color: var(--warn);
+}
+
 /* ── Settings rows ───────────────────────────────────────────────────────── */
 .set-row {
   display: flex;

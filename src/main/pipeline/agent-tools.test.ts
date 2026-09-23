@@ -54,7 +54,13 @@ const sleep = async (): Promise<void> => {}
 
 function harness(
   titles: string[] = ['Search', 'Anil Turaga', 'Priya Sharma'],
-  options: { stopped?: boolean; targetsStoppedBy?: string; coldScans?: number } = {}
+  options: {
+    stopped?: boolean
+    targetsStoppedBy?: string
+    coldScans?: number
+    /** What the *reading* harvest returns, which is a different walk entirely. */
+    context?: string[]
+  } = {}
 ): {
   context: ToolContext
   sidecar: FakeSidecar
@@ -65,7 +71,7 @@ function harness(
     accessibility: true,
     targets: titles.map((title, index) => target(index, title)),
     app: { bundleId: 'com.tinyspeck.slackmacgap', name: 'Slack', pid: 900 },
-    context: ['Anil: the redlines are with legal'],
+    context: options.context ?? ['Anil: the redlines are with legal'],
     targetsStoppedBy: options.targetsStoppedBy,
     coldScans: options.coldScans
   })
@@ -226,8 +232,70 @@ describe('find', () => {
     const h = harness()
     const out = await find(h.context, { query: 'Bartholomew' }, sleep)
 
-    expect(out.text).toMatch(/nothing here matches/)
+    expect(out.text).toMatch(/nothing pressable matches/)
     expect(out.text).toMatch(/3 things/)
+    // Nothing on screen said it either, so there is no second half to the
+    // answer — see the group below.
+    expect(out.text).not.toMatch(/plain text/)
+  })
+
+  /**
+   * The twenty-turn flail, and the sentence that ends it.
+   *
+   * Slack's DM autocomplete draws its rows as `AXStaticText` with no `AXPress`,
+   * so the target scan offers none of them and `find` used to answer "nothing
+   * matches" about words that were plainly on the screen. The model concluded
+   * it had not looked hard enough and kept searching. Measured: 238 targets
+   * before the overlay opened, 239 after, twenty-six harvest blocks naming the
+   * person.
+   */
+  describe('when the words are there but nothing can be pressed', () => {
+    it('says they are on screen and are not controls', async () => {
+      const h = harness(undefined, { context: ['Divyanshu Singh', 'dsingh', 'Divyanshu Kuriyal'] })
+      const out = await find(h.context, { query: 'Divyanshu' }, sleep)
+
+      expect(out.text).toMatch(/nothing pressable matches/)
+      expect(out.text).toContain('plain text rather than as controls')
+      expect(out.text).toContain('“Divyanshu Singh”')
+      expect(out.text).toContain('“Divyanshu Kuriyal”')
+      // And what to do instead, because "it is unreachable" is only useful
+      // alongside somewhere else to look.
+      expect(out.text).toMatch(/menu command/)
+      expect(out.detail).toContain('not a control')
+    })
+
+    /**
+     * The other half of the honesty: arrowing to one of these and confirming it
+     * needs Return, and `AgentKeySchema` has none by design (§4.2). Telling the
+     * model to try the keyboard here would be sending it at a wall.
+     */
+    it('does not suggest the keyboard, which cannot commit', async () => {
+      const h = harness(undefined, { context: ['Divyanshu Singh'] })
+      const out = await find(h.context, { query: 'Divyanshu' }, sleep)
+
+      expect(out.text).toContain('not available to you either')
+    })
+
+    it('ignores prose that merely contains the word', async () => {
+      const h = harness(undefined, {
+        context: [
+          'I spoke to Divyanshu about the terms doc last week and he said the redlines were with legal, which is roughly what Anil said too, so we are probably fine on that front.'
+        ]
+      })
+      const out = await find(h.context, { query: 'Divyanshu' }, sleep)
+      expect(out.text).not.toMatch(/plain text/)
+    })
+
+    /** A window that will not talk leaves the answer where it started. */
+    it('keeps the plain answer when the window cannot be read', async () => {
+      const h = harness()
+      h.context.sidecar.windowContext = async () => {
+        throw new Error('the window stopped answering')
+      }
+      const out = await find(h.context, { query: 'Bartholomew' }, sleep)
+      expect(out.text).toMatch(/nothing pressable matches/)
+      expect(out.ok).not.toBe(false)
+    })
   })
 
   /**
@@ -1424,5 +1492,113 @@ describe('scrollTo', () => {
 
     expect(out.text).toBe(STOPPED_MESSAGE)
     expect(h.sidecar.targetActions).toEqual([])
+  })
+})
+
+/**
+ * The list that is rebuilt while you are pressing it.
+ *
+ * Google Calendar's guest field is the case. The suggestion rows are fed
+ * asynchronously and re-rendered every time the server answers, so the element
+ * behind a row is destroyed and remade between the `find` that showed it and
+ * the `press` that aims at it. From a live log, 2.2 seconds apart:
+ *
+ *     find   “Chirayu” — 1 of 82                                ok
+ *     press  “Chirayu Gupta cgupta@…” isn’t there any more      REFUSED
+ *
+ * The model cannot win that race — its turn-around is seconds — so the retry
+ * lives below it.
+ */
+describe('pressing a row that is being redrawn', () => {
+  const guests = ['Guests', 'Chirayu Gupta cgupta@griddynamics.com', 'Save']
+
+  it('looks once more and presses the same row', async () => {
+    const h = harness(guests)
+    await find(h.context, { query: 'Chirayu' }, sleep)
+    // The list is rebuilt: same row, different index. Exactly what a React
+    // re-render of an async suggestion list does.
+    h.sidecar.retarget(['Guests', 'Rooms', 'Chirayu Gupta cgupta@griddynamics.com', 'Save'])
+
+    const out = await press(
+      h.context,
+      { index: 1, expectTitle: 'Chirayu Gupta cgupta@griddynamics.com' },
+      sleep
+    )
+
+    expect(out.ok).toBe(true)
+    expect(out.text).toContain('already been redrawn once')
+    expect(out.detail).toContain('on the second look')
+  })
+
+  /**
+   * Two rows with the same label are two different people. "Press the one you
+   * meant" is not answerable from here, and guessing is how a run invites the
+   * wrong person to a meeting.
+   */
+  it('refuses rather than guess when the title is no longer unique', async () => {
+    const h = harness(guests)
+    await find(h.context, { query: 'Chirayu' }, sleep)
+    h.sidecar.retarget([
+      'Guests',
+      'Chirayu Gupta cgupta@griddynamics.com',
+      'Chirayu Gupta cgupta@griddynamics.com',
+      'Save'
+    ])
+
+    const out = await press(
+      h.context,
+      { index: 1, expectTitle: 'Chirayu Gupta cgupta@griddynamics.com' },
+      sleep
+    )
+    expect(out.ok).toBe(false)
+    expect(out.text).toContain('being rebuilt as you look at it')
+    // And it says why looking again will not help, because that is what the
+    // model tried on its own for four turns.
+    expect(out.text).toContain('another route')
+  })
+
+  it('gives up honestly when the row is simply gone', async () => {
+    const h = harness(guests)
+    await find(h.context, { query: 'Chirayu' }, sleep)
+    h.sidecar.retarget(['Guests', 'Rooms', 'Save'])
+
+    const out = await press(
+      h.context,
+      { index: 1, expectTitle: 'Chirayu Gupta cgupta@griddynamics.com' },
+      sleep
+    )
+    expect(out.ok).toBe(false)
+  })
+
+  /**
+   * The retry is for a moving list, not for a refusal. A press Mull declined
+   * must not be quietly attempted a second time.
+   */
+  it('never retries something Mull refused on purpose', async () => {
+    const h = harness(['Guests', 'Delete event', 'Save'])
+    await find(h.context, { query: 'Delete' }, sleep)
+    const out = await press(h.context, { index: 1, expectTitle: 'Delete event' }, sleep)
+
+    expect(out.ok).toBe(false)
+    expect(out.text).toContain('won’t press')
+    expect(out.text).not.toContain('being rebuilt')
+  })
+
+  it('does not retry after the user has pressed escape', async () => {
+    const h = harness(guests)
+    await find(h.context, { query: 'Chirayu' }, sleep)
+    h.sidecar.retarget(['Guests', 'Rooms', 'Chirayu Gupta cgupta@griddynamics.com', 'Save'])
+    let stopped = false
+    h.context.stopped = () => stopped
+
+    const pressing = press(
+      h.context,
+      { index: 1, expectTitle: 'Chirayu Gupta cgupta@griddynamics.com' },
+      async () => {
+        stopped = true
+      }
+    )
+    const out = await pressing
+    expect(out.ok).toBe(false)
   })
 })

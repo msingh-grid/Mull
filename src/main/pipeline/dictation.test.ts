@@ -11,6 +11,7 @@ import { DictationPipeline } from './dictation'
 import type { SculptRequest } from './sculpt'
 import { IntentRouter } from './intent'
 import type { ClassifiedIntent, Engine } from '../engine/types'
+import { TurnMemory, type RecentTurn } from '../services/turns'
 
 function speech(seconds: number, amplitude = 0.25): Float32Array {
   const samples = new Float32Array(Math.round(CAPTURE_SAMPLE_RATE * seconds))
@@ -37,7 +38,9 @@ interface Harness {
   /** Every question the router handed to the lane that writes nothing. */
   asked: Array<{ question: string; transcript: string }>
   /** Every goal the router handed to the lane that goes and looks. */
-  navigated: Array<{ goal: string; unsure?: boolean }>
+  navigated: Array<{ goal: string; unsure?: boolean; recent?: RecentTurn[] | null }>
+  /** The conversation this harness is keeping, so a test can read it back. */
+  turns: TurnMemory
 }
 
 function harness(options: {
@@ -68,7 +71,8 @@ function harness(options: {
   const sculpted: SculptRequest[] = []
   const sends: Array<{ app: unknown; text: string; transcript: string }> = []
   const asked: Array<{ question: string; transcript: string }> = []
-  const navigated: Array<{ goal: string; unsure?: boolean }> = []
+  const navigated: Array<{ goal: string; unsure?: boolean; recent?: RecentTurn[] | null }> = []
+  const turns = new TurnMemory({ now: () => clockMs })
   // A classifier that answers whatever the test says, or an engine that is
   // down so the local rules have to decide.
   const engine: Engine = {
@@ -117,11 +121,18 @@ function harness(options: {
       navigate: options.sculpt
         ? {
             propose: async (request) => {
-              navigated.push({ goal: request.goal, unsure: request.unsure })
+              navigated.push({
+                goal: request.goal,
+                unsure: request.unsure,
+                recent: request.recent ? [...request.recent] : request.recent
+              })
             }
           }
         : undefined,
-        intent: options.sculpt ? new IntentRouter({ engine, now: () => clockMs }) : undefined,
+        intent: options.sculpt
+          ? new IntentRouter({ engine, now: () => clockMs, recent: () => turns.recent() })
+          : undefined,
+      turns,
       screenContext: options.context ? () => ({ mode: options.context as ContextMode }) : undefined,
       onState: (s) => states.push({ ...s }),
       now: () => clockMs,
@@ -150,7 +161,8 @@ function harness(options: {
     sculpted,
     sends,
     asked,
-    navigated
+    navigated,
+    turns
   }
 }
 
@@ -1347,7 +1359,7 @@ describe('when whisper is not sure it heard right', () => {
     await settle()
 
     // Sentence-cased by the cleanup pass, as every transcript is.
-    expect(h.navigated).toEqual([
+    expect(h.navigated).toMatchObject([
       { goal: 'What did Anil say about the terms doc', unsure: true }
     ])
     h.pipe.dispose()
@@ -1410,3 +1422,47 @@ describe('when whisper is not sure it heard right', () => {
   })
 })
 
+
+describe('the conversation a lane is handed', () => {
+  /** The same readable window the navigate tests need; a copy, not a share. */
+  const withWindow = (): FakeSidecar =>
+    new FakeSidecar({
+      accessibility: true,
+      context: ['Anil: the redlines are with legal', 'Anil: should land Thursday']
+    })
+
+  /**
+   * Read one line above `open`, and the test is really about that line: a lane
+   * shown the turn it is currently serving would read "said this → navigate →
+   * still going" about itself, which is a fact it already has.
+   */
+  it('gives the lane what came before, and never the utterance it is serving', async () => {
+    const h = harness({
+      sidecar: withWindow(),
+      sculpt: true,
+      context: 'text',
+      classifies: { kind: 'navigate', goal: 'what did Anil say about the terms doc' },
+      transcript: 'what did Anil say about the terms doc'
+    })
+    h.pipe.begin('instruct')
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    expect(h.navigated[0]?.recent).toEqual([])
+
+    h.pipe.begin('instruct')
+    h.pipe.pushChunk(speech(1.2))
+    h.clock.advance(1_200)
+    h.pipe.end()
+    await settle()
+
+    const second = h.navigated[1]?.recent ?? []
+    expect(second).toHaveLength(1)
+    expect(second[0]?.said).toContain('Anil')
+    // The expansion, not the utterance: the next follow-up needs the subject,
+    // and the goal is the only place it is written down.
+    expect(second[0]?.goal).toContain('terms doc')
+  })
+})

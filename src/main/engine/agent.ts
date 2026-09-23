@@ -7,12 +7,15 @@ import type {
   ClassifiedIntent,
   ClassifyRequest,
   ComposeRequest,
+  DistillRequest,
   Engine,
   EngineState,
   NavigateRequest,
   TransformRequest,
   TransformResult
 } from './types'
+import type { LearnedSkill } from '@shared/skills'
+import { SKILL_MODEL, SKILL_SYSTEM_PROMPT, parseSkills, skillPrompt } from './skills'
 import { EngineHealth } from './health'
 import {
   CLASSIFIER_MODEL,
@@ -125,6 +128,7 @@ export class AgentEngine implements Engine {
   private readonly composer: AgentSession
   private readonly navigator: AgentSession
   private readonly answerer: AgentSession
+  private readonly learner: AgentSession
 
   constructor(options: AgentEngineOptions) {
     this.model = options.model
@@ -176,6 +180,16 @@ export class AgentEngine implements Engine {
       model: options.model,
       systemPrompt: ANSWER_SYSTEM_PROMPT,
       thinking: options.thinking
+    })
+    // The sixth, and the only one nobody is waiting for. Pinned to the smallest
+    // model regardless of what the run itself was driven with — see
+    // `SKILL_MODEL` — and never warmed, because it runs after the card has
+    // closed and a cold subprocess costs the user nothing there.
+    this.learner = new AgentSession({
+      ...shared,
+      label: 'learn',
+      model: SKILL_MODEL,
+      systemPrompt: SKILL_SYSTEM_PROMPT
     })
   }
 
@@ -269,6 +283,29 @@ export class AgentEngine implements Engine {
       this.health.degrade(err)
       this.navigator.reset()
       throw err
+    }
+  }
+
+  /**
+   * What a finished run taught about this application.
+   *
+   * The one turn in Mull that runs when nobody is waiting, so it is the one
+   * turn whose failure is allowed to be completely silent: a throw here means
+   * the notebook does not grow, and the run it came from has already ended
+   * well or badly on its own terms.
+   *
+   * It does **not** degrade the engine's health on failure, unlike every other
+   * method here. Health is what the HUD reads to tell the user the engine is
+   * unavailable, and a distillation that timed out after the answer was already
+   * on screen is not evidence about anything the user is about to do.
+   */
+  async distill(request: DistillRequest): Promise<LearnedSkill[]> {
+    try {
+      return parseSkills(await this.learner.ask(skillPrompt(request)))
+    } catch (err) {
+      this.log('warn', 'engine: could not write down what the run learned', err)
+      this.learner.reset()
+      return []
     }
   }
 

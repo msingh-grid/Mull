@@ -13,6 +13,8 @@ import type { AgentRunResult } from '../engine/agent-loop'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
 import { Trace } from '../trace'
+import { describeSteps, type RecentTurn, type TurnOutcome } from '../services/turns'
+import { MAX_SKILLS_PER_APP, type LearnedSkill, type SkillRecord } from '@shared/skills'
 import type { ActionExecutor, Scan } from './actions'
 import {
   apps,
@@ -78,6 +80,17 @@ import {
 /** How long to let a freshly-activated window settle before the first look. */
 const SETTLE_MS = 250
 
+/**
+ * Below this, a run that arrived without stumbling had nothing to discover.
+ *
+ * Provisional, and said out loud rather than dressed up: it is set off three
+ * live runs — 8 turns clean and nothing to teach, 12 turns clean and a lesson
+ * that went on to earn its place, 31 turns with a failure. Ten sits between the
+ * first two, which is the most that can honestly be claimed from three points.
+ * `npm run probe:skills` is what should replace it. See the gate in `remember`.
+ */
+export const QUIET_TURNS = 10
+
 export interface AgentRequest {
   goal: string
   transcript: string
@@ -94,6 +107,19 @@ export interface AgentRequest {
    * — one press, on the utterance where the press is worth something.
    */
   unsure?: boolean
+  /**
+   * What the user was doing just before this, and what came of it.
+   *
+   * The half a goal string cannot carry. "And what about Priya" arrives here
+   * already expanded, but *that the last run walked this same route and came
+   * back with nothing* is not in the expansion — and without it the second
+   * attempt is the first attempt again.
+   *
+   * Read as evidence, never as instruction: it holds prior model output about
+   * prior windows, and `AGENT_SYSTEM_PROMPT` names it in the same paragraph as
+   * the screen for that reason.
+   */
+  recent?: RecentTurn[] | null
 }
 
 /** What the lane needs to run one goal. Mirrors `NavigateDeps`. */
@@ -109,6 +135,7 @@ export interface AgentDeps {
     goal: string
     app: { bundleId: string; name: string } | null
     context?: ScreenContext | null
+    recent?: RecentTurn[] | null
     handlers: {
       look(input: { want: 'text' | 'targets' | 'both' }): Promise<string>
       find(input: { query: string; kind?: 'press' | 'type' }): Promise<string>
@@ -128,6 +155,7 @@ export interface AgentDeps {
     }
     stopped: () => boolean
     urlGate?: (url: string) => { ok: boolean; because: string }
+    skills?: readonly { kind: 'do' | 'avoid'; text: string }[] | null
   }) => Promise<AgentRunResult>
   hud: {
     openCard(card: PlanCard, onAction: (action: 'apply' | 'apply-send' | 'cancel') => void): void
@@ -137,7 +165,9 @@ export interface AgentDeps {
     announce?(
       phase: 'applied' | 'error' | 'blocked',
       notice: string,
-      lastAction?: HudLastAction
+      lastAction?: HudLastAction,
+      /** What the run did, for the memory the next utterance is read against. */
+      turn?: TurnOutcome
     ): void
   }
   /**
@@ -175,6 +205,29 @@ export interface AgentDeps {
    * answer can be different for the next utterance than it was for this one.
    */
   autoRun?: () => boolean
+  /**
+   * The notebook: what previous runs learned about the application this one is
+   * about to work in.
+   *
+   * A port rather than the store, so the lane can be tested with no database —
+   * and so that "learning is switched off" is expressed by not supplying it,
+   * beside `useSkills` which expresses "switched off right now".
+   *
+   * Everything it returns is a hint. Nothing it returns widens the vocabulary,
+   * the known apps, the known menus or the URL gate; see `@shared/skills`.
+   */
+  skills?: {
+    forApp(bundleId: string | null | undefined, limit?: number): SkillRecord[]
+    learn(app: { bundleId: string; name?: string | null }, items: readonly LearnedSkill[], fromGroup?: string | null): void
+    markUsed(ids: readonly string[]): void
+    credit(ids: readonly string[], verdict: 'win' | 'loss'): void
+  }
+  /**
+   * `settings.skills`, read per run rather than at boot — the same treatment
+   * `autoRun` gets, and for the same reason: a switch that only takes effect
+   * next launch is a switch people stop believing.
+   */
+  useSkills?: () => boolean
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   sleep?: (ms: number) => Promise<void>
   trace?: () => Trace
@@ -302,6 +355,21 @@ export class AgentLane {
     /** Made before the first act, so every row can be stamped with it. */
     const groupId = randomUUID()
     const startedAt = Date.now()
+    /**
+     * Is the notebook armed for this run? Read once, so the read at the start
+     * and the write at the end cannot disagree — a run that was shown notes and
+     * then declined to be credited would quietly corrupt the scoring.
+     */
+    const learning = this.deps.skills !== undefined && this.deps.useSkills?.() !== false
+    /**
+     * Every note put in front of the model, wherever it came from.
+     *
+     * Shared with `ToolContext` rather than owned here, because `switchApp`
+     * hands over the destination app's notes mid-run and those have to be
+     * credited too. A list the tools append to is the only arrangement where
+     * "what was shown" stays true across a switch.
+     */
+    const shown: SkillRecord[] = []
     let note_ = 'moves between apps, clicks and types · nothing is submitted'
     let answer: string | null = null
     /** What the model said when it finished, and whether it got there. */
@@ -359,6 +427,17 @@ export class AgentLane {
       knownApps: new Map<string, string>(
         origin.app ? [[origin.app.bundleId, origin.app.name]] : []
       ),
+      /**
+       * The notebook, so `switchApp` can hand over the destination's notes.
+       *
+       * The lane cannot do that itself: it reads the notebook once, before the
+       * loop, when the only app it can name is the one the user is standing in.
+       * A goal like "go to Slack and…" is exactly the case where the useful
+       * notes are somewhere the run has not been yet, and the tool result that
+       * puts it there is the first moment anyone can say so.
+       */
+      ...(learning ? { skills: this.deps.skills } : {}),
+      shown,
       amend: (entryId, evidence) =>
         this.deps.journal?.amend(entryId, { detail: { evidence } }),
       ...(this.deps.log ? { log: this.deps.log } : {})
@@ -393,12 +472,36 @@ export class AgentLane {
 
     await this.sleep(SETTLE_MS)
 
+    /**
+     * What previous runs learned about the application this one starts in.
+     *
+     * Read here, at the last moment before the loop starts, rather than at
+     * propose time: a card can sit on screen for a while, and the notebook is
+     * written by other runs. `markUsed` is called on whatever was actually put
+     * in front of the model, so the counters describe what was shown rather
+     * than what was looked up.
+     *
+     * Keyed off `context.front` — where the hands are — rather than
+     * `request.app`, which is only where the *utterance* was routed. They agree
+     * at this point in a run and stop agreeing the moment `switchApp` fires,
+     * which is why `shown` below is a list the tools can add to rather than
+     * this array.
+     */
+    const learned = learning ? (this.deps.skills?.forApp(context.front?.bundleId) ?? []) : []
+    if (learned.length > 0) {
+      this.deps.skills?.markUsed(learned.map((skill) => skill.id))
+      trace.step('agent.learned', { n: learned.length })
+    }
+    shown.push(...learned)
+
     let result: AgentRunResult
     try {
       result = await this.deps.run({
         goal: request.goal,
         app: request.app,
         context: request.context ?? null,
+        recent: request.recent ?? null,
+        skills: learned,
         stopped: () => this.stopped,
         /**
          * The gate `canUseTool` consults before `openUrl` runs.
@@ -415,7 +518,7 @@ export class AgentLane {
           find: (input) =>
             act('find', `“${input.query}”`, () => find(context, input, this.sleep)),
           press: (input) =>
-            act('press', `“${input.expectTitle}”`, () => press(context, input)),
+            act('press', `“${input.expectTitle}”`, () => press(context, input, this.sleep)),
           setText: (input) =>
             // The text on the card rather than the field name: a write is the
             // one act where what went in matters more than where it went, and
@@ -627,7 +730,162 @@ export class AgentLane {
       // conditional.
       undoable: false,
       result: answer ?? note_
+    },
+    /**
+     * The route, for the next thing the user says.
+     *
+     * The announce is the single funnel every lane's ending passes through, so
+     * it is also where the turn closes (`dictation.ts`) — and this lane is the
+     * one with something worth adding to it. "It already went to Slack, found
+     * Priya and came back with nothing" is what stops the follow-up from being
+     * answered by repeating the walk that just failed.
+     */
+    {
+      goal: request.goal,
+      did: describeSteps(steps),
+      ended: result.ended
     })
+
+    /**
+     * And then, with nobody waiting, write down anything this taught.
+     *
+     * Last, deliberately. Everything above it is the run: the window is back,
+     * the row is written, the card has settled and the user has their answer.
+     * Nothing here can change any of that, which is why it is allowed to be
+     * slow, allowed to fail, and never awaited.
+     */
+    this.remember(request, {
+      // **Where the work happened, not where the utterance was routed.**
+      //
+      // `context.front` is moved by `switchApp`; `request.app` is the window the
+      // user was standing in when they spoke. Filing against the latter put a
+      // note about Slack's History menu under Zed — shown forever to runs that
+      // start in the editor and never to runs in Slack, which is exactly
+      // backwards. The lane already learned this once for journal rows
+      // (`plan.app`, above); the notebook is the same lesson one function over.
+      //
+      // A run that worked in two applications is still filed under one: the last
+      // one it was in, which is where it read the answer. That is lossy and it
+      // is the best signal available from a single field.
+      app: context.front ?? request.app ?? origin.app,
+      ended: result.ended,
+      arrived,
+      steps,
+      turns: result.turns,
+      shown,
+      groupId
+    })
+  }
+
+  /**
+   * Credit what was shown, and learn from what happened.
+   *
+   * Two halves that look alike and are not. The credit is bookkeeping about
+   * hints that were already given — cheap, local, and the thing that makes the
+   * decay in `SkillStore` mean anything. The distillation is a model call, and
+   * it is fired and forgotten: `void`, caught, and silent on failure, because
+   * by the time it runs the user has moved on and a notebook that did not grow
+   * is exactly where every run started.
+   *
+   * **A stopped run teaches nothing.** It ended because somebody pressed
+   * escape, which is a fact about the person rather than about the
+   * application — and crediting it as a loss would punish whatever hints
+   * happened to be on screen when they changed their mind.
+   */
+  private remember(
+    request: AgentRequest,
+    outcome: {
+      app: { bundleId: string; name: string } | null
+      ended: AgentRunResult['ended']
+      arrived: boolean
+      steps: PlanStep[]
+      turns: number
+      shown: SkillRecord[]
+      groupId: string
+    }
+  ): void {
+    const notebook = this.deps.skills
+    if (!notebook || this.deps.useSkills?.() === false) return
+    if (outcome.ended === 'stopped') return
+
+
+    if (outcome.shown.length > 0) {
+      notebook.credit(
+        outcome.shown.map((skill) => skill.id),
+        outcome.arrived ? 'win' : 'loss'
+      )
+    }
+
+    const app = outcome.app
+    const distill = this.deps.engine.distill?.bind(this.deps.engine)
+    if (!app || !distill) return
+
+    /**
+     * Did this run discover anything?
+     *
+     * The gate, and it is here because asking nicely did not work. The prompt
+     * has always said that an empty answer is the right one most of the time,
+     * and across the first three live runs it wrote a note every single time —
+     * including one that arrived in eight turns and one act, having gone
+     * straight to the answer *because* it had been shown the notes already.
+     * There was nothing to learn from that run, and a notebook that grows on
+     * every run is one nobody can read and the model cannot tell apart.
+     *
+     * So the question is answered before the model is asked, from the shape of
+     * the run rather than from its opinion of itself: **a run that arrived,
+     * failed at nothing and took few turns went straight there.** A detour, a
+     * refusal or a long haul is what leaves something worth writing down.
+     *
+     * The failure test comes first because it is the honest one — a failed act
+     * is a fact about the application, whatever the run's length. `QUIET_TURNS`
+     * is the softer half and is a starting point rather than a measurement:
+     * three runs is not a sample, and `npm run probe:skills` is the thing that
+     * should set it, by running the same goals with the notebook on and off and
+     * reporting what each note was worth.
+     */
+    const stumbled = outcome.steps.some((step) => step.state === 'failed')
+    const quiet = outcome.arrived && !stumbled && outcome.turns <= QUIET_TURNS
+    if (quiet) {
+      this.deps.log?.(
+        'info',
+        `agent: nothing to learn — went straight there in ${outcome.turns} turns`
+      )
+      return
+    }
+
+    void distill({
+      goal: request.goal,
+      app,
+      ended: outcome.ended,
+      arrived: outcome.arrived,
+      // Mull's own record of what it did, and the whole of what that turn is
+      // shown — never the window. See `engine/skills.ts`.
+      steps: outcome.steps
+        .filter((step) => step.state !== 'running')
+        .map((step) => ({ verb: step.verb, object: step.object, ok: step.state !== 'failed' })),
+      /**
+       * **The whole notebook for this app, not what this run happened to see.**
+       *
+       * This used to pass `outcome.shown`, and that was wrong twice over: it is
+       * capped at the five notes a run is given, so notes six to twelve were
+       * invisible and could be written again; and after a `switchApp` it is
+       * whichever app the run *started* in, so a run filing against Slack was
+       * shown the editor's notebook and asked not to repeat itself against the
+       * wrong list. A turn that cannot see what is already known cannot answer
+       * the only question that matters here — is this new?
+       */
+      known: notebook
+        .forApp(app.bundleId, MAX_SKILLS_PER_APP)
+        .map((skill) => ({ kind: skill.kind, text: skill.text }))
+    })
+      .then((items) => {
+        if (items.length === 0) return
+        notebook.learn(app, items, outcome.groupId)
+        this.deps.log?.('info', `agent: learned ${items.length} thing(s) about ${app.name}`)
+      })
+      .catch((err) => {
+        this.deps.log?.('warn', 'agent: could not write down what the run learned', err)
+      })
   }
 
   /**

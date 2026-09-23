@@ -229,6 +229,23 @@ public struct TargetActionInfo {
     }
 }
 
+/// One node the target walk looked at and turned down. See `UiTargetsInfo`.
+public struct RejectedInfo {
+    public let role: String
+    public let parentRole: String
+    public let text: String
+    public let press: Bool
+    public let inChoices: Bool
+
+    public init(role: String, parentRole: String, text: String, press: Bool, inChoices: Bool) {
+        self.role = role
+        self.parentRole = parentRole
+        self.text = text
+        self.press = press
+        self.inChoices = inChoices
+    }
+}
+
 public struct UiTargetsInfo {
     /// Names the set of element handles the sidecar is holding. A press quotes
     /// it back, so a press decided against a stale look is refused rather than
@@ -253,11 +270,15 @@ public struct UiTargetsInfo {
     public let chromium: Bool
     /// What the app said when asked to build a tree. See `ManualAccessibility`.
     public let wake: String
+    /// A sample of what the walk declined to offer. Diagnostics for a probe,
+    /// never input to a decision — see `AXTargets.Scan.Rejected`.
+    public let rejected: [RejectedInfo]
 
     public init(
         harvestId: String, targets: [UiTargetInfo], truncated: Bool, stoppedBy: String,
         scanMs: Int, nodes: Int = 0, webNodes: Int = 0, webAreas: Int = 0, duplicates: Int = 0,
-        clipped: Int = 0, deepest: Int = 0, chromium: Bool = false, wake: String = "unknown"
+        clipped: Int = 0, deepest: Int = 0, chromium: Bool = false, wake: String = "unknown",
+        rejected: [RejectedInfo] = []
     ) {
         self.harvestId = harvestId
         self.targets = targets
@@ -272,6 +293,7 @@ public struct UiTargetsInfo {
         self.deepest = deepest
         self.chromium = chromium
         self.wake = wake
+        self.rejected = rejected
     }
 }
 
@@ -651,7 +673,19 @@ public func makeDispatcher(system: SystemActions) -> RpcDispatcher {
             "clipped": .int(info.clipped),
             "deepest": .int(info.deepest),
             "chromium": .bool(info.chromium),
-            "wake": .string(info.wake)
+            "wake": .string(info.wake),
+            // Optional on the TypeScript side, so a sidecar built before this
+            // existed is still a valid reply and no protocol version moves.
+            "rejected": .array(
+                info.rejected.map { reject in
+                    .object([
+                        "role": .string(reject.role),
+                        "parentRole": .string(reject.parentRole),
+                        "text": .string(reject.text),
+                        "press": .bool(reject.press),
+                        "inChoices": .bool(reject.inChoices)
+                    ])
+                })
         ])
     }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TurnMemory } from './turns'
+import { compact, describeSteps, TurnMemory, type RecentTurn } from './turns'
 
 /**
  * The memory that makes "and what about Priya" mean something.
@@ -121,5 +121,129 @@ describe('the bounds', () => {
     m.turns.open({ said: 'something private', route: 'dictate', app: null })
     m.turns.clear()
     expect(m.turns.recent()).toEqual([])
+  })
+})
+
+describe('what a run did, added after the fact', () => {
+  /**
+   * The outcome and the route arrive from opposite ends — a run that ended with
+   * nothing to say still walked somewhere worth remembering — so neither may
+   * depend on the other having been supplied.
+   */
+  it('files the goal, the route and the ending against the open turn', () => {
+    const m = memory()
+    m.turns.open({ said: 'and what about Priya', route: 'navigate', app: 'Slack' })
+    m.turns.close('Priya has not replied since Tuesday.', {
+      goal: 'open the conversation with Priya and read the recent messages',
+      did: 'go to Slack · find “Priya” · look text',
+      ended: 'done'
+    })
+
+    expect(m.turns.recent()[0]).toMatchObject({
+      goal: 'open the conversation with Priya and read the recent messages',
+      did: 'go to Slack · find “Priya” · look text',
+      ended: 'done',
+      outcome: 'Priya has not replied since Tuesday.'
+    })
+  })
+
+  it('records a run that ended with nothing to say', () => {
+    const m = memory()
+    m.turns.open({ said: 'open the calendar', route: 'navigate', app: 'Slack' })
+    m.turns.close(null, { did: 'apps · go to Calendar', ended: 'turns' })
+
+    expect(m.turns.recent()[0]).toMatchObject({ did: 'apps · go to Calendar', ended: 'turns' })
+    expect(m.turns.recent()[0]?.outcome).toBeNull()
+  })
+
+  it('takes the expanded goal at open, when the classifier wrote one', () => {
+    const m = memory()
+    m.turns.open({
+      said: 'and what about Priya',
+      route: 'navigate',
+      app: 'Slack',
+      goal: 'open the conversation with Priya and find what she said about the terms doc'
+    })
+    expect(m.turns.recent()[0]?.goal).toContain('terms doc')
+  })
+
+  it('clamps the late fields too', () => {
+    const m = memory()
+    m.turns.open({ said: 'go', route: 'navigate', app: null })
+    m.turns.close(null, { goal: 'g'.repeat(400), did: 'd'.repeat(400) })
+
+    const turn = m.turns.recent()[0]
+    expect(turn?.goal?.length).toBeLessThanOrEqual(160)
+    expect(turn?.did?.length).toBeLessThanOrEqual(160)
+  })
+})
+
+describe('fitting the block into a prompt', () => {
+  const render = (turn: { said: string }): string => `said “${turn.said}”`
+  const turns = (count: number, size = 10): RecentTurn[] =>
+    Array.from({ length: count }, (_, i) => ({
+      said: `${i}`.repeat(size),
+      route: 'dictate',
+      app: i % 2 === 0 ? 'Slack' : 'Chrome',
+      outcome: null,
+      at: NOW
+    }))
+
+  it('keeps everything when everything fits', () => {
+    const { lines, earlier } = compact(turns(3), render, 1_000)
+    expect(lines).toHaveLength(3)
+    expect(earlier).toBeNull()
+  })
+
+  /** Newest first: the newest turn is the one a follow-up is following. */
+  it('drops the oldest when the block is too long, and says how many', () => {
+    const { lines, earlier } = compact(turns(6, 100), render, 400)
+    expect(lines.length).toBeLessThan(6)
+    expect(lines[lines.length - 1]).toContain('5'.repeat(100))
+    expect(earlier).toMatch(/^earlier: \d more turns in Slack and Chrome$/u)
+  })
+
+  /**
+   * One turn that is on its own too big for the budget is still shown. A block
+   * with nothing in it is worse than a block that overran, and the per-field
+   * clamps already bound how far it can overrun.
+   */
+  it('always keeps the newest turn, however long it is', () => {
+    const { lines, earlier } = compact(turns(2, 500), render, 100)
+    expect(lines).toHaveLength(1)
+    expect(earlier).toBe('earlier: 1 more turn in Slack')
+  })
+
+  it('has nothing to say about nothing', () => {
+    expect(compact([], render, 100)).toEqual({ lines: [], earlier: null })
+  })
+})
+
+describe('what a run did, in one clause', () => {
+  const step = (verb: string, object: string, state = 'done'): { verb: string; object: string; state: string } => ({
+    verb,
+    object,
+    state
+  })
+
+  it('joins the acts in the lane’s own verbs', () => {
+    expect(describeSteps([step('go to', 'Slack'), step('find', '“Priya”')])).toBe(
+      'go to Slack · find “Priya”'
+    )
+  })
+
+  /** The same list and opposite advice, depending on which press worked. */
+  it('marks the ones that failed', () => {
+    expect(describeSteps([step('press', '“Search”', 'failed')])).toBe('press “Search” ✗')
+  })
+
+  it('keeps the tail and counts the rest', () => {
+    const many = ['a', 'b', 'c', 'd', 'e', 'f'].map((name) => step('look', name))
+    expect(describeSteps(many, 2)).toBe('4 more · look e · look f')
+  })
+
+  it('leaves out an act that is still running, and says nothing about nothing', () => {
+    expect(describeSteps([step('look', 'text', 'running')])).toBeNull()
+    expect(describeSteps([])).toBeNull()
   })
 })

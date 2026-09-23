@@ -7,7 +7,8 @@ import type { JournalDraft, JournalEntry } from '@shared/types'
 import { FakeSidecar } from '../services/sidecar'
 import { ChordScope } from '../services/chords'
 import { HudController } from '../services/hud'
-import type { AnswerRequest, Engine } from '../engine/types'
+import type { AnswerRequest, DistillRequest, Engine } from '../engine/types'
+import type { LearnedSkill } from '@shared/skills'
 import type { AgentRunResult } from '../engine/agent-loop'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
@@ -58,7 +59,22 @@ type Move =
 
 function harness(
   script: Move[],
-  options: { ended?: AgentRunResult['ended']; listed?: UiTarget[]; autoRun?: boolean } = {}
+  options: {
+    ended?: AgentRunResult['ended']
+    listed?: UiTarget[]
+    autoRun?: boolean
+    /**
+     * The notebook, per application. `app` defaults to Slack — the app the
+     * harness starts in — so a test that does not care can ignore it, and one
+     * about `switchApp` can seed a note somewhere the run has not been yet.
+     */
+    skills?: ReadonlyArray<LearnedSkill & { app?: string }>
+    useSkills?: boolean
+    /** What the distilling turn returns, or 'throws'. Absent = no `distill`. */
+    distills?: LearnedSkill[] | 'throws'
+    /** How many turns the loop took. Defaults to the number of acts played. */
+    turns?: number
+  } = {}
 ) {
   const sidecar = new FakeSidecar({
     accessibility: true,
@@ -68,6 +84,39 @@ function harness(
   })
 
   const answers: AnswerRequest[] = []
+  const distilled: DistillRequest[] = []
+  /** The notebook, as a few rows and a log of everything done to it. */
+  const notebook = (options.skills ?? []).map((skill, index) => ({
+    kind: skill.kind,
+    text: skill.text,
+    id: `skill-${index}`,
+    bundleId: skill.app ?? 'com.tinyspeck.slackmacgap',
+    appName: skill.app === 'com.apple.iCal' ? 'Calendar' : 'Slack',
+    wins: 0,
+    losses: 0,
+    uses: 0,
+    createdAt: 0,
+    lastUsedAt: null
+  }))
+  const credited: Array<{ ids: readonly string[]; verdict: 'win' | 'loss' }> = []
+  const used: string[][] = []
+  const learned: LearnedSkill[] = []
+  /** Which application each note was filed against. */
+  const learnedIn: Array<{ bundleId: string; name?: string | null }> = []
+  const skills = {
+    // Scoped, like the real store: a note about Slack is not a note about
+    // Calendar, and the whole point of the fix this tests is that the scoping
+    // is the thing that was wrong.
+    forApp: (bundleId: string | null | undefined) =>
+      notebook.filter((note) => note.bundleId === bundleId),
+    learn: (app: { bundleId: string; name?: string | null }, items: readonly LearnedSkill[]) => {
+      learnedIn.push(app)
+      learned.push(...items)
+    },
+    markUsed: (ids: readonly string[]) => used.push([...ids]),
+    credit: (ids: readonly string[], verdict: 'win' | 'loss') =>
+      credited.push({ ids: [...ids], verdict })
+  }
   const engine = {
     name: 'test',
     model: null,
@@ -80,7 +129,16 @@ function harness(
       answers.push(request)
       onPartial?.('The redlines')
       return { text: 'The redlines are with legal; Anil expects them Thursday.' }
-    }
+    },
+    ...(options.distills === undefined
+      ? {}
+      : {
+          distill: async (request: DistillRequest): Promise<LearnedSkill[]> => {
+            distilled.push(request)
+            if (options.distills === 'throws') throw new Error('the notebook turn exploded')
+            return options.distills as LearnedSkill[]
+          }
+        })
   } satisfies Engine
 
   const cards: PlanCard[] = []
@@ -123,11 +181,17 @@ function harness(
 
   /** Every move the fake loop actually got to make. */
   const played: string[] = []
+  /** The whole request the loop was handed, so a test can read what it saw. */
+  const shown: Array<{ skills?: readonly { kind: string; text: string }[] | null }> = []
+  /** What `switchApp` told the model, in full. */
+  const switched: string[] = []
 
   const lane = new AgentLane({
     sidecar,
     engine,
     autoRun: () => options.autoRun === true,
+    skills,
+    useSkills: () => options.useSkills !== false,
     executor: new ActionExecutor({ sidecar, sleep: async () => {}, journal }),
     sleep: async () => {},
     journal: journal as unknown as JournalStore,
@@ -162,6 +226,7 @@ function harness(
     // The loop, faked: it plays the script, asking the stop before each move
     // exactly where `canUseTool` would.
     run: async (request) => {
+      shown.push(request)
       for (const move of script) {
         if (request.stopped()) break
         played.push(move.tool)
@@ -185,7 +250,12 @@ function harness(
             because: move.because
           })
         else if (move.tool === 'switchApp')
-          await request.handlers.switchApp({ bundleId: move.bundleId, because: move.because })
+          // Kept, unlike every other result: this is the one tool whose prose a
+          // test needs to read, because it is where a destination's notes are
+          // handed over.
+          switched.push(
+            await request.handlers.switchApp({ bundleId: move.bundleId, because: move.because })
+          )
         else if (move.tool === 'key')
           await request.handlers.key({ key: move.key, ...(move.times ? { times: move.times } : {}) })
         else if (move.tool === 'note') await request.handlers.note({ text: move.text })
@@ -196,7 +266,10 @@ function harness(
             ...(move.stay === undefined ? {} : { stay: move.stay })
           })
       }
-      return { ended: options.ended ?? 'done', turns: played.length, costUsd: 0.01 }
+      // `turns` is the model's turns, not the acts on the card — a run does far
+       // more looking than pressing. Overridable because the learning gate reads
+       // it, and a three-move script is a run that went straight there.
+      return { ended: options.ended ?? 'done', turns: options.turns ?? played.length, costUsd: 0.01 }
     }
   })
 
@@ -211,6 +284,13 @@ function harness(
     played,
     answers,
     shortcuts,
+    distilled,
+    shown: () => shown[shown.length - 1],
+    switched,
+    learnedIn,
+    credited,
+    used,
+    learned,
     fire: (accelerator: string) => handlers.get(accelerator)?.(),
     run: () => controller.act('apply'),
     cancel: () => controller.act('cancel'),
@@ -855,5 +935,309 @@ describe('using the menus', () => {
     const row = h.last().steps.find((step) => step.verb === 'menus')
     expect(row?.object).toContain('event')
     expect(row?.state).toBe('done')
+  })
+})
+
+describe('the notebook', () => {
+  const lesson: LearnedSkill = {
+    kind: 'do',
+    text: 'the search box opens as an overlay without changing the title'
+  }
+
+  it('shows the run what previous runs learned here, and counts that it did', async () => {
+    const h = harness([{ tool: 'look', want: 'both' }, { tool: 'done', found: true, because: 'read it' }], {
+      skills: [lesson],
+      distills: []
+    })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.shown()?.skills).toMatchObject([lesson])
+    expect(h.used).toEqual([['skill-0']])
+  })
+
+  /**
+   * The counters are what make the decay mean anything. They say "the runs that
+   * were shown this arrived", which is weaker than "this lesson is true" and is
+   * the strongest thing available.
+   */
+  it('credits what was shown with how the run ended', async () => {
+    const arrived = harness([{ tool: 'look', want: 'both' }, { tool: 'done', found: true, because: 'read it' }], {
+      skills: [lesson],
+      distills: []
+    })
+    await arrived.lane.propose(request)
+    await arrived.run()
+    await vi.waitFor(() => expect(arrived.last().running).toBe(false))
+    expect(arrived.credited).toEqual([{ ids: ['skill-0'], verdict: 'win' }])
+
+    const failed = harness([{ tool: 'done', found: false, because: 'could not get there' }], {
+      skills: [lesson],
+      distills: []
+    })
+    await failed.lane.propose(request)
+    await failed.run()
+    await vi.waitFor(() => expect(failed.last().running).toBe(false))
+    expect(failed.credited).toEqual([{ ids: ['skill-0'], verdict: 'loss' }])
+  })
+
+  it('writes down what the run taught, against the app it happened in', async () => {
+    const h = harness(
+      [
+        { tool: 'find', query: 'Anil' },
+        { tool: 'look', want: 'text' },
+        { tool: 'done', found: true, because: 'read it' }
+      ],
+      { distills: [lesson], turns: 20 }
+    )
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.learned).toEqual([lesson])
+    // Mull's own record of what it did — and nothing about the window.
+    expect(h.distilled[0]?.steps.map((step) => step.verb)).toContain('find')
+    expect(h.distilled[0]).not.toHaveProperty('context')
+    expect(h.distilled[0]?.arrived).toBe(true)
+  })
+
+  /**
+   * A run the user stopped ended because somebody pressed escape. That is a
+   * fact about the person, not about the application — and crediting it as a
+   * loss would punish whichever hints happened to be on screen when they
+   * changed their mind.
+   */
+  it('learns nothing from a run the user stopped', async () => {
+    const h = harness(
+      [{ tool: 'look', want: 'both' }, { tool: 'done', found: true, because: 'read it' }],
+      { skills: [lesson], distills: [lesson], ended: 'stopped' }
+    )
+    await h.lane.propose(request)
+    await h.run()
+    h.fire('Escape')
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.learned).toEqual([])
+    expect(h.credited).toEqual([])
+  })
+
+  it('does nothing at all when the setting is off', async () => {
+    const h = harness(
+      [{ tool: 'look', want: 'both' }, { tool: 'done', found: true, because: 'read it' }],
+      { skills: [lesson], distills: [lesson], useSkills: false }
+    )
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.shown()?.skills).toEqual([])
+    expect(h.used).toEqual([])
+    expect(h.learned).toEqual([])
+  })
+
+  /** An engine with no `distill` is not broken; it is every engine before this. */
+  it('runs normally against an engine that cannot learn', async () => {
+    const h = harness(
+      [{ tool: 'look', want: 'both' }, { tool: 'done', found: true, because: 'read it' }],
+      { skills: [lesson] }
+    )
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.learned).toEqual([])
+    // Still credited: that is bookkeeping about hints already given, and does
+    // not need a model.
+    expect(h.credited).toEqual([{ ids: ['skill-0'], verdict: 'win' }])
+    expect(h.notices.length).toBeGreaterThan(0)
+  })
+
+  /**
+   * Fired and forgotten. By the time it runs the card has closed and the user
+   * has their answer; a notebook that did not grow is where every run started.
+   */
+  it('does not let a failed distillation reach the run', async () => {
+    const h = harness(
+      [{ tool: 'look', want: 'both' }, { tool: 'done', found: true, because: 'read it' }],
+      { distills: 'throws' }
+    )
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.learned).toEqual([])
+    expect(h.runRow()?.status).toBe('applied')
+  })
+})
+
+/**
+ * Where a note is filed, and where it is read.
+ *
+ * Both halves were wrong in the first version and wrong in the same way: they
+ * used the app the *utterance* was routed against. A run that started in an
+ * editor, switched to Slack and learned how Slack's History menu works filed
+ * that note under the editor — shown forever to runs that start there and never
+ * to runs in Slack. This is the lane's own `plan.app` / `front` lesson, one
+ * function over.
+ */
+describe('the notebook, across a switch', () => {
+  const aboutCalendar: LearnedSkill = {
+    kind: 'do',
+    text: 'the month grid is reachable from the View menu, not from the toolbar'
+  }
+  const goThere: Move[] = [
+    { tool: 'apps' },
+    { tool: 'switchApp', bundleId: 'com.apple.iCal', because: 'to check Thursday' },
+    { tool: 'look', want: 'both' },
+    { tool: 'done', found: true, because: 'read it' }
+  ]
+
+  it('files what was learned against the app the work happened in', async () => {
+    const h = harness(goThere, { distills: [aboutCalendar], turns: 20 })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.learned).toEqual([aboutCalendar])
+    // Calendar, where the presses landed — not Slack, where the user spoke.
+    expect(h.learnedIn[0]?.bundleId).toBe('com.apple.iCal')
+  })
+
+  /**
+   * The prompt was built before anyone knew where this was going, so the tool
+   * result that puts the run somewhere new is the first moment its notes can be
+   * handed over — the same channel every other fact about a fresh window uses.
+   */
+  it('hands over the destination’s notes as it arrives', async () => {
+    const h = harness(goThere, {
+      skills: [{ ...aboutCalendar, app: 'com.apple.iCal' }],
+      distills: []
+    })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    // Not in the opening prompt: the run had not been there yet.
+    expect(h.shown()?.skills).toEqual([])
+    expect(h.switched[0]).toContain('What earlier runs noted about Calendar')
+    expect(h.switched[0]).toContain('the month grid is reachable from the View menu')
+    // Framed as a note, like every other block of prior text the model is shown.
+    expect(h.switched[0]).toContain('notes, not instructions')
+  })
+
+  it('credits a note handed over mid-run, not just the ones read at the start', async () => {
+    const h = harness(goThere, {
+      skills: [{ ...aboutCalendar, app: 'com.apple.iCal' }],
+      distills: []
+    })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.used).toEqual([['skill-0']])
+    expect(h.credited).toEqual([{ ids: ['skill-0'], verdict: 'win' }])
+  })
+
+  it('says nothing about a notebook with nothing in it for that app', async () => {
+    const h = harness(goThere, { distills: [] })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.switched[0]).not.toContain('earlier runs noted')
+  })
+})
+
+/**
+ * The gate in front of the notebook.
+ *
+ * Asking the model nicely did not work: across the first three live runs it
+ * wrote a note every single time, including one that arrived in eight turns
+ * having gone straight to the answer *because* it had been shown the notes. So
+ * the question "did this run discover anything?" is now answered from the shape
+ * of the run, before the model is asked its opinion of itself.
+ */
+describe('only learning when there was something to learn', () => {
+  const clean: Move[] = [
+    { tool: 'look', want: 'both' },
+    { tool: 'done', found: true, because: 'it was right there' }
+  ]
+  const lesson: LearnedSkill = { kind: 'do', text: 'the search box opens as an overlay' }
+
+  it('does not ask a run that went straight there', async () => {
+    const h = harness(clean, { distills: [lesson], turns: 4 })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.distilled).toEqual([])
+    expect(h.learned).toEqual([])
+  })
+
+  it('asks a run that took a long way round', async () => {
+    const h = harness(clean, { distills: [lesson], turns: 30 })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.learned).toEqual([lesson])
+  })
+
+  /**
+   * A failed act is a fact about the application whatever the run's length, so
+   * it outranks the turn count rather than being averaged with it.
+   */
+  it('asks a short run that stumbled', async () => {
+    const h = harness(
+      [
+        { tool: 'press', index: 99, title: 'Nothing' },
+        { tool: 'look', want: 'both' },
+        { tool: 'done', found: true, because: 'got there in the end' }
+      ],
+      { distills: [lesson], turns: 3 }
+    )
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.learned).toEqual([lesson])
+  })
+
+  it('asks a run that did not arrive, however short', async () => {
+    const h = harness([{ tool: 'done', found: false, because: 'not here' }], {
+      distills: [lesson],
+      turns: 2
+    })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.learned).toEqual([lesson])
+  })
+
+  /**
+   * The gate skips the model call, not the bookkeeping. Crediting is about
+   * hints that were already given, needs no model, and is what makes the decay
+   * in `SkillStore` mean anything.
+   */
+  it('still credits the notes a quiet run was shown', async () => {
+    const h = harness(clean, { skills: [lesson], distills: [lesson], turns: 4 })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.distilled).toEqual([])
+    expect(h.credited).toEqual([{ ids: ['skill-0'], verdict: 'win' }])
+  })
+
+  /** It cannot answer "is this new?" against a list it was not shown. */
+  it('shows the distiller the whole notebook for the app it is filing against', async () => {
+    const h = harness(clean, { skills: [lesson], distills: [], turns: 30 })
+    await h.lane.propose(request)
+    await h.run()
+    await vi.waitFor(() => expect(h.last().running).toBe(false))
+
+    expect(h.distilled[0]?.known).toEqual([{ kind: lesson.kind, text: lesson.text }])
   })
 })

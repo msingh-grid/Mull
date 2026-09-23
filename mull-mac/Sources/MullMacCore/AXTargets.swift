@@ -72,6 +72,31 @@ public enum AXTargets {
         public let kind: Kind
     }
 
+    /// A node the walk looked at and did not offer.
+    ///
+    /// Diagnostics, exactly like the node counts above, and built for the same
+    /// class of failure: a scan that reports `complete` with a plausible number
+    /// of targets, while the thing the user is pointing at is not among them.
+    /// The counts say how much tree there was; this says what was in it that
+    /// was thrown away, and — crucially — *why it was throwable*.
+    ///
+    /// Sampled and bounded. It is not a second target list and must never
+    /// become one: nothing acts on it, `press` cannot address it, and it is
+    /// read by a probe rather than by the model.
+    public struct Rejected {
+        public let role: String
+        public let parentRole: String
+        /// Whatever name it had. Nodes with no name at all are not sampled —
+        /// an unnamed reject is noise in every window ever measured.
+        public let text: String
+        /// Does it advertise `AXPress`? The question the whole struct exists
+        /// for: a row that claims it is one rule away from being offered, and a
+        /// row that does not is a different problem entirely.
+        public let press: Bool
+        /// Was it inside a `choiceContainers` role when the walk reached it?
+        public let inChoices: Bool
+    }
+
     public struct Scan {
         public let harvestId: String
         public let targets: [Target]
@@ -130,6 +155,8 @@ public enum AXTargets {
         /// "unsupported". A browser that answers "unsupported" is one Mull has
         /// no lever on — see `AXHarvest.ManualAccessibility`.
         public let wake: String
+        /// A bounded sample of what the walk declined to offer. See `Rejected`.
+        public let rejected: [Rejected]
 
         public init(
             harvestId: String,
@@ -144,7 +171,8 @@ public enum AXTargets {
             clipped: Int = 0,
             deepest: Int = 0,
             chromium: Bool = false,
-            wake: String = "unknown"
+            wake: String = "unknown",
+            rejected: [Rejected] = []
         ) {
             self.harvestId = harvestId
             self.targets = targets
@@ -159,6 +187,7 @@ public enum AXTargets {
             self.deepest = deepest
             self.chromium = chromium
             self.wake = wake
+            self.rejected = rejected
         }
     }
 
@@ -294,6 +323,13 @@ public enum AXTargets {
     /// leaves two thirds of the budget for controls.
     private static let maxOptions = 100
 
+    /// How many rejected nodes to sample. See `Scan.Rejected`.
+    ///
+    /// Small, because this is evidence for a person reading a probe, not input
+    /// to anything. Forty is enough to characterise a window and few enough
+    /// that collecting it cannot be the reason a scan misses its deadline.
+    private static let maxRejected = 40
+
     private static let attributes =
         [
             kAXRoleAttribute,
@@ -345,7 +381,13 @@ public enum AXTargets {
         var elements: [AXUIElement] = []
         var visited = 0
         var stoppedBy = "complete"
-        var stack: [(element: AXUIElement, depth: Int, inChoices: Bool)] = [(root, 0, false)]
+        // The parent's role rides along, for `Scan.Rejected` alone: a rejected
+        // `AXStaticText` means one thing under an `AXList` and another under an
+        // `AXGroup`, and that distinction is the whole of what `choiceContainers`
+        // turns on.
+        var stack: [(element: AXUIElement, depth: Int, inChoices: Bool, parentRole: String)] =
+            [(root, 0, false, "")]
+        var rejected: [Rejected] = []
         /// How many list options have been offered. See `maxOptions`.
         var choicesTaken = 0
         let deadline = startedAt + budget.deadline
@@ -365,7 +407,7 @@ public enum AXTargets {
         var clipped = 0
         var deepest = 0
 
-        while let (element, depth, inChoices) = stack.popLast() {
+        while let (element, depth, inChoices, parentRole) = stack.popLast() {
             if visited >= budget.maxNodes {
                 stoppedBy = "nodes"
                 break
@@ -400,6 +442,17 @@ public enum AXTargets {
                 } else {
                     duplicates += 1
                 }
+            } else if rejected.count < maxRejected, let name = name(of: node), !name.isEmpty {
+                // Sampled here rather than inferred later, because this is the
+                // one place that knows both what the node was and that it was
+                // turned down.
+                rejected.append(
+                    Rejected(
+                        role: node.role,
+                        parentRole: parentRole,
+                        text: AXHarvest.clamp(name, to: 60),
+                        press: node.actions.contains(kAXPressAction),
+                        inChoices: inChoices))
             }
 
             // The depth bound, and the one budget that used to leave no trace.
@@ -419,7 +472,7 @@ public enum AXTargets {
             // `choiceContainers`.
             let below = inChoices || choiceContainers.contains(node.role)
             for child in node.children.reversed() {
-                stack.append((child, depth + 1, below))
+                stack.append((child, depth + 1, below, node.role))
             }
         }
 
@@ -483,7 +536,8 @@ public enum AXTargets {
             clipped: clipped,
             deepest: deepest,
             chromium: chromium,
-            wake: wake.name)
+            wake: wake.name,
+            rejected: rejected)
     }
 
     // MARK: - One node

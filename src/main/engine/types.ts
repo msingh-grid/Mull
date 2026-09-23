@@ -21,6 +21,7 @@ import type { RecentTurn } from '../services/turns'
 import type { ScreenContext } from '@shared/context'
 import type { NavAttempt, NavStep } from '@shared/nav'
 import type { UiTarget } from '@shared/sidecar-api'
+import type { LearnedSkill } from '@shared/skills'
 
 export type EngineState =
   | { kind: 'ready' }
@@ -96,6 +97,15 @@ export interface AnswerRequest {
    * "did this happen" stops being something to infer from a thin read.
    */
   did?: Array<{ verb: string; object: string; ok: boolean }>
+  /**
+   * The last few things the user said, and what came of them.
+   *
+   * Here for the same reason `did` is: this turn is the one that talks to the
+   * user, and a report that cannot tell "the same answer as last time" from "a
+   * new answer" says the obvious thing twice. It also carries the question a
+   * follow-up is following, which the goal alone often does not.
+   */
+  recent?: readonly RecentTurn[] | null
 }
 
 /**
@@ -249,6 +259,30 @@ export interface NavigateRequest {
    * route is not working, and it is invisible from `stepsLeft` alone.
    */
   progress?: { taken: number; moved: number }
+  /** What was tried before this plan, so a second attempt can vary the route. */
+  recent?: readonly RecentTurn[] | null
+}
+
+/**
+ * What a run taught, for the turn that writes it down.
+ *
+ * Deliberately free of `context`: the distilling turn never sees the window.
+ * Everything it produces is stored and shown to later runs, so the material it
+ * reads is the thing to bound — Mull's own verbs and the titles it quoted back,
+ * not a page of somebody's correspondence. See `engine/skills.ts`.
+ */
+export interface DistillRequest {
+  /** The goal the run was given. */
+  goal: string
+  app: { bundleId: string; name: string } | null
+  /** How it ended: 'done' | 'turns' | 'budget' | 'deadline' | 'error'. */
+  ended: string
+  /** Whether it got where it was going. */
+  arrived: boolean
+  /** What it did, in Mull's own verbs — the whole of what this turn reads. */
+  steps: Array<{ verb: string; object: string; ok: boolean }>
+  /** What is already known about this application, so it is not written twice. */
+  known: Array<{ kind: 'do' | 'avoid'; text: string }>
 }
 
 export interface Engine {
@@ -311,5 +345,19 @@ export interface Engine {
    * Messages API, which is ordinary work and simply has not been done yet.
    */
   runAgent?(request: AgentGoal): Promise<AgentRunResult>
+  /**
+   * Write down what a finished run taught about this application.
+   *
+   * **Optional, like `runAgent` and for a related reason.** It only makes sense
+   * beside a tool loop — there is nothing to distil from a single-shot rewrite
+   * — and an engine that does not offer it simply never learns anything, which
+   * is where every engine was before this existed.
+   *
+   * Runs off the critical path, after the card has closed. Implementations may
+   * throw; the caller treats any failure as "learned nothing", which is the
+   * same rule `classify` follows and matters more here because the output is
+   * written to disk and read by later runs.
+   */
+  distill?(request: DistillRequest): Promise<LearnedSkill[]>
   dispose?(): Promise<void>
 }

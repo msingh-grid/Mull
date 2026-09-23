@@ -254,6 +254,21 @@ export class EngineHolder implements Engine {
     return run.call(this.inner, request)
   }
 
+  /**
+   * Forwarded rather than declared, and the difference matters.
+   *
+   * `distill` is optional on `Engine`, and the caller checks for it before
+   * using it — so this must be absent when the engine behind the holder has
+   * none, not a method that resolves to nothing. A holder that always answers
+   * would tell the lane that learning is available on every engine, and the
+   * lane would file "nothing was learned" against runs where nothing ever
+   * could be.
+   */
+  get distill(): Engine['distill'] {
+    const inner = this.inner
+    return inner.distill ? (request) => inner.distill?.(request) ?? Promise.resolve([]) : undefined
+  }
+
   async dispose(): Promise<void> {
     await this.inner.dispose?.()
   }

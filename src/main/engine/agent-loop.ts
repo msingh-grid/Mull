@@ -34,6 +34,7 @@ import {
 } from '@shared/agent'
 import { AGENT_SYSTEM_PROMPT, agentPrompt } from './prompts'
 import type { ScreenContext } from '@shared/context'
+import type { RecentTurn } from '../services/turns'
 
 /**
  * The loop — the thing `AgentEngine`'s five sessions deliberately are not.
@@ -130,6 +131,25 @@ export interface AgentGoal {
   goal: string
   app: { bundleId: string; name: string } | null
   context?: ScreenContext | null
+  /**
+   * The last few things the user said, and what came of them.
+   *
+   * Evidence about the *conversation*, where `context` is evidence about the
+   * window — and the one thing a fresh session cannot reconstruct, since a run
+   * gets its own session precisely so it does not inherit the last run's
+   * beliefs about a window that has moved. What is worth carrying across is
+   * what the user asked and what happened, not what the model concluded.
+   */
+  recent?: readonly RecentTurn[] | null
+  /**
+   * What Mull has learned about this application, on previous runs.
+   *
+   * Hints, and nothing stronger: they ride in the user turn beside the screen
+   * rather than in the system prompt, and every gate in this file — the URL
+   * check in `canUseTool`, the closed tool list, the stop — runs after them.
+   * See `renderLearned` in `prompts.ts` and `@shared/skills`.
+   */
+  skills?: readonly { kind: 'do' | 'avoid'; text: string }[] | null
   handlers: AgentHandlers
   /** Refuse every act, and end the turn, once this says so. */
   stopped: () => boolean

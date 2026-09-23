@@ -26,8 +26,9 @@ import {
   type FocusSnapshot
 } from './selection'
 import type { IntentRouter } from './intent'
-import { wantsSend } from './router'
+import { wantsSend, type Route } from './router'
 import type { HotkeyIntent } from '../services/hotkey'
+import type { RecentTurn, TurnOutcome } from '../services/turns'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
 import type { JournalDraft, JournalEntry } from '@shared/types'
@@ -97,6 +98,8 @@ export interface NavigateLaneLike {
     routedBy?: string
     /** Whisper was not sure it heard this; the lane will not auto-run it. */
     unsure?: boolean
+    /** What was tried just before this, so a second attempt can vary. */
+    recent?: RecentTurn[] | null
   }): Promise<void>
 }
 
@@ -108,6 +111,8 @@ export interface AskLaneLike {
     app: { bundleId: string; name: string } | null
     context?: ScreenContext | null
     routedBy?: string
+    /** What was asked just before this, so a follow-up has its subject. */
+    recent?: RecentTurn[] | null
   }): Promise<void>
 }
 
@@ -157,8 +162,10 @@ export interface DictationDeps {
    * — see `services/turns.ts`.
    */
   turns?: {
-    open(turn: { said: string; route: string; app: string | null }): void
-    close(outcome: string | null): void
+    open(turn: { said: string; route: string; app: string | null; goal?: string | null }): void
+    close(outcome: string | null, extra?: TurnOutcome): void
+    /** Read once per utterance, *before* this one is opened. See `handle`. */
+    recent(): RecentTurn[]
   }
 }
 
@@ -667,10 +674,26 @@ export class DictationPipeline {
      * turn they are following up on. `close` fills in the outcome when it
      * arrives; see `announce` and the applied branch below.
      */
+    /**
+     * The conversation as it stood *before* this sentence joined it.
+     *
+     * Read here rather than inside each lane, and deliberately one line above
+     * `open`: a lane shown the turn it is currently serving would read "said
+     * this → navigate → still going" about itself, which is a fact it already
+     * has and a line it would have to be told to ignore.
+     */
+    const before = this.deps.turns?.recent() ?? null
+
     this.deps.turns?.open({
       said: text,
       route: routed?.route.kind ?? 'dictate',
-      app: this.state.app?.name ?? null
+      app: this.state.app?.name ?? null,
+      // The sentence that was actually acted on, which is rarely the sentence
+      // that was spoken: "and what about Priya" leaves the classifier as "open
+      // the conversation with Priya and find what she said about the terms
+      // doc". The *next* follow-up needs the subject, and this is the only
+      // place it is ever written down.
+      goal: goalOf(routed?.route)
     })
     let hint: string | null = null
 
@@ -705,7 +728,8 @@ export class DictationPipeline {
         // Carried rather than re-derived: the doubt belongs to the recording,
         // and this is the one lane where it changes what happens rather than
         // only what the HUD says. See `LOW_CONFIDENCE`.
-        unsure: meta.confidence !== null && meta.confidence < LOW_CONFIDENCE
+        unsure: meta.confidence !== null && meta.confidence < LOW_CONFIDENCE,
+        recent: before
       })
       return
     }
@@ -726,7 +750,8 @@ export class DictationPipeline {
         transcript: text,
         app: this.state.app ?? routed.snapshot.app,
         context: routed.snapshot.context,
-        routedBy: routed.by
+        routedBy: routed.by,
+        recent: before
       })
       return
     }
@@ -1040,13 +1065,23 @@ export class DictationPipeline {
   announce(
     phase: Extract<HudState['phase'], 'applied' | 'error' | 'blocked'>,
     notice: string,
-    lastAction?: HudState['lastAction']
+    lastAction?: HudState['lastAction'],
+    /**
+     * What the lane did on its way here, for the memory rather than the panel.
+     *
+     * A fourth argument rather than three more fields on `HudLastAction`,
+     * because that shape is the renderer's contract and none of this is drawn:
+     * the route a run took and the goal it was actually given are evidence for
+     * the *next* utterance, and the panel has no business carrying them to a
+     * window that will never show them.
+     */
+    turn?: TurnOutcome
   ): boolean {
     if (this.phase !== 'idle') return false
     // The single funnel every lane's ending passes through, which is what makes
     // it the right place to close the turn: sculpt, ask, navigate and the agent
     // all arrive here, and none of them has to know that a memory exists.
-    this.deps.turns?.close(lastAction?.result ?? notice)
+    this.deps.turns?.close(lastAction?.result ?? notice, turn)
     if (this.lingerTimer) {
       clearTimeout(this.lingerTimer)
       this.lingerTimer = null
@@ -1199,4 +1234,20 @@ function readingChip(snapshot: FocusSnapshot): HudChip | null {
     id: 'reading',
     label: context.image ? 'reading this window + screenshot' : 'reading this window'
   }
+}
+
+/**
+ * The instruction a route carries, whatever that route calls it.
+ *
+ * Four lanes name the same thing four ways — `goal`, `question`, `instruction`
+ * — and the memory wants one field. `dictate` and `send` have none: the words
+ * *are* the message in one case and a key press in the other, so there is
+ * nothing an expansion could add.
+ */
+function goalOf(route: Route | undefined): string | null {
+  if (!route) return null
+  if (route.kind === 'navigate') return route.goal
+  if (route.kind === 'ask') return route.question
+  if (route.kind === 'edit' || route.kind === 'compose') return route.instruction
+  return null
 }

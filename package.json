@@ -19,6 +19,9 @@
     "smoke": "tsx scripts/smoke.ts",
     "bench:engine": "tsx scripts/bench-engine.ts",
     "probe:asr": "tsx scripts/probe-asr.ts",
+    "probe:skills": "tsx scripts/probe-skills.ts",
+    "probe:overlay": "tsx scripts/probe-overlay.ts",
+    "probe:findmiss": "tsx scripts/probe-findmiss.ts",
     "notarize:dryrun": "tsx scripts/notarize-dryrun.ts",
     "pack:local": "npm run build:sidecar && npm run build && tsx scripts/pack-local.ts",
     "test": "vitest run"

@@ -101,6 +101,42 @@ can be measured against each other on the same goals:
   in-process functions, forty turns, a cost ceiling and a wall-clock deadline.
   Off by default (`settings.agentLoop`), subscription lane only.
 
+### What Mull keeps between utterances
+
+Two things, both bounded, both visible, and deliberately not the journal.
+
+**The conversation** (`services/turns.ts`, `store/turns.ts`). The last six
+things you said, what they were routed to, what came back, and — for a run that
+walked somewhere — the expanded goal it was given and the route it took. Shown
+to the classifier (*is this a follow-up?*), and to the agent, navigate and ask
+lanes (*what did the last attempt try, and did it work?*). Persisted, so it
+survives a relaunch; expiring after thirty minutes, because a stale turn makes
+an unrelated sentence look like a follow-up and that failure is worse than
+having no memory at all. The rendered block is capped, and what does not fit is
+folded into one line saying how many turns there were.
+
+**The notebook** (`store/skills.ts`, `settings.skills`, off by default). After
+an agent run finishes, one small model call reads **Mull's own record of what it
+did** — `find “Anil” — ok`, `press “Search” — the window did not change` — and
+writes down at most two clauses about that application. It is never shown the
+window. The note is filed against the app the run *ended* in rather than the one
+you spoke from, and a run that switches apps is handed the destination's notes in
+the `switchApp` tool result — the prompt is built before anyone knows where it is
+going. Later runs in the same app get the best few as hints, scored by whether
+the runs that saw them arrived, capped at a dozen per app, and listed in
+Settings where any of them can be deleted.
+
+Most runs teach nothing, and the notebook is kept small by three things rather
+than by asking the model to be brief: a run that arrived, failed at nothing and
+took few turns is never asked at all; the turn that *is* asked is shown the whole
+notebook for that app, so it can answer "already known"; and a re-worded lesson
+votes for the one already stored instead of joining it.
+
+The notebook is prose the model reads, and it widens nothing: every seam in
+"The safety model" below runs after it. A note reading "press Send" describes
+something `AgentKeySchema` has no word for. `npm run probe:skills` is what
+decides whether the feature ever earns a default of on.
+
 ---
 
 ## Architecture
