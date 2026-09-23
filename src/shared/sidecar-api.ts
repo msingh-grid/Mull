@@ -328,6 +328,36 @@ export const UiTargetsResultSchema = z.object({
    * genuinely holds eighteen buttons. With `nodes: 190, webNodes: 0` beside it,
    * it is not ambiguous at all.
    */
+  /**
+   * A bounded sample of what the walk looked at and declined to offer.
+   *
+   * Diagnostics, exactly like the counts around it, and added for the same
+   * class of failure they were: a scan that reports `complete` with a plausible
+   * number of targets while the thing the user is pointing at is not among
+   * them. Slack's DM autocomplete is the case — nine rows on screen, the target
+   * count moved by one, and nothing said what had been thrown away.
+   *
+   * **Optional, and that is the point.** A sidecar built before this existed
+   * simply omits it, which keeps `SIDECAR_PROTOCOL_VERSION` where it is — the
+   * handshake is strict equality, and a diagnostic is not worth a version
+   * nobody can roll back.
+   *
+   * Nothing acts on it: `press` cannot address these, the model is never shown
+   * them, and `scripts/probe-overlay.ts` is the only reader.
+   */
+  rejected: z
+    .array(
+      z.object({
+        role: z.string(),
+        /** The role of whatever contained it — what `choiceContainers` turns on. */
+        parentRole: z.string(),
+        text: z.string(),
+        /** Does it advertise `AXPress`? One rule away, or a different problem. */
+        press: z.boolean(),
+        inChoices: z.boolean()
+      })
+    )
+    .optional(),
   /** Elements visited, against the scan's `maxNodes`. */
   nodes: z.number().int().nonnegative().optional(),
   /**

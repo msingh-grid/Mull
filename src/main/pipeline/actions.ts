@@ -77,7 +77,16 @@ export interface StepResult {
   /** One clause, for the card and the journal. Always set, including on ok. */
   detail: string
   /** Set when the step was refused here rather than by the sidecar. */
-  refusedBy?: 'destructive' | 'no-such-target' | 'wrong-kind'
+  /**
+   * Which gate said no, when one did.
+   *
+   * `vanished` is the sidecar's rather than this file's: the handle the scan
+   * held came back with no role at all, meaning the element was destroyed
+   * between the look and the press. It is reported separately from the refusals
+   * because it is the only one that is not a decision — nobody declined
+   * anything, the window simply moved. See the retry in `agent-tools.press`.
+   */
+  refusedBy?: 'destructive' | 'no-such-target' | 'wrong-kind' | 'vanished'
   /**
    * What the field held before a `type` wrote over it.
    *
@@ -289,7 +298,18 @@ export class ActionExecutor {
           expectRole: target.role,
           expectTitle: target.title
         })
-        if (!pressed.ok) return { ok: false, detail: describeRefusal(pressed, target) }
+        if (!pressed.ok) {
+          return {
+            ok: false,
+            detail: describeRefusal(pressed, target),
+            // `gone` is the handle coming back empty and `changed` is it coming
+            // back as something else; both mean the list was rebuilt under us,
+            // and both are worth one fresh look before giving up.
+            ...(pressed.reason === 'gone' || pressed.reason === 'changed'
+              ? { refusedBy: 'vanished' as const }
+              : {})
+          }
+        }
         // The press is asynchronous from the app's point of view — it returns
         // the moment the action is accepted, not when the UI has caught up. Let
         // it settle before the loop looks again, or the next scan describes the

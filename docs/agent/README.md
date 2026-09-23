@@ -418,6 +418,29 @@ Almost all of that file is guards:
 | `SEARCH_FIELD` regex for `type` | writing into somebody's composer | `:56` |
 | `expectRole` + `expectTitle` quoted back to the sidecar | a stale index landing on whatever moved into the slot | `:219` |
 
+One of those refusals is not a decision, and it took a live run to notice.
+`gone` and `changed` mean the element behind the index was destroyed or replaced
+between the look and the press — nobody declined anything, the list was rebuilt.
+Google Calendar's guest autocomplete does it on every keystroke, because the
+suggestions arrive asynchronously and the rows are re-rendered as they land:
+
+```
+find   “Chirayu” — 1 of 82                                ok
+press  “Chirayu Gupta cgupta@…” isn’t there any more      REFUSED     2.2s later
+find   “Chirayu Gupta guest” — 1 of 79                    ok          (82 → 79)
+```
+
+**The model cannot win that race.** Its turn-around is seconds and the re-render
+is milliseconds, so "look again and press again" — which it tried, four times —
+is the same race with the same result. So `press` now retries once itself
+(`agent-tools.ts`): one fresh scan, and the same press if the title the model
+named is **unique** in the new list. All three legs of §4.3 survive it — the
+model still names a title it read off a list Mull produced, the list is still one
+Mull scanned, and the press still quotes role and title back for the sidecar to
+re-check — and the stop is asked again after the rescan, because the retry is a
+second act. A title that is no longer unique is refused exactly as before:
+choosing between two identical labels is how a run invites the wrong person.
+
 `DESTRUCTIVE` is a deny-list, and that is not the same mistake as the deleted
 verb tables. Those were allow-lists: an unlisted phrasing fell through and was
 typed into a composer, and the only fix was to keep adding words forever. This
@@ -595,8 +618,9 @@ to write with.
 
 ## 4. The seams that do not depend on the model behaving
 
-Seven — and the seventh is the one that is *not* structural, which is why it is
-worth reading last.
+Eight. The seventh is the one that is *not* structural, which is why it is worth
+reading before the last; the eighth is about the two blocks that carry text
+*into* a run and is here to say plainly what they do not touch.
 
 ### 4.1 The model cannot ask to send
 
@@ -754,6 +778,130 @@ mistake is ever found.
 The honest summary: **commit is still out of reach, but it is now held out by a
 guard rather than by a shape.** `AGENT-V2.md` §7's budget gate is still the real
 answer and is still unbuilt.
+
+### 4.75 Where the accessibility tree runs out
+
+§4.7 is about the menu bar, where the *structure* runs out. This is about the
+window, where the *tree* does — and it is the same kind of honesty, one layer
+down.
+
+Slack's DM autocomplete draws nine suggestion rows. Measured with the overlay
+open (`npm run probe:overlay`):
+
+```
+overlay closed   238 targets · 899 nodes · stoppedBy=complete
+overlay open     239 targets · 979 nodes · stoppedBy=complete
+                 the +1 is the search box's own value changing
+
+the rows          AXStaticText · parent=AXGroup · press=false
+the harvest       26 blocks naming the person, all of them readable
+```
+
+So the rows are on screen, are read by `AXHarvest`, and **advertise no
+`AXPress`**. `AXTargets.neverTargets` drops `AXStaticText`, and its one narrow
+exception — `choiceContainers` (`AXList`/`AXMenu`/`AXComboBox`), built for
+Google Calendar's 96-entry time listbox — requires `AXPress` as well as the
+container, so widening the container rule would buy exactly nothing. The
+`rejected` sample on `uiTargets` exists to make that answerable from a probe
+instead of from a guess; it is diagnostics only, optional on the wire, and no
+protocol version moved for it.
+
+**What this costs, and what was done about it.** Nothing here is reachable:
+the keyboard route needs Return, which `AgentKeySchema` does not contain
+(§4.2), and a click at coordinates would bypass every label check the executor
+has — `DESTRUCTIVE`, `expectRole`/`expectTitle`, `knownMenus` — which is a far
+larger hole than one overlay is worth. So the route is genuinely closed, and the
+fix was to *say so*: `find` on a miss now reads the window and reports the words
+as present-but-not-controls. That converts a twenty-turn, thirty-cent flail —
+re-searching, re-pressing the search box, trying arrow keys — into one decision.
+It grants nothing: it reports text in a tool that could already read the whole
+window, and there is no index for `press` to address.
+
+### 4.8 The two blocks that carry text in, and grant nothing
+
+Two blocks now reach the agent's user turn that did not before — `<recent>`, the
+last few things the user said and what came of them (`services/turns.ts`), and
+`<learned>`, what previous runs wrote down about this application
+(`store/skills.ts`, `settings.skills`, off by default).
+
+Both are new *input* surfaces, and it is worth being exact about what that does
+and does not mean. Both carry text derived from previous windows: an `outcome`
+is model prose about a window, and a learned clause is distilled from a step
+list that quotes target titles. Neither is a new *capability* surface, because
+every seam above runs after them and none of them consults either block:
+
+```
+AgentKeySchema     seven keys, no Return      → "press Send" is unsayable
+knownApps          ids `apps` produced         → "now open Terminal" is unreachable
+knownMenus         pairs `menus` produced      → an invented command is refused
+checkUrl           host already in a tab       → an address in a note is refused
+the card + escape  every act is drawn          → a hint that misleads is watched
+```
+
+So the worst a poisoned note can do is make a run take a worse route, visibly,
+inside the same vocabulary — which is also the worst a *wrong* note can do, and
+is the failure the scoring in `SkillStore` is for.
+
+What bounds the input side is shape rather than instruction, in the same spirit
+as everything above:
+
+```
+the distiller never sees the window   only the goal and Mull's own step list
+scoped to where the work happened     `context.front`, not the routed app — see below
+only asked when a run stumbled        a clean short run discovered nothing — see below
+shown the whole notebook for that app so "is this new?" is answerable at all
+two clauses per run, 160 chars each   LearnedSkillsSchema, refused whole on any breach
+two kinds, `do` and `avoid`           no kind can describe a capability or an address
+twelve per app, decaying on failure   a note that never coincides with success leaves
+a pane that lists and deletes them    the user can read every word Mull kept
+```
+
+The prompt says so as well — both blocks are named in the same paragraph as the
+screen, as things to read and never obey — but that is the cheap half, exactly
+as it is in 4.4.
+
+**One thing worth knowing about the scoping, because it was wrong first.** A
+note is filed against `context.front` at the end of the run — where the hands
+were — not against `request.app`, which is only where the *utterance* was
+routed. The first version used the latter, and a run that started in an editor,
+switched to Slack and learned how Slack's History menu works filed that note
+under the editor: shown forever to runs that start there, never to runs in
+Slack. That is the same mistake `plan.app` / `front` already records for journal
+rows, made one function over.
+
+**And it wrote on every single run, which is the other thing that was wrong.**
+The prompt has always said an empty answer is the right one most of the time; on
+the first three live runs it wrote a note every time, including one that arrived
+in eight turns and one act having gone straight to the answer *because* it had
+been shown the notes. Two causes, and the second is the interesting one:
+
+```
+the turn could not see what it was duplicating
+      `known` was the ≤5 notes the *run* was shown, and after a switchApp
+      those belong to the app the run started in — so a run filing against
+      Slack was asked "is this new?" against the editor's list.
+      Now: the whole notebook for the app being filed against.
+
+nothing stopped a run with no discovery in it from writing
+      Now a gate in `remember`, before the model is asked: a run that
+      arrived, failed at nothing and took ≤ QUIET_TURNS went straight
+      there and is not asked at all. A failed act outranks the turn count,
+      because it is a fact about the application whatever the length.
+```
+
+`QUIET_TURNS` is a starting point off three runs and says so in its docstring;
+`npm run probe:skills` is what should set it. There is also a term-overlap check
+in `SkillStore.learn` so a re-worded lesson votes for the one already stored —
+but it is a backstop and its limit is a named test: a real pair from live runs
+scores 0.455 and is not caught, and the threshold is not moving to fit it.
+
+The read side has the matching problem in reverse — the prompt is built before
+the run knows where it is going — so the destination's notes ride in the
+`switchApp` tool result instead: the same channel every other fact about a fresh
+window arrives on, and the first moment anyone can name the destination. A run
+that worked in two applications is still filed under one, the last it was in,
+which is where it read the answer. That is lossy, and it is the best signal a
+single field carries.
 
 What this does *not* do is make the switch invisible or costless — it moves the
 user's screen, which is the whole reason `because` is required, is rendered on

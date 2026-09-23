@@ -1,7 +1,13 @@
 import { z } from 'zod'
 import { MODEL_IDS } from '@shared/settings'
-import { renderContext, renderTargets } from './prompts'
+import { renderContext, renderRecent, renderTargets } from './prompts'
 import type { ClassifiedIntent, ClassifyRequest } from './types'
+
+// `renderRecent` moved to `prompts.ts`, where every other shared renderer lives
+// — it now has a second reader in the lanes that act. Re-exported here because
+// this is the prompt that assembles it, and its tests are written against this
+// module.
+export { renderRecent }
 
 /**
  * Deciding what the user meant.
@@ -282,28 +288,6 @@ export function classifyPrompt(request: ClassifyRequest): string {
     )
   }
   return parts.join('\n\n')
-}
-
-/**
- * The last few things the user said, one per line.
- *
- * Rendered as sentences rather than JSON for the same reason the screen is: the
- * model reads a conversation better than it reads a serialization of one, and
- * the only thing being asked of this block is whether the current sentence is
- * continuing it.
- *
- * A turn with no outcome yet — the user has spoken again while a run is still
- * going — says so rather than being dropped. "I asked this and it has not come
- * back" is exactly the situation a follow-up arrives in.
- */
-export function renderRecent(turns: ClassifyRequest['recent']): string | null {
-  if (!turns || turns.length === 0) return null
-  const lines = turns.map((turn) => {
-    const where = turn.app ? ` in ${turn.app}` : ''
-    const became = turn.outcome ? ` → answered: “${turn.outcome}”` : ' → still going'
-    return `said “${turn.said}”${where} → ${turn.route}${became}`
-  })
-  return `<recent>\n${lines.join('\n')}\n</recent>`
 }
 
 /**

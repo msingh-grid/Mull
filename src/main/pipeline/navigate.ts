@@ -11,6 +11,7 @@ import { ActionExecutor, type Scan } from './actions'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
 import { Trace } from '../trace'
+import { describeSteps, type RecentTurn, type TurnOutcome } from '../services/turns'
 
 /**
  * Going to look somewhere else, and coming back.
@@ -131,6 +132,8 @@ export interface NavigateRequest {
    * see the same field on `AgentRequest` for why the doubt outranks the switch.
    */
   unsure?: boolean
+  /** What was tried just before this. See the same field on `AgentRequest`. */
+  recent?: RecentTurn[] | null
 }
 
 export interface NavigateDeps {
@@ -159,7 +162,9 @@ export interface NavigateDeps {
     announce?(
       phase: 'applied' | 'error' | 'blocked',
       notice: string,
-      lastAction?: HudLastAction
+      lastAction?: HudLastAction,
+      /** What the plan did, for the memory the next utterance is read against. */
+      turn?: TurnOutcome
     ): void
   }
   /**
@@ -455,7 +460,8 @@ export class NavigateLane {
           stoppedBy: scan.stoppedBy,
           history,
           stepsLeft: this.maxSteps - taken,
-          progress: { taken, moved }
+          progress: { taken, moved },
+          recent: request.recent ?? null
         })
       } catch (err) {
         // A step that did not parse, or an engine that refused. Either way the
@@ -584,6 +590,7 @@ export class NavigateLane {
           {
             goal: request.goal,
             context: found,
+            recent: request.recent ?? null,
             // The same evidence the agent lane passes, for the same reason —
             // see `AnswerRequest.did`.
             did: steps
@@ -682,7 +689,10 @@ export class NavigateLane {
         // back. There is nothing for ⌥Z to take.
         undoable: false,
         result: answer ?? note
-      }
+      },
+      // The same clause the agent lane files, for the same reason: a follow-up
+      // that does not know this plan already walked here will send it again.
+      { goal: request.goal, did: describeSteps(steps), ended: arrived ? 'done' : 'turns' }
     )
   }
 

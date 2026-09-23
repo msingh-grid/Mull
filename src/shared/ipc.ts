@@ -207,6 +207,19 @@ export const IPC = {
   /** main -> journal window: the journal changed; re-read it. */
   journalChanged: 'mull:journal:changed',
 
+  /**
+   * settings -> main: what Mull has learned about driving each application.
+   *
+   * Its own three verbs rather than a field on the settings object, because it
+   * is a list that grows on its own and the pane needs to delete one row of it.
+   * Everything Mull learns has to be readable and deletable by the person whose
+   * applications it learned in — the same promise the journal makes about
+   * actions, made about notes.
+   */
+  skillsList: 'mull:skills:list',
+  skillsForget: 'mull:skills:forget',
+  skillsClear: 'mull:skills:clear',
+
   /** any renderer -> main: bring one of Mull's own windows up. */
   windowOpen: 'mull:window:open',
 

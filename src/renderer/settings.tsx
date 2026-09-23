@@ -4,6 +4,7 @@ import type { AboutInfo } from '@shared/about'
 import { SPEECH_MODELS, type ModelStatus } from '@shared/model'
 import type { PermissionsSnapshot } from '@shared/permissions'
 import type { Settings } from '@shared/settings'
+import type { SkillRecord } from '@shared/skills'
 import { SETUP_TOKEN_COMMAND, type EngineStatus } from '@shared/engine'
 import { PermissionRows } from './components/PermissionRows'
 import { applyTheme } from './theme'
@@ -427,6 +428,113 @@ function EnginePane({
 }
 
 /**
+ * What Mull has learned, and the button that takes it back.
+ *
+ * The pane exists because of a promise the rest of the app already makes: you
+ * can always see what Mull did, and undo it. A notebook that quietly
+ * accumulated notes about the user's own applications — written by a model,
+ * read by a loop that presses things — would be the one piece of state in Mull
+ * nobody could look at. So every note is listed, in the words it is stored in,
+ * with the application it is about and how it has fared, and any of them can be
+ * deleted.
+ *
+ * The counts are shown rather than hidden because they are the honest version
+ * of what a note is worth: `2 ✓ / 1 ✗` means two runs that saw this arrived and
+ * one did not. It is not a claim that the note is true — nothing here knows
+ * that — and printing it is cheaper than implying otherwise.
+ */
+function SkillsPane({
+  settings,
+  update
+}: {
+  settings: Settings
+  update: (patch: Partial<Settings>) => Promise<void>
+}): JSX.Element {
+  const bridge = window.mull
+  const [notes, setNotes] = useState<SkillRecord[] | null>(null)
+
+  const refresh = useCallback(() => {
+    void bridge?.skills.list().then(setNotes)
+  }, [bridge])
+
+  useEffect(refresh, [refresh])
+
+  const forget = async (id: string): Promise<void> => {
+    await bridge?.skills.forget(id)
+    refresh()
+  }
+
+  const forgetAll = async (): Promise<void> => {
+    await bridge?.skills.clear()
+    refresh()
+  }
+
+  /** Grouped by app, in the order the store returned — it sorts by name. */
+  const byApp = new Map<string, SkillRecord[]>()
+  for (const note of notes ?? []) {
+    const key = note.appName ?? note.bundleId
+    byApp.set(key, [...(byApp.get(key) ?? []), note])
+  }
+
+  return (
+    <section className="section">
+      <h2>What Mull has learned</h2>
+
+      <Row label="Keep notes on each app" hint="only while “let the model drive” is on">
+        <select
+          value={settings.skills ? 'on' : 'off'}
+          onChange={(event) => void update({ skills: event.target.value === 'on' })}
+        >
+          <option value="off">Off</option>
+          <option value="on">On</option>
+        </select>
+      </Row>
+      <p>
+        {settings.skills
+          ? 'After a run finishes, Mull asks a small model to read its own list of what it did — “find “Anil” — ok”, “press “Search” — the window did not change” — and write down at most two things about that application. What was on screen is never sent to that call. Later runs in the same app are shown the best few notes as hints; they cannot make Mull press anything it could not press before.'
+          : 'Every run starts from scratch, with no idea what worked in this app last time. Turning this on lets Mull keep a dozen short notes per application, written from its own record of what it did — never from what was on your screen.'}
+      </p>
+
+      {notes === null ? null : notes.length === 0 ? (
+        <p className="set-hint">
+          Nothing learned yet. Notes appear after a run finishes with this switched on.
+        </p>
+      ) : (
+        <>
+          {[...byApp.entries()].map(([app, rows]) => (
+            <div key={app} className="skill-app">
+              <h3 className="skill-app-name">{app}</h3>
+              {rows.map((note) => (
+                <div key={note.id} className="set-row">
+                  <div className="set-label">
+                    <span>
+                      <span className={`skill-kind ${note.kind}`}>{note.kind}</span> {note.text}
+                    </span>
+                    <span className="set-hint">
+                      {note.wins} ✓ · {note.losses} ✗ · shown {note.uses}×
+                    </span>
+                  </div>
+                  <div className="set-control">
+                    <button type="button" className="btn ghost" onClick={() => void forget(note.id)}>
+                      Forget
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
+          <Row label="All of it" hint="cannot be undone">
+            <button type="button" className="btn ghost" onClick={() => void forgetAll()}>
+              Forget everything
+            </button>
+          </Row>
+        </>
+      )}
+    </section>
+  )
+}
+
+/**
  * The speech model pane.
  *
  * Two models, and the choice between them is the ordinary size-for-speed one:
@@ -755,6 +863,8 @@ function SettingsWindow(): JSX.Element {
         <SpeechModelPane settings={settings} update={update} />
 
         <EnginePane settings={settings} update={update} />
+
+        <SkillsPane settings={settings} update={update} />
 
         <section className="section">
           <h2>About</h2>

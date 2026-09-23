@@ -39,7 +39,8 @@ Three processes, and the split is about **capability**, not tidiness.
 │               agent — and the executor that performs steps  │
 │   engine/     which model serves a turn, and the prompts    │
 │   services/   hotkeys, HUD, insertion, undo, AppleScript    │
-│   store/      SQLite journal, captures, settings            │
+│   store/      SQLite journal, turns, skills, captures,      │
+│               settings                                      │
 └───────────┬──────────────────────────────┬──────────────────┘
             │ ndjson JSON-RPC over stdio   │ IPC
             ▼                              ▼
@@ -172,6 +173,7 @@ Two definitions would mean a thing was true in one file and a hope in the other.
 | `agent-loop.ts` | The **one real tool loop** |
 | `prompts.ts` | Every system prompt, exported once so both engines send identical bytes |
 | `classify.ts` · `health.ts` · `fake.ts` | Routing, remembered engine health, and a deterministic stand-in |
+| `skills.ts` | The distillation turn: `SKILL_MODEL` (the smallest one), the prompt, and a parser where **every failure learns nothing**. Shown the goal and Mull's own step list; **never the window** |
 
 #### `src/main/services/`
 
@@ -185,8 +187,10 @@ Two definitions would mean a thing was true in one file and a hope in the other.
 | `sender.ts` · `send-table.ts` | Pressing send, and the per-app chord. **An unknown app has no chord and Mull offers no send** |
 | `osascript.ts` | The AppleScript runner. One rule: **outside input travels in `argv`, never spliced into script text** |
 | `apps.ts` · `browser.ts` · `menus.ts` | System Events, browser tabs, and the menu bar (safety seam #7, the weakest) |
+| — | **When a list is rebuilt under you:** async suggestion lists (Google Calendar guests) destroy and remake their rows between a `find` and a `press`. `press` retries once against a fresh scan when the named title is unique — see `pressAgain` in `agent-tools.ts` |
+| — | **When a control is not a control:** some apps draw lists as `AXStaticText` with no `AXPress` (Slack's DM autocomplete). `find` reports those as on-screen-but-unreachable rather than as "nothing matches" — `npm run probe:overlay` measures it, `rejected` on `uiTargets` says why a node was dropped |
 | `permissions.ts` | What macOS *actually* granted. **A ✓ never comes from the click** |
-| `turns.ts` | Short-term memory so "and what about Priya" is not classified alone |
+| `turns.ts` | Short-term memory so "and what about Priya" is not classified alone. Six turns, thirty minutes, persisted through `store/turns.ts`, compacted to a char budget before it reaches a prompt. Read by classify, agent, navigate and ask — never edit or compose |
 | `model.ts` · `tray.ts` · `tray-icon.ts` | Speech-model download; menu bar; the generated icon module — **do not hand-edit** |
 
 #### `src/main/store/`, `asr/`, `audio/`
@@ -195,6 +199,8 @@ Two definitions would mean a thing was true in one file and a hope in the other.
 |---|---|
 | `store/sqlite.ts` | The narrow `SqlDatabase` interface — `better-sqlite3` in the app, `node:sqlite` in tests |
 | `store/journal.ts` | Every action, **including failures**. `undoable` is earned, never assumed |
+| `store/turns.ts` | The disk under `services/turns.ts` — the last few things you said, so a follow-up survives a relaunch. Expired rows are dropped on read, never returned |
+| `store/skills.ts` | What previous agent runs learned about each application: one clause per row, deduped by a normalised key, scored by how the runs that saw them ended, capped per app. Written only when `settings.skills` is on |
 | `store/captures.ts` | The window transcript and screenshot **as rendered into the prompt**, as a receipt |
 | `store/settings.ts` · `store/credentials.ts` | Atomic JSON settings; `safeStorage`-encrypted secrets that **throw rather than fall back to plaintext** |
 | `asr/` | The `AsrProvider` seam, whisper-cli subprocess, and a fake that never pretends to have heard you |

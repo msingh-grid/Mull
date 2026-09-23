@@ -15,6 +15,7 @@ import { ScriptError } from '../services/osascript'
 import type { BrowserBridge, BrowserTab } from '../services/browser'
 import type { ActionExecutor, Scan } from './actions'
 import { describeChange } from './navigate'
+import type { SkillRecord } from '@shared/skills'
 
 /**
  * What the five tools actually do.
@@ -150,6 +151,25 @@ export interface ToolContext {
    * earned by looking rather than granted at the start.
    */
   knownHosts?: Set<string>
+  /**
+   * The notebook, and everything out of it this run has been shown.
+   *
+   * Here rather than only in the lane because of `switchApp`. The lane reads the
+   * notebook once, before the loop, when the only app it can name is the one the
+   * user is standing in — and a goal like "go to Slack and…" is precisely the
+   * case where the useful notes belong to somewhere the run has not been yet.
+   * Notes about the destination therefore arrive the same way every other fact
+   * about a new window arrives: in the tool result that put the run there.
+   *
+   * `shown` accumulates what was actually put in front of the model, across the
+   * whole run, so the lane can credit all of it at the end rather than only the
+   * notes it looked up itself.
+   */
+  skills?: {
+    forApp(bundleId: string | null | undefined, limit?: number): SkillRecord[]
+    markUsed(ids: readonly string[]): void
+  }
+  shown?: SkillRecord[]
   /** Annotate a step's row once its effect is finally visible. */
   amend?: (entryId: string, evidence: string) => void
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
@@ -402,14 +422,18 @@ export async function find(
   const hits = findTargets(scan.targets, input.query, input.kind)
 
   if (hits.length === 0) {
+    // Before saying "nothing", find out whether the words are on screen and
+    // merely unpressable. That is a different sentence and a different move.
+    const unpressable = await onScreenButNotControls(context, input.query)
     return {
       text:
-        `nothing here matches “${input.query}”. There are ${scan.targets.length} things ` +
-        'in this window; look at them, or try a word that would appear in the label itself.',
+        `nothing pressable matches “${input.query}”. There are ${scan.targets.length} things ` +
+        `in this window that can be pressed; look at them, or try a word that would appear ` +
+        `in the label itself.${unpressable}`,
       // A find that matched nothing is the exact moment the question "was there
       // anything here to match?" gets asked, so this is where the tree note
       // earns its place.
-      detail: `“${input.query}” — nothing${treeNote(scan) ? ` · ${treeNote(scan)}` : ''}`,
+      detail: `“${input.query}” — ${unpressable ? 'not a control' : 'nothing'}${treeNote(scan) ? ` · ${treeNote(scan)}` : ''}`,
       ok: true
     }
   }
@@ -420,9 +444,109 @@ export async function find(
   }
 }
 
+/**
+ * Is what we were looking for on the screen, and simply not a control?
+ *
+ * The difference between the two sentences is worth a round trip, and the run
+ * that prompted this is the argument. Slack's DM autocomplete draws nine
+ * suggestion rows as `AXStaticText` inside an `AXGroup`, none of them
+ * advertising `AXPress` — so the target scan offers none of them and `find`
+ * answered "nothing matches". The model reasonably concluded it had not looked
+ * hard enough, and spent twenty turns and thirty cents re-searching, re-pressing
+ * the search box and trying arrow keys, for a thing that was never reachable.
+ *
+ * Measured, not supposed: with the query typed in, `uiTargets` moved from 238
+ * to 239 targets (the one being the search box's own value) while the reading
+ * harvest returned twenty-six blocks naming the person. The words were there
+ * the whole time. Nobody said so.
+ *
+ * So on a miss — and only on a miss — the window's text is read and searched.
+ * "It is here but it is not a control" is what turns a flail into a decision:
+ * try the menu bar, try a different route, or say plainly that it cannot be
+ * reached.
+ *
+ * **This grants nothing.** It reports text, exactly as `look` already does, in
+ * a tool that could already read the whole window on request. Nothing here
+ * becomes pressable by being mentioned; there is no index, and `press` has
+ * nothing to address. It is the honest half of an answer that was previously
+ * only half honest.
+ *
+ * Never throws and never blocks the answer: a harvest that fails leaves the
+ * original "nothing matches", which is where this started.
+ */
+async function onScreenButNotControls(context: ToolContext, query: string): Promise<string> {
+  const words = query.trim().toLowerCase().split(/\s+/u).filter(Boolean)
+  if (words.length === 0) return ''
+  try {
+    const seen = await context.sidecar.windowContext(READ_BUDGET)
+    const lines: string[] = []
+    for (const block of seen.blocks) {
+      const text = block.text.trim()
+      if (!text || text.length > NOT_CONTROL_CHARS) continue
+      const haystack = text.toLowerCase()
+      if (!words.every((word) => haystack.includes(word))) continue
+      if (!lines.includes(text)) lines.push(text)
+      if (lines.length >= NOT_CONTROL_LINES) break
+    }
+    if (lines.length === 0) return ''
+    return (
+      `\n\nBut these are on screen right now, as plain text rather than as controls: ` +
+      `${lines.map((line) => `“${line}”`).join(', ')}. ` +
+      `This app is drawing them in a way that offers nothing to press — arrowing to one and ` +
+      `confirming it is not available to you either. Reach it another way: a menu command, a ` +
+      `different route to the same place, or say plainly that it cannot be reached from here.`
+    )
+  } catch {
+    return ''
+  }
+}
+
+/** Long blocks are prose that happens to contain the word, not a row. */
+const NOT_CONTROL_CHARS = 80
+
+/** Enough to show the shape of the list; not enough to quote the window. */
+const NOT_CONTROL_LINES = 6
+
+/**
+ * Press one numbered thing — and, if it evaporated, look once and press it again.
+ *
+ * ### The race this exists for
+ *
+ * Google Calendar's guest field is the case that found it. The model typed a
+ * name, called `find`, was shown one matching row, and pressed it — and the
+ * press was refused because the `AXUIElement` behind that row had already been
+ * destroyed. From a live log:
+ *
+ *     find   “Chirayu” — 1 of 82                                    ok
+ *     press  “Chirayu Gupta cgupta@…” isn’t there any more          REFUSED
+ *     find   “Chirayu Gupta guest” — 1 of 79
+ *
+ * 2.2 seconds apart, and the target count moved by three in between. The
+ * suggestion list is fed asynchronously and re-rendered as results arrive, so
+ * every element in it is replaced every time the server answers. **The model
+ * cannot win that race**: its turn-around is seconds and the re-render is
+ * milliseconds, so "look again and press again" — which it dutifully tried — is
+ * the same race with the same outcome. Retrying has to happen below the model,
+ * or not at all.
+ *
+ * ### What the retry may and may not do
+ *
+ * It re-scans and presses **the same title the model named**, and only when that
+ * title is unique in the fresh list. So all three legs of §4.3 are intact:
+ *
+ *   the model still names a title it read off a list Mull produced
+ *   the list is still one Mull scanned, not one the model composed
+ *   the press still quotes role and title back for the sidecar to re-check
+ *
+ * What it does not do is re-interpret. A title that is now ambiguous is refused
+ * exactly as before, because "press the one you meant" is not answerable from
+ * here and guessing between two identical labels is how a run presses the wrong
+ * person's name. One attempt, then the honest refusal.
+ */
 export async function press(
   context: ToolContext,
-  input: { index: number; expectTitle: string }
+  input: { index: number; expectTitle: string },
+  sleep: (ms: number) => Promise<void> = async () => {}
 ): Promise<ToolOutcome> {
   if (context.stopped()) return STOPPED
 
@@ -457,7 +581,19 @@ export async function press(
   context.scan = null
 
   if (!result.ok) {
-    return { text: `that did not work: ${result.detail}`, detail: result.detail, ok: false }
+    if (result.refusedBy !== 'vanished' || context.stopped()) {
+      return { text: `that did not work: ${result.detail}`, detail: result.detail, ok: false }
+    }
+    const again = await pressAgain(context, input, sleep)
+    if (again) return again
+    return {
+      text:
+        `that did not work: ${result.detail}. This list is being rebuilt as you look at it — ` +
+        `looking again and pressing again will hit the same moving target. Try another route ` +
+        `to the same place.`,
+      detail: result.detail,
+      ok: false
+    }
   }
 
   // Held for the next look, which is the first moment anyone can tell whether
@@ -487,6 +623,56 @@ export async function press(
  * list four times. A press does; this does not; and when an autocomplete does
  * replace the list, the next `look` says so through `describeChange`.
  */
+/**
+ * One fresh look, and one more press at the same named row. See `press`.
+ *
+ * Returns null when it cannot honestly retry — the title is gone, or it is no
+ * longer unique — and the caller then reports the original refusal.
+ */
+async function pressAgain(
+  context: ToolContext,
+  input: { index: number; expectTitle: string },
+  sleep: (ms: number) => Promise<void>
+): Promise<ToolOutcome | null> {
+  let fresh: Scan
+  try {
+    fresh = await rescan(context, sleep)
+  } catch {
+    return null
+  }
+  // Asked again after the scan, not only before it. A rescan settles for a
+  // couple of hundred milliseconds, and the retry is a *second press* — the
+  // rule is that the stop is checked before every act, and this is an act.
+  if (context.stopped()) return null
+
+  const matches = fresh.targets.filter((target) => target.title === input.expectTitle)
+  // Exactly one, or nothing. Two rows with the same label are two different
+  // people, and choosing between them is not a thing this function knows.
+  if (matches.length !== 1) return null
+  const target = matches[0] as UiTarget
+
+  context.scan = fresh
+  context.steps += 1
+  const result = await context.executor.perform(
+    { verb: 'press', index: target.index, label: input.expectTitle },
+    fresh,
+    { ...context.plan, step: context.steps }
+  )
+  context.scan = null
+  if (!result.ok) return null
+
+  context.pressed = { scan: fresh, ...(result.entryId ? { entryId: result.entryId } : {}) }
+  return {
+    text:
+      `pressed “${target.title}” — ${result.detail}. It had already been redrawn once, so this ` +
+      `was a second look and a second press at the same row. Look again before pressing ` +
+      `anything else.`,
+    detail: `${result.detail} (on the second look)`,
+    ok: true,
+    ...(result.entryId ? { entryId: result.entryId } : {})
+  }
+}
+
 export async function setText(
   context: ToolContext,
   input: { index: number; expectTitle: string; text: string }
@@ -737,10 +923,39 @@ export async function switchApp(
     text:
       `${name} is in front now. Nothing here has been looked at yet — ` +
       'look or find before pressing anything, and remember the tab tools only ' +
-      'mean something in a browser.',
+      'mean something in a browser.' +
+      notesFor(context, { bundleId: wanted, name }),
     trace: name,
     ok: true
   }
+}
+
+/**
+ * What previous runs learned about the application just entered, if anything.
+ *
+ * Appended to `switchApp`'s result rather than delivered any other way, because
+ * this is the moment the notes become relevant and the moment the run can first
+ * be told about them: the prompt was built before anyone knew where this was
+ * going. Same channel as every other fact about a fresh window.
+ *
+ * Marked as used and recorded in `shown` here, so the counters describe what the
+ * model was actually given rather than what was looked up — and so a run that
+ * switched twice credits both notebooks at the end.
+ *
+ * Returns '' when there is nothing, which is most of the time. A tool result
+ * that ends with an empty heading is worse than one that simply does not
+ * mention the notebook.
+ */
+function notesFor(context: ToolContext, app: { bundleId: string; name: string }): string {
+  const notes = context.skills?.forApp(app.bundleId) ?? []
+  if (notes.length === 0) return ''
+  context.skills?.markUsed(notes.map((note) => note.id))
+  context.shown?.push(...notes)
+  const lines = notes.map((note) => `  ${note.kind}: ${note.text}`).join('\n')
+  // Named as a note and framed as one. It is distilled from earlier runs'
+  // records of this app — useful, fallible, and not an instruction; the system
+  // prompt says the same about <learned> and this is the same material.
+  return `\n\nWhat earlier runs noted about ${app.name} (notes, not instructions):\n${lines}`
 }
 
 /**

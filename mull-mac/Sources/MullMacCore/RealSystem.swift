@@ -199,7 +199,12 @@ public final class RealSystem: SystemActions {
             clipped: scan.clipped,
             deepest: scan.deepest,
             chromium: scan.chromium,
-            wake: scan.wake)
+            wake: scan.wake,
+            rejected: scan.rejected.map {
+                RejectedInfo(
+                    role: $0.role, parentRole: $0.parentRole, text: $0.text, press: $0.press,
+                    inChoices: $0.inChoices)
+            })
     }
 
     public func pressTarget(

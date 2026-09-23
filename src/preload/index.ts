@@ -13,6 +13,7 @@ import type { PermissionKey, PermissionsSnapshot } from '@shared/permissions'
 import type { DownloadProgress, ModelStatus } from '@shared/model'
 import type { EngineStatus, EngineTestResult } from '@shared/engine'
 import type { JournalEntryView } from '@shared/types'
+import type { SkillRecord } from '@shared/skills'
 
 /**
  * The bridge. Renderers get exactly these functions and nothing else — no
@@ -71,6 +72,15 @@ export interface MullApi {
     undoEntry: (id: string) => Promise<{ ok: boolean; message: string }>
     /** Main pushes this whenever an entry is written or undone. */
     onChanged: (handler: () => void) => () => void
+  }
+  /** What Mull has learned about driving each application (`settings.skills`). */
+  skills: {
+    /** Everything, grouped by application. Empty when the feature is off. */
+    list: () => Promise<SkillRecord[]>
+    /** Forget one note. */
+    forget: (id: string) => Promise<void>
+    /** Forget all of them. */
+    clear: () => Promise<void>
   }
   settings: {
     get: () => Promise<Settings>
@@ -179,6 +189,12 @@ const api: MullApi = {
       ipcRenderer.on(IPC.journalChanged, listener)
       return () => ipcRenderer.removeListener(IPC.journalChanged, listener)
     }
+  },
+
+  skills: {
+    list: () => ipcRenderer.invoke(IPC.skillsList) as Promise<SkillRecord[]>,
+    forget: (id) => ipcRenderer.invoke(IPC.skillsForget, id) as Promise<void>,
+    clear: () => ipcRenderer.invoke(IPC.skillsClear) as Promise<void>
   },
 
   settings: {

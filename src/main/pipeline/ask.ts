@@ -7,6 +7,7 @@ import type { Engine } from '../engine/types'
 import type { JournalStore } from '../store/journal'
 import type { CaptureStore } from '../store/captures'
 import { Trace } from '../trace'
+import type { RecentTurn } from '../services/turns'
 
 /**
  * Answering a question about the window in front of you.
@@ -46,6 +47,15 @@ export interface AskRequest {
   /** The window read at key-down — the whole material for the answer. */
   context?: ScreenContext | null
   routedBy?: string
+  /**
+   * What was asked just before this, so a follow-up has a subject.
+   *
+   * "And what about Priya" reaches this lane already expanded by the
+   * classifier, but the *answer* to the previous question is not in the
+   * expansion — and "is that before or after the deadline she gave?" is only
+   * answerable against it.
+   */
+  recent?: RecentTurn[] | null
 }
 
 export interface AskDeps {
@@ -115,7 +125,7 @@ export class AskLane {
 
     try {
       const { text } = await this.deps.engine.answer(
-        { goal: request.question, context: request.context },
+        { goal: request.question, context: request.context, recent: request.recent ?? null },
         (partial) => {
           if (partial.trim()) show(partial)
         }

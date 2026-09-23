@@ -54,13 +54,16 @@ import { DEFAULT_SPEECH_MODEL, SPEECH_MODELS } from '@shared/model'
 import { SettingsStore } from './store/settings'
 import { JournalStore } from './store/journal'
 import { CaptureStore } from './store/captures'
+import { SkillStore } from './store/skills'
+import type { SkillRecord } from '@shared/skills'
 import { openSqlite } from './store/sqlite'
 import { DictationPipeline } from './pipeline/dictation'
 import { SculptLane } from './pipeline/sculpt'
 import { NavigateLane } from './pipeline/navigate'
 import { AgentLane, type AgentRequest } from './pipeline/agent'
 import type { NavigateLaneLike } from './pipeline/dictation'
-import { TurnMemory } from './services/turns'
+import { TurnMemory, TTL_MS } from './services/turns'
+import { TurnStore } from './store/turns'
 import { AppleScriptApps } from './services/apps'
 import { AppleScriptMenus } from './services/menus'
 import { AppleScriptBrowser } from './services/browser'
@@ -112,16 +115,27 @@ let demoEngine: Engine | null = null
 let credentials: CredentialsStore | null = null
 let detectedLogin = false
 let captures: CaptureStore | null = null
+/**
+ * What Mull has learned about driving each application.
+ *
+ * Opened with the journal and null if that failed — a Mull that cannot write to
+ * its database still dictates, edits and navigates; it simply stops learning.
+ */
+let skills: SkillStore | null = null
 let sculpt: SculptLane | null = null
 let navigate: NavigateLane | null = null
 let agent: AgentLane | null = null
 /**
  * The last few things the user said, for reading follow-ups against.
  *
- * In memory and bounded, unlike the journal — this is the conversation Mull is
+ * Bounded and expiring, unlike the journal — this is the conversation Mull is
  * in, not the record of what it did. See `services/turns.ts`.
+ *
+ * Built empty here and rebuilt in `bootstrap` once the database is open, so a
+ * follow-up survives a relaunch. `let` rather than `const` for that reason, and
+ * the rebuild happens before anything is handed a reference to it.
  */
-const turns = new TurnMemory()
+let turns = new TurnMemory()
 /** Whichever of the two lanes this utterance belongs to. See `bootstrap`. */
 let navigateRouter: NavigateLaneLike | null = null
 let ask: AskLane | null = null
@@ -488,9 +502,16 @@ async function bootstrap(): Promise<void> {
   // still works, it just stops remembering. Undo is disabled in that state
   // rather than guessing.
   try {
-    journal = new JournalStore(openSqlite(journalPath()))
+    const db = openSqlite(journalPath())
+    journal = new JournalStore(db)
     const pruned = journal.prune()
     if (pruned > 0) log.info(`journal pruned ${pruned} old entries`)
+    // Two more tables in the same file, and both of them optional in exactly the
+    // way the journal is: a Mull that cannot open its database still dictates,
+    // still edits and still navigates — it simply stops remembering between
+    // launches, which is where it was before any of this existed.
+    turns = new TurnMemory({ persistence: new TurnStore(db, { ttlMs: TTL_MS, log: logFn }) })
+    skills = new SkillStore(db, { log: logFn })
   } catch (err) {
     log.error('journal unavailable — actions will not be recorded or undoable', err)
     journal = null
@@ -609,8 +630,8 @@ async function bootstrap(): Promise<void> {
       // the row underneath answered with something they said minutes ago. The
       // lane builds a full `HudLastAction` for exactly this (`navigate.ts`), and
       // the sculpt adapter above has always forwarded it.
-      announce: (phase, notice, lastAction) =>
-        void pipeline?.announce(phase, notice, lastAction)
+      announce: (phase, notice, lastAction, turn) =>
+        void pipeline?.announce(phase, notice, lastAction, turn)
     },
     trace: () => pipeline?.currentTrace() ?? new Trace(),
     log: logFn
@@ -645,13 +666,18 @@ async function bootstrap(): Promise<void> {
     // Read per proposal, like `agentLoop` at the dispatch below: the user can
     // flip it in the settings pane between one utterance and the next.
     autoRun: () => settings?.get().autoRun === true,
+    // The notebook, and the switch that arms it — both read per run, so a
+    // change in Settings takes effect on the next thing you say. Absent when
+    // the database would not open, which is the same degrade the journal makes.
+    ...(skills ? { skills } : {}),
+    useSkills: () => settings?.get().skills === true,
     hud: {
       openCard: (card, onAction) => hud?.openCard(card, onAction),
       updateCard: (card) => hud?.updateCard(card),
       closeCard: () => hud?.closeCard(),
       update: (patch) => void pipeline?.patchState(patch),
-      announce: (phase, notice, lastAction) =>
-        void pipeline?.announce(phase, notice, lastAction)
+      announce: (phase, notice, lastAction, turn) =>
+        void pipeline?.announce(phase, notice, lastAction, turn)
     },
     trace: () => pipeline?.currentTrace() ?? new Trace(),
     log: logFn
@@ -868,6 +894,26 @@ ipcMain.handle(IPC.ping, () => 'pong')
  * diff implementation: the number on a row and the marks inside it come from
  * the same call, and cannot describe different edits.
  */
+/**
+ * What Mull has learned, and the two ways to take it back.
+ *
+ * Beside the journal handlers because they answer the same promise: anything
+ * Mull keeps about the user's applications is readable and deletable by the
+ * user. A note that could not be deleted would be the one piece of state in the
+ * app that the person it is about has no say over.
+ */
+ipcMain.handle(IPC.skillsList, (): SkillRecord[] => skills?.all() ?? [])
+
+ipcMain.handle(IPC.skillsForget, (_event, id: string): void => {
+  skills?.forget(id)
+  log.info('skills: forgot one note')
+})
+
+ipcMain.handle(IPC.skillsClear, (): void => {
+  skills?.clear()
+  log.info('skills: forgot everything')
+})
+
 ipcMain.handle(IPC.journalRecent, (_event, limit?: number): JournalEntryView[] => {
   const entries = journal?.recent(limit ?? 50) ?? []
   return entries.map((entry) => ({

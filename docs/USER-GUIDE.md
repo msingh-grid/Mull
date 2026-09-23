@@ -504,10 +504,47 @@ relaunch. Everything else takes effect on the next thing you say.
 | **Which model decides** | Careful — Sonnet 5 | The routing model. Greyed out when routing is rules-only | Engine |
 | **Going and looking** | One step at a time | `Let the model drive` is the experimental agent loop — **subscription lane only** | Engine |
 | **Which model drives** | **Most careful — Opus 5** | The agent-loop model. Greyed out while the agent loop is off | Engine |
+| **Keep notes on each app** | Off | Lets Mull write down what it learned about driving an application, and show those notes to later runs there. Only does anything while `Let the model drive` is on | What Mull has learned |
 | **Thinking** | Off | Extended reasoning for writing lanes only | The HUD pill, not Settings |
 
 `Which model drives` defaults higher than everything else on purpose: a rewrite
 lands in a diff card and gets read by a human; a press just happens.
+
+### What Mull has learned
+
+With **Keep notes on each app** on, a finished "go and look" run is followed by
+one small model call. It is shown Mull's own list of what it just did — *find
+“Anil” — ok*, *press “Search” — the window did not change* — and writes down at
+most two short notes about that application. **What was on your screen is never
+sent to that call.** Later runs in the same app are shown the best few notes.
+
+The pane lists every note in the words it is stored in, with the app it is about
+and how it has fared (`2 ✓ · 1 ✗` means two runs that saw it got where they were
+going and one did not). Any note can be deleted, and there is a button that
+forgets all of them. Mull keeps at most a dozen per application, and drops one
+that has been present for three failed runs and no successful ones.
+
+**Most runs add nothing, by design.** A run that went straight to what it wanted
+without a wrong turn is not asked what it learned — there was nothing to
+discover. The notes come from the runs that took a detour, hit something that
+did not work, or gave up.
+
+A note is a hint, not a permission. It cannot make Mull press anything it could
+not press before — nothing Mull can do changes because of what it has learned,
+only which of those things it tries first.
+
+### Following on from what you just said
+
+Mull remembers the last few things you said for half an hour, so *"and what
+about Priya"* means something. What it keeps is short: your sentence, where it
+went, what came back, and — for a run that went looking — where it went and
+whether it worked. That is what makes the second question in a row answerable,
+and it is why a question asked half an hour after the first one is not treated
+as a follow-up: an old sentence read as a follow-up sends a plain message off on
+an expedition instead of typing it.
+
+It survives quitting Mull. To clear it, quit and delete `journal.db` — the same
+file the journal lives in.
 
 ### Settings with no control
 
@@ -655,7 +692,7 @@ All under `~/Library/Application Support/mull/`:
 
 | | |
 |---|---|
-| `journal.db` | Everything Mull did |
+| `journal.db` | Everything Mull did, the last few things you said, and what it has learned about each app |
 | `settings.json` | Your settings |
 | `credentials.json` | Your token or API key, encrypted |
 | `captures/` | The 25 most recent screenshots |

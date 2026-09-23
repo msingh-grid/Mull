@@ -219,6 +219,32 @@ export const SettingsSchema = z.object({
    */
   agentModel: ModelChoiceSchema.default('opus'),
   /**
+   * May Mull keep notes on how to drive each application?
+   *
+   * With this on, a finished agent run is followed by one small model call that
+   * reads **Mull's own record of what it did** — `find “Anil” — ok`, `press
+   * “Search” — the window did not change` — and writes down at most two clauses
+   * about that application. Later runs in the same app are shown the best few.
+   * The window transcript is never sent to that call, and the clauses are kept
+   * per bundle id, scored by whether the runs that saw them arrived, capped at
+   * a dozen per app, and listed in Settings where any of them can be deleted.
+   *
+   * **What it cannot do is widen anything.** The notes are hints in the user
+   * turn, read after every seam that bounds the loop: `AgentKeySchema` still has
+   * no Return, `knownApps` and `knownMenus` still hold only what Mull read off
+   * the machine during the run, `checkUrl` still refuses a host that is not
+   * already open, every act is still a row on a card, and escape still stops it.
+   * A note saying "press Send" describes something the model cannot say.
+   *
+   * **Off by default, exactly as `agentLoop` is, and for the same reason.**
+   * This is the switch a measurement is taken across — `npm run probe:skills`
+   * runs the same goals both ways and prints steps-to-done — and a feature that
+   * changes what goes into the prompt of a loop that presses things has to earn
+   * its default rather than be given it. Does nothing while `agentLoop` is off,
+   * and nothing on the API-key lane, which has no loop to learn from.
+   */
+  skills: z.boolean().default(false),
+  /**
    * Which local speech model transcribes you.
    *
    * `small.en` is the default and the one onboarding fetches: 488 MB, and it
