@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { ClassifiedIntent, ClassifyRequest, Engine, EngineState } from '../engine/types'
+import { EngineHolder } from '../engine/select'
 import { IntentRouter, usableGoal } from './intent'
 
 const SAID = 'Can you make my last message less apologetic?'
@@ -84,6 +85,77 @@ describe('IntentRouter — it asks, because the key already decided', () => {
   })
 })
 
+describe('IntentRouter — obvious screen questions', () => {
+  const SCREEN = {
+    app: INPUT.app,
+    windowTitle: 'Project',
+    blocks: [
+      {
+        role: 'AXStaticText',
+        text: 'Visible text',
+        label: null,
+        focused: false,
+        selected: false
+      }
+    ],
+    truncated: false,
+    image: null,
+    imageReason: 'not-requested',
+    chars: 12,
+    harvestMs: 1
+  }
+
+  it('routes the narrow accepted vocabulary directly to the answer lane', async () => {
+    for (const transcript of [
+      "What's on my screen?",
+      'What is on the screen',
+      'What am I looking at?',
+      "Please, what's on my screen?",
+      'Can you tell me what is on the screen?',
+      "Can you please tell me what's on my screen?"
+    ]) {
+      const engine = engineThat()
+      const decision = await new IntentRouter({ engine }).decide({
+        ...INPUT,
+        transcript,
+        context: SCREEN
+      })
+
+      expect(decision).toEqual({
+        route: { kind: 'ask', question: transcript },
+        by: 'fast-path',
+        classifyMs: null,
+        fallbackReason: null
+      })
+      expect(engine.asked).toEqual([])
+    }
+  })
+
+  it('does not reinterpret declarative speech or general questions', async () => {
+    for (const transcript of ['It is on my screen.', 'Is it on my screen?', 'What is this?']) {
+      const engine = engineThat()
+      const decision = await new IntentRouter({ engine }).decide({
+        ...INPUT,
+        transcript,
+        context: SCREEN
+      })
+      expect(decision.by).toBe('model')
+      expect(engine.asked).toHaveLength(1)
+    }
+  })
+
+  it('requires readable screen context', async () => {
+    const engine = engineThat()
+    const decision = await new IntentRouter({ engine }).decide({
+      ...INPUT,
+      transcript: "What's on my screen?",
+      context: null
+    })
+    expect(decision.by).toBe('model')
+    expect(engine.asked).toHaveLength(1)
+  })
+})
+
 describe('IntentRouter — the model', () => {
   it('routes the sentence that started all this', async () => {
     const engine = engineThat({
@@ -131,6 +203,28 @@ describe('IntentRouter — the model', () => {
     })
     const decision = await new IntentRouter({ engine }).decide(INPUT)
     expect(decision.route).toMatchObject({ instruction: SAID })
+  })
+
+  it('traces the actual engine and classifier model', async () => {
+    const inner = Object.assign(engineThat(), {
+      name: 'codex',
+      model: 'gpt-5.6-sol',
+      classifierModel: 'gpt-5.6-terra'
+    })
+    const engine = new EngineHolder(inner)
+    const steps: Array<{ name: string; fields?: Record<string, unknown> }> = []
+
+    await new IntentRouter({
+      engine,
+      trace: () => ({
+        step: (name, fields) => steps.push({ name, fields })
+      })
+    }).decide(INPUT)
+
+    expect(steps.find((step) => step.name === 'classify.ask')?.fields).toMatchObject({
+      engine: 'codex',
+      model: 'gpt-5.6-terra'
+    })
   })
 })
 

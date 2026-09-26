@@ -170,8 +170,9 @@ Two definitions would mean a thing was true in one file and a hope in the other.
 | `select.ts` | `resolveEngine()`, `SignedOutEngine`, `EngineHolder`, `detectClaudeCodeLogin()` |
 | `agent.ts` | `AgentEngine` — the Claude subscription via the Agent SDK. **No test file** |
 | `api-key.ts` | `ApiKeyEngine` — the Messages API directly. **No test file** |
+| `codex.ts` | `CodexCliEngine` — an explicit, constrained `codex exec` transport using the CLI's cached ChatGPT login |
 | `agent-loop.ts` | The **one real tool loop** |
-| `prompts.ts` | Every system prompt, exported once so both engines send identical bytes |
+| `prompts.ts` | Every system prompt, exported once so all engines share the same instructions |
 | `classify.ts` · `health.ts` · `fake.ts` | Routing, remembered engine health, and a deterministic stand-in |
 | `skills.ts` | The distillation turn: `SKILL_MODEL` (the smallest one), the prompt, and a parser where **every failure learns nothing**. Shown the goal and Mull's own step list; **never the window** |
 
@@ -358,6 +359,8 @@ notifications are **logged loudly, never silently dropped**.
 | `subscription` | neither | `SignedOutEngine` — **never falls back to a saved API key** |
 | `api-key` | key present | `ApiKeyEngine` |
 | `api-key` | absent | `SignedOutEngine` — **never falls back to the subscription** |
+| `codex-subscription` | compatible CLI + ChatGPT login | `CodexCliEngine` |
+| `codex-subscription` | CLI absent/incompatible, API-key login, or signed out | provider-specific `SignedOutEngine` — **never falls back to Claude** |
 | `auto` *(default)* | — | subscription → API key → signed out |
 
 The explicit modes refuse rather than quietly using the credential the user did
@@ -421,16 +424,63 @@ tokens.
 per utterance. With an API key selected, `agentLoop: true` silently does nothing
 and navigation falls to the questionnaire lane.
 
+### The Codex subscription lane
+
+`CodexCliEngine` is selected only by `engine: 'codex-subscription'`; Automatic
+selection remains Claude subscription → Anthropic API key. Mull discovers the
+binary from `MULL_CODEX_CLI`, the GUI process's `PATH`, `~/.local/bin/codex`, and
+the standard Homebrew locations. It feature-probes `codex exec --help` and
+accepts `codex login status` only when it says `Logged in using ChatGPT`. The
+probe reads both stdout and stderr because successful CLI versions can print
+the human-readable login state to stderr.
+
+Each request spawns the installed CLI once with JSONL output, ephemeral mode,
+ignored user configuration and rules, an empty private working directory,
+read-only sandboxing, approval policy `never`, disabled web search, and the
+prompt on stdin. Screenshots and output schemas are mode `0600`; their parent
+directory is mode `0700`; all are removed in `finally`. Classification and
+navigation use JSON Schema and still pass through the existing Zod parsers.
+Every call receives an explicit `--model`: classification uses the saved Codex
+classifier model, while transform, compose, navigate and answer use the saved
+Codex writing model. The engine reports that writing model and deliberately
+exposes no Codex credential setting. Classification also passes
+`model_reasoning_effort="low"` as a per-run CLI config override; the writing,
+answer and navigation calls retain the selected model's default reasoning.
+There is intentionally no reasoning setting for this fixed critical-path
+optimization.
+
+`IntentRouter` answers a narrow set of screen-inspection questions locally
+(`What is on my screen?`, `What am I looking at?`) and sends them straight to
+the answer lane. It does not repair near-miss ASR text: `It is on my screen.`
+remains a declarative utterance. The `asr.done` trace is therefore the source of
+truth for the words handed to routing.
+
+Each CLI run logs content-free timing milestones for start, first JSONL event,
+first assistant text, completion and categorized failure. These records include
+the lane, actual model and reasoning mode, but never the prompt, screen, output,
+credentials or raw stderr.
+
+This is constrained, not tool-free: the CLI has no documented hard tool-disable
+flag equivalent to Claude's `tools: []`. Mull terminates a run when a command or
+tool event is observed, but that is detection rather than pre-authorization.
+The engine consequently has no `runAgent` or `distill`; navigation remains the
+Mull-owned one-step loop even when the stored agent-loop preference is on.
+
 ### Models
 
-One table, `MODEL_IDS` in `src/shared/settings.ts`:
+Two tables in `src/shared/settings.ts` map saved choices to provider IDs.
+Claude uses:
 `haiku → claude-haiku-4-5`, `sonnet → claude-sonnet-5`, `opus → claude-opus-5`.
+Codex uses:
+`luna → gpt-5.6-luna`, `terra → gpt-5.6-terra`, `sol → gpt-5.6-sol`.
 
 | Setting | Default | Chooses the model for |
 |---|---|---|
 | `editModel` | `sonnet` | transform, compose, navigate, answer |
 | `classifierModel` | `sonnet` | routing only |
 | `agentModel` | **`opus`** | the tool loop only |
+| `codexEditModel` | `terra` | Codex transform, compose, navigate, answer |
+| `codexClassifierModel` | `terra` | Codex routing only |
 
 `agentModel` defaults higher than the others deliberately: a rewrite lands in a
 diff card and is read; a press just happens.
@@ -519,7 +569,7 @@ of its vocabulary rather than by its good intentions.
 | `fetch:vad` | `scripts/fetch-model.ts vad` | ~900 KB Silero VAD. Optional; absence just skips `--vad` |
 | `probe:asr` | `scripts/probe-asr.ts` | Word error rate per model/flag set over a corpus of real holds |
 | `smoke` | `scripts/smoke.ts` | Headless E2E over real ndjson plus fakes. `todo` lines never fail |
-| `bench:engine` | `scripts/bench-engine.ts` | Subscription vs API-key first-token latency. **Costs real tokens.** Reads credentials from **env only** |
+| `bench:engine` | `scripts/bench-engine.ts` | Classifier and first-visible-text latency across available Claude, API-key, and Codex lanes. **Costs real tokens.** Codex uses its CLI login; Claude credentials come from **env only** |
 | `notarize:dryrun` | `scripts/notarize-dryrun.ts` | Proves everything provable without an Apple account; uploads nothing |
 | `pack:local` | sidecar → build → `pack-local.ts` | The full local DMG. ~4 min, ~235 MB |
 
@@ -687,6 +737,7 @@ model, same journal, same settings.
 | `MULL_SIDECAR_PATH` | Absolute override for the sidecar binary | `mull-mac/.build/release/mull-mac` in dev |
 | `MULL_WHISPER_CLI` | Absolute override for whisper-cli; **skips the candidate search entirely** | First of four homebrew / usr-local candidates |
 | `MULL_CLAUDE_CLI_PATH` | Override for the `claude` binary the Agent SDK spawns | unset in dev (the SDK self-resolves) |
+| `MULL_CODEX_CLI` | Absolute override for the installed `codex` binary used by the explicit Codex subscription lane | PATH, `~/.local/bin`, then Homebrew candidates |
 | `MULL_ASR` | `=fake` forces the fake transcriber — how smoke runs with no model on disk | unset |
 | `MULL_ASR_KEEP_AUDIO` | Directory to copy each utterance's WAV + transcript into, for replay through `probe:asr`. **The one thing that defeats "audio never outlives the transcription"** — no UI can set it, so shipped builds cannot | unset |
 | `MULL_LOCAL_HARDENED` | `=0` drops the hardened runtime from a local build | hardened **on** |

@@ -101,6 +101,8 @@ export interface HudState {
    * apologetic" is not, and nobody opens a preferences window between the two.
    */
   thinking: boolean
+  /** False when the active engine cannot honour Mull's thinking toggle. */
+  thinkingAvailable?: boolean
   /**
    * Whether a plan card starts itself instead of waiting for Run — armed from
    * the HUD, beside `thinking`, and for the same reason.
@@ -126,6 +128,7 @@ export const IDLE_HUD_STATE: HudState = {
   stage: null,
   stageAt: null,
   thinking: false,
+  thinkingAvailable: true,
   autoRun: false,
   card: null
 }

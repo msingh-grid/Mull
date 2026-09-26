@@ -33,6 +33,16 @@ export const MODEL_IDS: Record<ModelChoice, string> = {
   opus: 'claude-opus-5'
 }
 
+export const CodexModelChoiceSchema = z.enum(['luna', 'terra', 'sol'])
+
+export type CodexModelChoice = z.infer<typeof CodexModelChoiceSchema>
+
+export const CODEX_MODEL_IDS: Record<CodexModelChoice, string> = {
+  luna: 'gpt-5.6-luna',
+  terra: 'gpt-5.6-terra',
+  sol: 'gpt-5.6-sol'
+}
+
 export const SettingsSchema = z.object({
   /**
    * Gone at M5b, kept only so a stored settings file still parses.
@@ -56,11 +66,11 @@ export const SettingsSchema = z.object({
   onboardingCompletedAt: z.number().int().nullable().default(null),
   launchAtLogin: z.boolean().default(false),
   /**
-   * Which lane serves edits. `auto` prefers the Claude subscription and falls
-   * back to an API key; the other two are explicit choices that refuse rather
-   * than silently using the credential the user didn't pick.
+   * Which lane serves edits. `auto` preserves the original Claude-first
+   * behaviour. Codex is deliberately explicit: choosing it must never make an
+   * Anthropic request or silently fall back to one.
    */
-  engine: z.enum(['auto', 'subscription', 'api-key']).default('auto'),
+  engine: z.enum(['auto', 'subscription', 'api-key', 'codex-subscription']).default('auto'),
   /**
    * May Mull use the Claude Code login already on this Mac?
    *
@@ -73,12 +83,14 @@ export const SettingsSchema = z.object({
    */
   inheritClaudeCodeLogin: z.boolean().default(true),
   /**
-   * Careful (Sonnet 5) or fast (Haiku 4.5). Default careful: an edit is
-   * judgement about someone's writing, and the preview makes the judgement
-   * cheap to check. The bench (`npm run bench:engine`) is what tells you
-   * whether fast is worth it on your machine.
+   * Careful (Sonnet 5), fast (Haiku 4.5), or most careful (Opus 5). Default
+   * careful: an edit is judgement about someone's writing, and the preview
+   * makes that judgement cheap to check. The bench (`npm run bench:engine`) is
+   * what tells you whether fast is worth it on your machine.
    */
-  editModel: z.enum(['sonnet', 'haiku']).default('sonnet'),
+  editModel: ModelChoiceSchema.default('sonnet'),
+  /** Codex writing, answering and one-step navigation model. */
+  codexEditModel: CodexModelChoiceSchema.default('terra'),
   /**
    * How Mull decides dictate-vs-edit.
    *
@@ -108,6 +120,8 @@ export const SettingsSchema = z.object({
    * measurement that settled it.
    */
   classifierModel: ModelChoiceSchema.default('sonnet'),
+  /** Codex routing model, kept separate from the Claude preference. */
+  codexClassifierModel: CodexModelChoiceSchema.default('terra'),
   /**
    * How much of the window in front of you Mull may read (M5a).
    *

@@ -290,6 +290,11 @@ export interface Engine {
   readonly name: string
   /** The model actually in use, or null when there isn't one. For the ledger. */
   readonly model: string | null
+  /**
+   * The model that routes an instruction, when it differs from the writing
+   * model. Optional because signed-out and test engines have no second model.
+   */
+  readonly classifierModel?: string | null
   ready(): Promise<EngineState>
   /**
    * Words to type, or an instruction about text on screen?
