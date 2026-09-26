@@ -205,6 +205,20 @@ export class IntentRouter {
       return { route: { kind: 'send' }, by: 'fast-path', classifyMs: null, fallbackReason: null }
     }
 
+    // A tiny local vocabulary for the question people use to verify that Mull
+    // can see their window. It is safe here because this router is reached only
+    // through the instruction key, and the answer lane never types into the
+    // application. Keeping the vocabulary deliberately narrow avoids bringing
+    // back the general-purpose verb table this classifier replaced.
+    if (context.hasScreen && isScreenQuestion(transcript)) {
+      return {
+        route: { kind: 'ask', question: transcript },
+        by: 'fast-path',
+        classifyMs: null,
+        fallbackReason: null
+      }
+    }
+
     const rules = (reason: string): RoutedIntent => ({
       route: route(transcript, context),
       by: 'rules',
@@ -225,7 +239,8 @@ export class IntentRouter {
     const startedAt = this.now()
     const trace = this.deps.trace?.()
     trace?.step('classify.ask', {
-      model: 'haiku',
+      engine: this.deps.engine.name,
+      model: this.deps.engine.classifierModel ?? this.deps.engine.model ?? 'none',
       screen: input.context?.chars ?? 0,
       targets: input.targets?.length ?? 0,
       field: input.fieldText?.length ?? 0,
@@ -283,6 +298,20 @@ export class IntentRouter {
       fallbackReason: null
     }
   }
+}
+
+/**
+ * The exact, harmless screen-inspection questions that skip model routing.
+ *
+ * Do not repair near misses here. In particular, "It is on my screen" may be
+ * genuine dictation or an ASR error; changing it into a question would silently
+ * rewrite the user's words. The `asr.done` trace is the authority on what this
+ * router actually received.
+ */
+export function isScreenQuestion(transcript: string): boolean {
+  return /^(?:(?:please[,\s]+)|(?:can\s+you\s+(?:please\s+)?tell\s+me\s+))?(?:what(?:['’]s|\s+is)\s+on\s+(?:my|the)\s+screen|what\s+am\s+i\s+looking\s+at)\s*[?.!]*$/iu.test(
+    transcript.trim()
+  )
 }
 
 /**

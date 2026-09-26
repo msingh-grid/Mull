@@ -26,6 +26,38 @@ describe('SettingsStore', () => {
     expect(new SettingsStore({ path }).get().theme).toBe('dark')
   })
 
+  it('round-trips the Codex lane without erasing Claude preferences', () => {
+    new SettingsStore({ path }).set({
+      engine: 'codex-subscription',
+      editModel: 'haiku',
+      codexEditModel: 'sol',
+      codexClassifierModel: 'luna',
+      agentLoop: true
+    })
+    expect(new SettingsStore({ path }).get()).toMatchObject({
+      engine: 'codex-subscription',
+      editModel: 'haiku',
+      codexEditModel: 'sol',
+      codexClassifierModel: 'luna',
+      agentLoop: true
+    })
+  })
+
+  it('migrates old settings to independent Terra defaults without changing Claude choices', () => {
+    writeFileSync(
+      path,
+      JSON.stringify({ engine: 'codex-subscription', editModel: 'haiku', agentLoop: true }),
+      'utf8'
+    )
+    expect(new SettingsStore({ path }).get()).toMatchObject({
+      engine: 'codex-subscription',
+      editModel: 'haiku',
+      codexEditModel: 'terra',
+      codexClassifierModel: 'terra',
+      agentLoop: true
+    })
+  })
+
   it('merges rather than replaces', () => {
     const store = new SettingsStore({ path })
     store.set({ theme: 'dark' })

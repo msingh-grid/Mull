@@ -15,7 +15,7 @@ export interface EngineCredentials {
   apiKey: string | null
 }
 
-export type EngineKind = 'agent' | 'api-key' | 'signed-out' | 'fake'
+export type EngineKind = 'agent' | 'api-key' | 'codex' | 'signed-out' | 'fake'
 
 export interface EngineStatus {
   /** Which implementation is serving edits right now. */
@@ -32,6 +32,14 @@ export interface EngineStatus {
    * lane works with nothing pasted at all.
    */
   detectedLogin: boolean
+  /** Whether a Codex CLI executable was found in a GUI-safe search path. */
+  codexCliFound: boolean
+  /** Whether that CLI exposes every flag Mull needs for an isolated run. */
+  codexCliCompatible: boolean
+  /** True only for ChatGPT subscription auth, never API-key auth. */
+  codexLoggedIn: boolean
+  /** Redacted CLI version string, useful when a required flag is missing. */
+  codexVersion: string | null
 }
 
 /** What `engineTest` reports: proof the credential works, not that it saved. */
@@ -50,3 +58,6 @@ export interface EngineTestResult {
  * This stays for the Mac where the browser cannot redirect back.
  */
 export const SETUP_TOKEN_COMMAND = 'claude setup-token'
+
+/** Mull never handles the Codex token; the CLI owns this login end to end. */
+export const CODEX_LOGIN_COMMAND = 'codex login'

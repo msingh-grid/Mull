@@ -23,7 +23,7 @@ This guide is for using Mull. If you are working on the code, read
   - [Send](#6--send)
 - [The HUD and the cat](#the-hud-and-the-cat)
 - [The menu bar](#the-menu-bar)
-- [Connecting Claude](#connecting-claude)
+- [Connecting an engine](#connecting-an-engine)
 - [Settings reference](#settings-reference)
 - [Privacy — what leaves your Mac](#privacy--what-leaves-your-mac)
 - [Journal and undo](#journal-and-undo)
@@ -319,8 +319,9 @@ Engine → "Going and looking":
 | Can it change apps? | No — one window | Yes, and read menus and tabs |
 | Requires | Any engine | **Claude subscription only** |
 
-"Let the model drive" is experimental and **off by default**. On the API-key lane
-it does nothing at all — every request falls back to the one-step-at-a-time lane.
+"Let the model drive" is experimental and **off by default**. On the API-key and
+Codex lanes it does nothing at all — every request falls back to the
+one-step-at-a-time lane.
 
 **What it will not do,** whichever lane runs:
 
@@ -427,10 +428,10 @@ shows state: nothing when idle, `●` listening, `⋯` working, `!` needs attent
 
 ---
 
-## Connecting Claude
+## Connecting an engine
 
 Dictation needs no account at all. Everything else — editing, replying, asking,
-going and looking — needs Claude, and there are two ways to connect it.
+going and looking — needs a connected language-model engine.
 
 Settings → **Engine** → **Lane**:
 
@@ -439,6 +440,7 @@ Settings → **Engine** → **Lane**:
 | **Automatic** *(default)* | Prefers your Claude subscription; falls back to an API key if that is all you have |
 | **Claude subscription** | Uses your Claude plan. **Refuses rather than quietly using an API key** you also saved |
 | **API key** | Bills your Anthropic account per token. Refuses rather than quietly using your subscription |
+| **Codex subscription** *(experimental)* | Uses an installed Codex CLI that is signed in with ChatGPT. It never falls back to Claude |
 
 ### Using your Claude subscription
 
@@ -461,6 +463,33 @@ subscription lane, and it costs you per token.
 because the API-key lane has no tool loop. The setting stays visible and simply
 does nothing; going-and-looking falls back to the one-step-at-a-time lane.
 
+### Using your Codex subscription
+
+Install Codex CLI, run `codex login`, and choose **Codex subscription**. Mull
+accepts only a status of `Logged in using ChatGPT`; a Codex API-key login does
+not activate this lane. Mull stores no OpenAI credential and does not add Codex
+credentials to its encrypted credential file.
+
+Every model request is a fresh `codex exec` process in a private empty temporary
+directory. Mull ignores user and project Codex configuration and rules, selects
+read-only sandboxing, disables web search, supplies the prompt through standard
+input, and deletes temporary screenshots and schemas after the request. The
+writing and classifier model choices are stored separately from their Claude
+counterparts. Choose Luna for speed, Terra for the balanced default, or Sol for
+the most careful work. Classification always uses low reasoning to keep routing
+responsive; edits, answers and navigation retain the chosen model's default.
+The HUD Thinking control remains unavailable because that fixed classifier
+optimization is not a user-facing reasoning setting.
+The installed CLI and signed-in ChatGPT account still determine whether a
+particular Codex model is available; Connection → Test reports any refusal.
+
+Codex CLI is an agent runtime, not a direct subscription-backed Responses API.
+Its documented interface has no hard `tools: []` switch. Mull asks it not to use
+tools and stops a request if a command or tool event appears, but this is
+detection rather than pre-authorization. Going-and-looking therefore stays in
+Mull's visible, one-step-at-a-time loop. The Codex lane does not run Mull's agent
+loop or skill-distillation call in this version.
+
 ### Check that it works
 
 Settings → Engine → **Connection** → **Test**. This runs one real round trip and
@@ -478,7 +507,7 @@ all rather than falling back to plain text.
 |---|---|
 | `not connected` | No credential saved. Dictation still works |
 | `paused — you've reached your usage limit for now.` | Rate limited; Mull waits about a minute before trying again |
-| `paused — the service is busy.` | Anthropic is overloaded; about 20 seconds |
+| `paused — the service is busy.` | The selected model service is overloaded; about 20 seconds |
 | `paused — offline` | No network |
 
 ---
@@ -498,14 +527,14 @@ relaunch. Everything else takes effect on the next thing you say.
 | **Windows theme** | Follow system | Appearance of Mull's own windows: `Follow system` / `Paper` / `Lamplit` | Appearance |
 | **HUD theme** | Match windows | `Always paper-light` keeps the HUD readable as a page even when everything else is dark | Appearance |
 | **HUD position** | Bottom centre | Drag the panel to move it; button resets it | Appearance |
-| **Lane** | Automatic | Subscription vs API key — see [above](#connecting-claude) | Engine |
-| **Edits** | Careful — Sonnet 5 | Which model rewrites and drafts. `Fast — Haiku 4.5` is the other option | Engine |
+| **Lane** | Automatic | Claude subscription, Anthropic API key, or explicit Codex subscription — see [above](#connecting-an-engine) | Engine |
+| **Edits** | Careful — Sonnet 5 / GPT-5.6-Terra | Which model rewrites, drafts, answers and navigates. Claude offers Haiku/Sonnet/Opus; Codex offers Luna/Terra/Sol | Engine |
 | **Deciding what you meant** | Ask the model | `Rules only — nothing leaves this Mac` keeps routing local, and is measurably worse at natural phrasing | Engine |
-| **Which model decides** | Careful — Sonnet 5 | The routing model. Greyed out when routing is rules-only | Engine |
+| **Which model decides** | Careful — Sonnet 5 / GPT-5.6-Terra | The provider-specific routing model. Greyed out when routing is rules-only | Engine |
 | **Going and looking** | One step at a time | `Let the model drive` is the experimental agent loop — **subscription lane only** | Engine |
 | **Which model drives** | **Most careful — Opus 5** | The agent-loop model. Greyed out while the agent loop is off | Engine |
 | **Keep notes on each app** | Off | Lets Mull write down what it learned about driving an application, and show those notes to later runs there. Only does anything while `Let the model drive` is on | What Mull has learned |
-| **Thinking** | Off | Extended reasoning for writing lanes only | The HUD pill, not Settings |
+| **Thinking** | Off | Extended reasoning for Claude writing lanes only; hidden for Codex | The HUD pill, not Settings |
 
 `Which model drives` defaults higher than everything else on purpose: a rewrite
 lands in a diff card and gets read by a human; a press just happens.
@@ -573,6 +602,9 @@ whisper.cpp. That is architecture, not policy — there is no network path for i
 | Ask Mull for an edit | Your instruction and the text being edited |
 | Ask a question or a reply | Also the window's text, and (by default) a picture of that one window |
 | Ask Mull to go and look | The window's text and controls, each turn |
+
+Model inputs go only to the selected lane: Anthropic for either Claude lane, or
+OpenAI through the local Codex CLI for the explicit Codex lane.
 
 Three switches narrow that:
 
@@ -694,7 +726,7 @@ All under `~/Library/Application Support/mull/`:
 |---|---|
 | `journal.db` | Everything Mull did, the last few things you said, and what it has learned about each app |
 | `settings.json` | Your settings |
-| `credentials.json` | Your token or API key, encrypted |
+| `credentials.json` | Your Claude token or Anthropic API key, encrypted. Codex login remains owned by Codex CLI |
 | `captures/` | The 25 most recent screenshots |
 | `models/ggml-small.en.bin` | The speech model, ~466 MB — safe to delete and re-download |
 | `models/ggml-silero-v5.1.2.bin` | Optional voice-activity model, ~900 KB — trims silence before transcribing |
@@ -702,6 +734,12 @@ All under `~/Library/Application Support/mull/`:
 
 Logs are at `~/Library/Logs/mull/main.log`. Settings → **About** shows all of
 these paths, plus the versions actually running.
+
+For a misrouted spoken request, start with its `asr.done` line: the quoted
+`said=` value is the exact transcript the classifier received, and `confidence=`
+is the speech recognizer's estimate. Codex timing lines report the selected
+model, first CLI event, first assistant text and completion without recording
+the prompt, screen, answer, credentials or raw CLI stderr.
 
 Deleting Mull leaves all of it behind; delete the folder too if you want it gone.
 

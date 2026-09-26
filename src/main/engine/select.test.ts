@@ -5,6 +5,7 @@ import { AGENT_MODEL } from '@shared/agent'
 import { EngineHolder, inheritedLogin, resolveEngine, SignedOutEngine } from './select'
 import { AgentEngine } from './agent'
 import { ApiKeyEngine } from './api-key'
+import { CodexCliEngine } from './codex'
 import { CLASSIFIER_MODEL } from './classify'
 import { FakeEngine } from './fake'
 import { cleanEditOutput, cleanEditPartial, editPrompt, maxOutputTokens } from './prompts'
@@ -12,13 +13,23 @@ import { cleanEditOutput, cleanEditPartial, editPrompt, maxOutputTokens } from '
 const NOTHING: EngineCredentials = { oauthToken: null, apiKey: null }
 
 /** The slice `resolveEngine` reads, at its defaults. */
-type EngineSettings = Pick<Settings, 'engine' | 'editModel' | 'classifierModel' | 'agentModel'>
+type EngineSettings = Pick<
+  Settings,
+  | 'engine'
+  | 'editModel'
+  | 'classifierModel'
+  | 'agentModel'
+  | 'codexEditModel'
+  | 'codexClassifierModel'
+>
 
 const BASE: EngineSettings = {
   engine: 'auto',
   editModel: 'sonnet',
   classifierModel: 'sonnet',
-  agentModel: 'opus'
+  agentModel: 'opus',
+  codexEditModel: 'terra',
+  codexClassifierModel: 'terra'
 }
 
 function pick(
@@ -95,12 +106,99 @@ describe('resolveEngine — an explicit choice', () => {
   it('refuses the other way round too', () => {
     expect(pick({ oauthToken: 'token' }, { engine: 'api-key' }).name).toBe('signed-out')
   })
+
+  it('constructs Codex only when explicitly selected and ready', () => {
+    const engine = resolveEngine({
+      credentials: { oauthToken: 'claude-token', apiKey: 'anthropic-key' },
+      settings: {
+        ...BASE,
+        engine: 'codex-subscription',
+        codexEditModel: 'sol',
+        codexClassifierModel: 'luna'
+      },
+      detectedLogin: true,
+      codex: {
+        path: '/bin/codex',
+        version: 'codex-cli 1.2.3',
+        compatible: true,
+        loggedIn: true,
+        reason: null
+      }
+    })
+    expect(engine).toBeInstanceOf(CodexCliEngine)
+    expect(engine.name).toBe('codex')
+    expect(engine.model).toBe('gpt-5.6-sol')
+    expect((engine as CodexCliEngine).classifierModel).toBe('gpt-5.6-luna')
+  })
+
+  it('never falls back from an unavailable explicit Codex lane to Claude', async () => {
+    const engine = resolveEngine({
+      credentials: { oauthToken: 'claude-token', apiKey: 'anthropic-key' },
+      settings: { ...BASE, engine: 'codex-subscription' },
+      detectedLogin: true,
+      codex: {
+        path: '/bin/codex',
+        version: 'codex-cli old',
+        compatible: false,
+        loggedIn: false,
+        reason: 'Codex CLI is missing required options.'
+      }
+    })
+    expect(engine.name).toBe('signed-out')
+    await expect(engine.transform({ instruction: 'x', text: 'y', app: null })).rejects.toThrow(
+      /Codex CLI/
+    )
+  })
+
+  it('gives Codex-specific guidance when the CLI is missing', async () => {
+    const engine = resolveEngine({
+      credentials: { oauthToken: 'claude-token', apiKey: 'anthropic-key' },
+      settings: { ...BASE, engine: 'codex-subscription' },
+      detectedLogin: true
+    })
+    expect(engine.name).toBe('signed-out')
+    await expect(engine.answer({ goal: 'test' })).rejects.toThrow(/Codex CLI is not installed/i)
+  })
+
+  it('gives Codex-specific guidance when ChatGPT login is missing', async () => {
+    const engine = resolveEngine({
+      credentials: { oauthToken: 'claude-token', apiKey: 'anthropic-key' },
+      settings: { ...BASE, engine: 'codex-subscription' },
+      detectedLogin: true,
+      codex: {
+        path: '/bin/codex',
+        version: 'codex-cli 1.2.3',
+        compatible: true,
+        loggedIn: false,
+        reason: 'Codex is not signed in with ChatGPT.'
+      }
+    })
+    expect(engine.name).toBe('signed-out')
+    await expect(engine.answer({ goal: 'test' })).rejects.toThrow(/ChatGPT/i)
+  })
+
+  it('does not add Codex to Automatic even when its login is ready', () => {
+    const engine = resolveEngine({
+      credentials: NOTHING,
+      settings: BASE,
+      detectedLogin: false,
+      codex: {
+        path: '/bin/codex',
+        version: 'codex-cli 1.2.3',
+        compatible: true,
+        loggedIn: true,
+        reason: null
+      }
+    })
+    expect(engine.name).toBe('signed-out')
+  })
 })
 
 describe('resolveEngine — the model switch', () => {
   it('maps careful and fast to real model ids', () => {
     expect(pick({ apiKey: 'key' }, { editModel: 'sonnet' }).model).toBe('claude-sonnet-5')
     expect(pick({ apiKey: 'key' }, { editModel: 'haiku' }).model).toBe('claude-haiku-4-5')
+    expect(pick({ apiKey: 'key' }, { editModel: 'opus' }).model).toBe('claude-opus-5')
   })
 
   /**

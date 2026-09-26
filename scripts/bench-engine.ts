@@ -8,20 +8,24 @@
  *
  *   npm run bench:engine
  *   ANTHROPIC_API_KEY=sk-ant-… npm run bench:engine
+ *   MULL_CODEX_CLI=/path/to/codex npm run bench:engine
  *   MULL_BENCH_RUNS=5 npm run bench:engine
  *
- * Credentials come from the environment, never from the app's encrypted store:
- * this runs under plain node, where `safeStorage` does not exist, and a
- * developer tool has no business reaching into a keychain anyway. With nothing
- * set, the subscription lane still runs if this Mac is signed in to Claude
- * Code — which is the case it most needs to measure.
+ * Claude credentials come from the environment, never from the app's encrypted
+ * store: this runs under plain node, where `safeStorage` does not exist. With
+ * nothing set, the Claude subscription lane still runs if this Mac is signed
+ * in to Claude Code. The Codex lane uses only the installed CLI's ChatGPT login,
+ * exactly as the app does.
  */
 import { AgentEngine } from '../src/main/engine/agent'
 import { ApiKeyEngine } from '../src/main/engine/api-key'
+import { CodexCliEngine, inspectCodexCli } from '../src/main/engine/codex'
 import { detectClaudeCodeLogin } from '../src/main/engine/select'
 import { FIRST_TOKEN_BUDGET_MS } from '../src/main/bench'
 import { diffText } from '../src/main/pipeline/diff'
 import type { Engine } from '../src/main/engine/types'
+import { resolveCodexCliPath } from '../src/main/locations'
+import { CODEX_MODEL_IDS } from '../src/shared/settings'
 
 const RUNS = Number(process.env['MULL_BENCH_RUNS'] ?? 3)
 
@@ -98,6 +102,25 @@ function ms(value: number): string {
 async function measure(label: string, engine: Engine): Promise<void> {
   console.log(`\n── ${label} · ${engine.model ?? 'no model'} ─────────────────────────────`)
 
+  const classifier: number[] = []
+  for (let pass = 0; pass < RUNS; pass += 1) {
+    const startedAt = Date.now()
+    try {
+      await engine.classify({
+        transcript: 'make this crisp',
+        app: null,
+        selection: FIXTURES[0]!.text,
+        fieldText: null,
+        fieldTruncated: false,
+        context: null,
+        targets: []
+      })
+      classifier.push(Date.now() - startedAt)
+    } catch (err) {
+      console.log(`  ✕ classifier: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
   const samples: Sample[] = []
   for (let pass = 0; pass < RUNS; pass += 1) {
     for (const fixture of FIXTURES) {
@@ -117,7 +140,10 @@ async function measure(label: string, engine: Engine): Promise<void> {
   const total = ok.map((sample) => sample.totalMs)
 
   console.log(
-    `\n  first token  p50 ${ms(percentile(first, 50))}  p95 ${ms(percentile(first, 95))}` +
+    `\n  classifier   p50 ${ms(percentile(classifier, 50))}  p95 ${ms(percentile(classifier, 95))}`
+  )
+  console.log(
+    `  first token  p50 ${ms(percentile(first, 50))}  p95 ${ms(percentile(first, 95))}` +
       `   (budget ${FIRST_TOKEN_BUDGET_MS}ms)`
   )
   console.log(`  complete     p50 ${ms(percentile(total, 50))}  p95 ${ms(percentile(total, 95))}`)
@@ -145,6 +171,7 @@ async function main(): Promise<void> {
   const apiKey = process.env['ANTHROPIC_API_KEY']
   const oauthToken = process.env['CLAUDE_CODE_OAUTH_TOKEN'] ?? null
   const detected = detectClaudeCodeLogin()
+  const codex = inspectCodexCli(resolveCodexCliPath())
 
   console.log(`bench:engine · model ${model} · ${RUNS} passes × ${FIXTURES.length} fixtures`)
 
@@ -168,8 +195,22 @@ async function main(): Promise<void> {
     console.log('\n── api key ── skipped: set ANTHROPIC_API_KEY to measure this lane')
   }
 
+  if (codex.path && codex.compatible && codex.loggedIn) {
+    ran += 1
+    await measure(
+      'Codex subscription',
+      new CodexCliEngine({
+        codexPath: codex.path,
+        model: CODEX_MODEL_IDS.terra,
+        classifierModel: CODEX_MODEL_IDS.terra
+      })
+    )
+  } else {
+    console.log(`\n── Codex subscription ── skipped: ${codex.reason ?? 'not available'}`)
+  }
+
   if (ran === 0) {
-    console.log('\nNothing to measure. Sign in to Claude Code, or set ANTHROPIC_API_KEY.')
+    console.log('\nNothing to measure. Sign in to Claude Code or Codex, or set ANTHROPIC_API_KEY.')
     process.exitCode = 1
   }
 }

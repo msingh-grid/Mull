@@ -29,6 +29,7 @@ import {
   credentialsPath,
   journalPath,
   resolveClaudeCliPath,
+  resolveCodexCliPath,
   resolveSidecarPath,
   settingsPath
 } from './locations'
@@ -74,6 +75,7 @@ import { appliedText, diffText } from './pipeline/diff'
 import { FakeEngine } from './engine/fake'
 import { AgentEngine } from './engine/agent'
 import { ApiKeyEngine } from './engine/api-key'
+import { CodexCliEngine, inspectCodexCli, type CodexCliInspection } from './engine/codex'
 import {
   detectClaudeCodeLogin,
   EngineHolder,
@@ -114,6 +116,13 @@ let browserSignIn: AbortController | null = null
 let demoEngine: Engine | null = null
 let credentials: CredentialsStore | null = null
 let detectedLogin = false
+let codexCli: CodexCliInspection = {
+  path: null,
+  version: null,
+  compatible: false,
+  loggedIn: false,
+  reason: null
+}
 let captures: CaptureStore | null = null
 /**
  * What Mull has learned about driving each application.
@@ -343,10 +352,11 @@ function createCaptureWindow(): BrowserWindow {
 // ---------------------------------------------------------------------------
 
 function pushHudState(state: HudState): void {
+  const visible = { ...state, thinkingAvailable: engine?.name !== 'codex' }
   if (hudWindow && !hudWindow.isDestroyed()) {
-    hudWindow.webContents.send(IPC.hudState, state)
+    hudWindow.webContents.send(IPC.hudState, visible)
   }
-  tray?.setPhase(state.phase)
+  tray?.setPhase(visible.phase)
 }
 
 /** Tell any open journal window that the record changed under it. */
@@ -530,6 +540,7 @@ async function bootstrap(): Promise<void> {
   demoEngine = new FakeEngine()
   credentials = new CredentialsStore({ path: credentialsPath(), safeStorage, log: logFn })
   detectedLogin = detectClaudeCodeLogin()
+  codexCli = inspectCodexCli(resolveCodexCliPath())
   engine = new EngineHolder(
     resolveEngine({
       credentials: credentials.get(),
@@ -539,7 +550,8 @@ async function bootstrap(): Promise<void> {
       // speaks, and it must apply to that utterance rather than the next launch.
       thinking: () => settings?.get().thinking === true,
       log: logFn,
-      claudeCliPath: resolveClaudeCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath })
+      claudeCliPath: resolveClaudeCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+      codex: codexCli
     })
   )
   log.info('engine', {
@@ -965,7 +977,10 @@ ipcMain.handle(IPC.journalUndoEntry, async (_event, id: string) => {
 
 // The controller's state, not the pipeline's: first paint must include an open
 // card, or a HUD that reloads mid-preview would come back showing nothing.
-ipcMain.handle(IPC.hudStateGet, () => hud?.getState() ?? pipeline?.getState() ?? null)
+ipcMain.handle(IPC.hudStateGet, () => {
+  const state = hud?.getState() ?? pipeline?.getState()
+  return state ? { ...state, thinkingAvailable: engine?.name !== 'codex' } : null
+})
 
 ipcMain.handle(IPC.hudAction, (_event, action: HudAction) => {
   hud?.act(action)
@@ -1151,10 +1166,8 @@ ipcMain.handle(IPC.settingsSet, (_event, patch: Partial<Settings>) => {
   if (next) {
     // Which lane and which models are engine-shaping, so the change has to
     // reach the holder — otherwise picking "Fast" would keep using the careful
-    // model until the next launch, and quietly. All three model settings are
-    // listed because each is baked into the engine at construction: the two
-    // session models when the sessions are built, the loop's when `runAgent`
-    // reads it.
+    // model until the next launch, and quietly. Provider-specific preferences
+    // are kept separate, but every one is baked into its engine at construction.
     const reshaped =
       before !== undefined &&
       before !== null &&
@@ -1162,6 +1175,8 @@ ipcMain.handle(IPC.settingsSet, (_event, patch: Partial<Settings>) => {
         before.editModel !== next.editModel ||
         before.classifierModel !== next.classifierModel ||
         before.agentModel !== next.agentModel ||
+        before.codexEditModel !== next.codexEditModel ||
+        before.codexClassifierModel !== next.codexClassifierModel ||
         before.inheritClaudeCodeLogin !== next.inheritClaudeCodeLogin)
     if (reshaped) reloadEngine()
     // The speech model is not engine-shaped — it is the local transcriber, and
@@ -1196,9 +1211,12 @@ function engineModels(): Record<string, string | null | undefined> {
   const current = engine?.current
   return {
     model: current?.model ?? null,
-    classifier: current instanceof AgentEngine || current instanceof ApiKeyEngine
-      ? current.classifierModel
-      : undefined,
+    classifier:
+      current instanceof AgentEngine ||
+      current instanceof ApiKeyEngine ||
+      current instanceof CodexCliEngine
+        ? current.classifierModel
+        : undefined,
     agent: current instanceof AgentEngine ? current.agentModel : undefined
   }
 }
@@ -1213,6 +1231,9 @@ function engineModels(): Record<string, string | null | undefined> {
  */
 function reloadEngine(): void {
   if (!engine || !credentials || !settings) return
+  if (settings.get().engine === 'codex-subscription') {
+    codexCli = inspectCodexCli(resolveCodexCliPath())
+  }
   engine.swap(
     resolveEngine({
       credentials: credentials.get(),
@@ -1222,7 +1243,8 @@ function reloadEngine(): void {
       // speaks, and it must apply to that utterance rather than the next launch.
       thinking: () => settings?.get().thinking === true,
       log: logFn,
-      claudeCliPath: resolveClaudeCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath })
+      claudeCliPath: resolveClaudeCliPath({ packaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+      codex: codexCli
     })
   )
   log.info('engine reloaded', { kind: engine.name, ...engineModels() })
@@ -1231,11 +1253,27 @@ function reloadEngine(): void {
   // subscription lane's harness does.
   intent?.reset()
   warmEngine()
+  const state = hud?.getState() ?? pipeline?.getState()
+  if (state) pushHudState(state)
 }
 
 /** The shared rule, asked of this process's detection and settings. */
 function usableLogin(): boolean {
   return inheritedLogin(detectedLogin, settings?.get() ?? { inheritClaudeCodeLogin: true })
+}
+
+/** Re-read a login the user may have completed in Terminal while Settings is open. */
+function refreshCodexInspection(): void {
+  const before = codexCli
+  const next = inspectCodexCli(resolveCodexCliPath())
+  codexCli = next
+  const changed =
+    before.path !== next.path ||
+    before.version !== next.version ||
+    before.compatible !== next.compatible ||
+    before.loggedIn !== next.loggedIn ||
+    before.reason !== next.reason
+  if (changed && settings?.get().engine === 'codex-subscription') reloadEngine()
 }
 
 /** The path of whatever model Settings currently points at. */
@@ -1284,7 +1322,8 @@ async function reloadAsr(): Promise<void> {
 
 ipcMain.handle(IPC.engineStatus, async () => {
   if (!engine || !credentials) return null
-  return engineStatus(engine, credentials.presence(), detectedLogin)
+  refreshCodexInspection()
+  return engineStatus(engine, credentials.presence(), detectedLogin, codexCli)
 })
 
 /**

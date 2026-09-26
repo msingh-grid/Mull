@@ -303,6 +303,12 @@ describe('the thinking toggle', () => {
     expect(hudView(state({ phase: 'idle', thinking: false })).thinking).toEqual({ on: false })
   })
 
+  it('is hidden when the active engine cannot honour it', () => {
+    expect(
+      hudView(state({ phase: 'idle', thinking: true, thinkingAvailable: false })).thinking
+    ).toBeNull()
+  })
+
   /**
    * Mid-utterance it is either too late to matter or describing the turn
    * already in flight — both worse than not being there.

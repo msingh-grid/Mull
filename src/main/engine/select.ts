@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process'
 import type { EngineCredentials, EngineKind, EngineStatus } from '@shared/engine'
-import { MODEL_IDS, type Settings } from '@shared/settings'
+import { CODEX_MODEL_IDS, MODEL_IDS, type Settings } from '@shared/settings'
 import { AgentEngine } from './agent'
 import { ApiKeyEngine } from './api-key'
+import { CodexCliEngine, type CodexCliInspection } from './codex'
 import type { AgentGoal, AgentRunResult } from './agent-loop'
 import type { NavStep } from '@shared/nav'
 import type {
@@ -41,14 +42,17 @@ import type {
  * and the engine constructors — so `classify.ts` and `@shared/agent` keep
  * their constants as defaults and neither has to learn what a setting is.
  */
-const MODELS: Record<Settings['editModel'], string> = {
-  sonnet: MODEL_IDS.sonnet,
-  haiku: MODEL_IDS.haiku
-}
-
 export interface ResolveEngineOptions {
   credentials: EngineCredentials
-  settings: Pick<Settings, 'engine' | 'editModel' | 'classifierModel' | 'agentModel'>
+  settings: Pick<
+    Settings,
+    | 'engine'
+    | 'editModel'
+    | 'classifierModel'
+    | 'agentModel'
+    | 'codexEditModel'
+    | 'codexClassifierModel'
+  >
   /** Result of `detectClaudeCodeLogin()`, passed in so this stays pure. */
   detectedLogin: boolean
   /**
@@ -60,16 +64,20 @@ export interface ResolveEngineOptions {
   log?: (level: 'info' | 'warn' | 'error', message: string, meta?: unknown) => void
   /** See `resolveClaudeCliPath` in `src/main/locations.ts`. Only the subscription (agent) lane needs it. */
   claudeCliPath?: string
+  /** Installed CLI inspection. Codex remains opt-in even when this is ready. */
+  codex?: CodexCliInspection
 }
 
 export function resolveEngine(options: ResolveEngineOptions): Engine {
   const { credentials, settings, detectedLogin, log, thinking, claudeCliPath } = options
-  const model = MODELS[settings.editModel]
+  const model = MODEL_IDS[settings.editModel]
   // Resolved here and passed in, rather than read from settings inside the
   // engines: an engine that reaches for a store is an engine that cannot be
   // built in a test without one.
   const classifierModel = MODEL_IDS[settings.classifierModel]
   const agentModel = MODEL_IDS[settings.agentModel]
+  const codexModel = CODEX_MODEL_IDS[settings.codexEditModel]
+  const codexClassifierModel = CODEX_MODEL_IDS[settings.codexClassifierModel]
   const subscription = credentials.oauthToken !== null || detectedLogin
 
   const agent = (): Engine =>
@@ -84,6 +92,7 @@ export function resolveEngine(options: ResolveEngineOptions): Engine {
     })
   const apiKey = (): Engine =>
     new ApiKeyEngine({ apiKey: credentials.apiKey as string, model, classifierModel })
+  const codex = options.codex
 
   switch (settings.engine) {
     case 'subscription':
@@ -94,6 +103,22 @@ export function resolveEngine(options: ResolveEngineOptions): Engine {
       return credentials.apiKey
         ? apiKey()
         : new SignedOutEngine('Mull is set to use an API key, but none is saved.')
+    case 'codex-subscription':
+      if (!codex?.path) {
+        return new SignedOutEngine('Mull is set to use Codex, but the Codex CLI is not installed.')
+      }
+      if (!codex.compatible) {
+        return new SignedOutEngine(codex.reason ?? 'The installed Codex CLI is not compatible with Mull.')
+      }
+      if (!codex.loggedIn) {
+        return new SignedOutEngine(codex.reason ?? 'Run codex login and sign in with ChatGPT first.')
+      }
+      return new CodexCliEngine({
+        codexPath: codex.path,
+        model: codexModel,
+        classifierModel: codexClassifierModel,
+        log
+      })
     default:
       if (subscription) return agent()
       if (credentials.apiKey) return apiKey()
@@ -198,6 +223,10 @@ export class EngineHolder implements Engine {
     return this.inner.model
   }
 
+  get classifierModel(): string | null | undefined {
+    return this.inner.classifierModel
+  }
+
   /** The old engine is disposed; a warm subprocess should not outlive it. */
   swap(next: Engine): void {
     const previous = this.inner
@@ -278,7 +307,14 @@ export class EngineHolder implements Engine {
 export async function engineStatus(
   engine: Engine,
   presence: { hasSubscription: boolean; hasApiKey: boolean },
-  detectedLogin: boolean
+  detectedLogin: boolean,
+  codex: CodexCliInspection = {
+    path: null,
+    version: null,
+    compatible: false,
+    loggedIn: false,
+    reason: null
+  }
 ): Promise<EngineStatus> {
   const state = await engine.ready()
   return {
@@ -288,6 +324,10 @@ export async function engineStatus(
     model: engine.model,
     hasSubscription: presence.hasSubscription,
     hasApiKey: presence.hasApiKey,
-    detectedLogin
+    detectedLogin,
+    codexCliFound: codex.path !== null,
+    codexCliCompatible: codex.compatible,
+    codexLoggedIn: codex.loggedIn,
+    codexVersion: codex.version
   }
 }

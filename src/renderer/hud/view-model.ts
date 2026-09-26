@@ -98,7 +98,10 @@ export function hudView(state: HudState, now = Date.now()): HudView {
     stage: stageFor(state, now),
     // Kept visible while armed even outside idle, so nobody leaves it on by
     // accident and wonders why everything got slow.
-    thinking: state.phase === 'idle' || state.thinking ? { on: state.thinking } : null,
+    thinking:
+      state.thinkingAvailable !== false && (state.phase === 'idle' || state.thinking)
+        ? { on: state.thinking }
+        : null,
     // Armed is kept visible outside idle for a sharper version of thinking's
     // reason: the cost of forgetting this one on is a run that goes by itself.
     autoRun: state.phase === 'idle' || state.autoRun ? { on: state.autoRun } : null,

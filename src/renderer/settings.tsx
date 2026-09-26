@@ -5,8 +5,9 @@ import { SPEECH_MODELS, type ModelStatus } from '@shared/model'
 import type { PermissionsSnapshot } from '@shared/permissions'
 import type { Settings } from '@shared/settings'
 import type { SkillRecord } from '@shared/skills'
-import { SETUP_TOKEN_COMMAND, type EngineStatus } from '@shared/engine'
+import { CODEX_LOGIN_COMMAND, SETUP_TOKEN_COMMAND, type EngineStatus } from '@shared/engine'
 import { PermissionRows } from './components/PermissionRows'
+import { engineModelControls } from './engine-models'
 import { applyTheme } from './theme'
 import './tokens.css'
 import './hud.css'
@@ -76,7 +77,6 @@ function EnginePane({
   const [key, setKey] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
-  const [copied, setCopied] = useState(false)
   const [waitingForBrowser, setWaitingForBrowser] = useState(false)
 
   const refresh = useCallback(() => {
@@ -148,14 +148,13 @@ function EnginePane({
     refresh()
   }
 
-  const copy = async (): Promise<void> => {
+  const copyCommand = async (command: string): Promise<void> => {
     try {
-      await navigator.clipboard.writeText(SETUP_TOKEN_COMMAND)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 1_600)
+      await navigator.clipboard.writeText(command)
+      setMessage(`Copied: ${command}`)
     } catch {
       // Clipboard denied: the command is on screen and selectable anyway.
-      setMessage(`Copy this and run it in a terminal: ${SETUP_TOKEN_COMMAND}`)
+      setMessage(`Copy this and run it in a terminal: ${command}`)
     }
   }
 
@@ -172,11 +171,21 @@ function EnginePane({
     </button>
   )
 
+  const codexSelected = settings.engine === 'codex-subscription'
+  const modelControls = engineModelControls(settings)
+  const providerName =
+    status?.kind === 'agent'
+      ? 'Claude subscription'
+      : status?.kind === 'api-key'
+        ? 'API key'
+        : status?.kind === 'codex'
+          ? 'Codex subscription'
+          : 'Engine'
   const live =
     status === null
       ? 'checking…'
       : status.state === 'ready'
-        ? `${status.kind === 'agent' ? 'Claude subscription' : 'API key'} · ${status.model ?? '—'}`
+        ? `${providerName} · ${status.model ?? '—'}`
         : status.state === 'signed-out'
           ? 'not connected'
           : `paused — ${status.reason ?? 'unavailable'}`
@@ -213,22 +222,29 @@ function EnginePane({
         hint={settings.routing === 'model' ? 'you wait for this one' : 'rules only — unused'}
       >
         <select
-          value={settings.classifierModel}
+          value={modelControls.classifierValue}
           disabled={settings.routing !== 'model'}
-          onChange={(event) =>
-            void update({ classifierModel: event.target.value as Settings['classifierModel'] })
-          }
+          onChange={(event) => {
+            if (codexSelected) {
+              void update({
+                codexClassifierModel: event.target.value as Settings['codexClassifierModel']
+              })
+            } else {
+              void update({ classifierModel: event.target.value as Settings['classifierModel'] })
+            }
+          }}
         >
-          <option value="haiku">Fast — Haiku 4.5</option>
-          <option value="sonnet">Careful — Sonnet 5</option>
-          <option value="opus">Most careful — Opus 5</option>
+          {modelControls.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
       </Row>
       <p>
-        This is the one decision nothing downstream reconsiders, so getting it wrong costs the
-        whole request — but you wait for it before anything happens, every time. Haiku is about a
-        second quicker and enough if you mostly dictate and edit. Move up if Mull keeps
-        misunderstanding what you asked for, and back down if the pause starts to show.
+        {codexSelected
+          ? 'Luna is fastest, Terra is the balanced default, and Sol is the most careful. This choice is kept separately from your Claude classifier model.'
+          : 'This is the one decision nothing downstream reconsiders, so getting it wrong costs the whole request — but you wait for it before anything happens, every time. Haiku is about a second quicker and enough if you mostly dictate and edit. Move up if Mull keeps misunderstanding what you asked for, and back down if the pause starts to show.'}
       </p>
 
       {/* One control, wherever it is needed: with no login at all it is the
@@ -298,8 +314,12 @@ function EnginePane({
               paste what it prints; it mints exactly the same token the button does.
             </p>
             <Row label="Command">
-              <button type="button" className="btn ghost" onClick={() => void copy()}>
-                {copied ? 'Copied' : 'Copy command'}
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => void copyCommand(SETUP_TOKEN_COMMAND)}
+              >
+                Copy command
               </button>
             </Row>
             <Row label="Token">
@@ -323,6 +343,42 @@ function EnginePane({
           </details>
         </>
       ) : null}
+
+      <Row
+        label="Codex subscription"
+        hint={
+          !status?.codexCliFound
+            ? 'CLI not found'
+            : !status.codexCliCompatible
+              ? `incompatible · ${status.codexVersion ?? 'update required'}`
+              : status.codexLoggedIn
+                ? `compatible${status.codexVersion ? ` · ${status.codexVersion}` : ''} · ChatGPT login found`
+                : `compatible${status.codexVersion ? ` · ${status.codexVersion}` : ''} · login required`
+        }
+      >
+        {status?.codexLoggedIn ? (
+          <span className="mono">signed in</span>
+        ) : (
+          <>
+            <code>{CODEX_LOGIN_COMMAND}</code>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => void copyCommand(CODEX_LOGIN_COMMAND)}
+            >
+              Copy
+            </button>
+            <button type="button" className="btn ghost" onClick={refresh}>
+              Refresh
+            </button>
+          </>
+        )}
+      </Row>
+      <p>
+        Uses the Codex CLI already installed on this Mac and its ChatGPT subscription login. Mull
+        never reads or stores that login. Runs are ephemeral, read-only, and ignore Codex user and
+        project configuration.
+      </p>
 
       <Row label="API key" hint={status?.hasApiKey ? 'saved' : 'optional'}>
         {status?.hasApiKey ? (
@@ -359,24 +415,39 @@ function EnginePane({
           <option value="auto">Automatic</option>
           <option value="subscription">Claude subscription</option>
           <option value="api-key">API key</option>
+          <option value="codex-subscription">Codex subscription · experimental</option>
         </select>
       </Row>
 
-      <Row label="Edits" hint="npm run bench:engine measures both">
+      <Row
+        label="Edits"
+        hint={codexSelected ? 'also answers and navigation' : 'also drafts, answers and navigation'}
+      >
         <select
-          value={settings.editModel}
-          onChange={(event) =>
-            void update({ editModel: event.target.value as Settings['editModel'] })
-          }
+          value={modelControls.editValue}
+          onChange={(event) => {
+            if (codexSelected) {
+              void update({ codexEditModel: event.target.value as Settings['codexEditModel'] })
+            } else {
+              void update({ editModel: event.target.value as Settings['editModel'] })
+            }
+          }}
         >
-          <option value="sonnet">Careful — Sonnet 5</option>
-          <option value="haiku">Fast — Haiku 4.5</option>
+          {modelControls.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
       </Row>
 
-      <Row label="Going and looking" hint="experimental — subscription lane only">
+      <Row
+        label="Going and looking"
+        hint={codexSelected ? 'Mull-managed steps on Codex' : 'experimental — Claude subscription only'}
+      >
         <select
-          value={settings.agentLoop ? 'loop' : 'steps'}
+          value={codexSelected ? 'steps' : settings.agentLoop ? 'loop' : 'steps'}
+          disabled={codexSelected}
           onChange={(event) => void update({ agentLoop: event.target.value === 'loop' })}
         >
           <option value="steps">One step at a time</option>
@@ -384,33 +455,39 @@ function EnginePane({
         </select>
       </Row>
       <p>
-        {settings.agentLoop
+        {codexSelected
+          ? 'Mull runs the navigation loop and asks Codex for one validated step at a time. The saved Claude agent-loop preference is preserved and returns if you switch lanes.'
+          : settings.agentLoop
           ? 'Mull gives the model tools — look, find, press — and it decides what to do next after seeing what each one returns. It can take up to 40 turns instead of 6, so it can do more than fetch one thing. Escape stops it at the next action; what has already been pressed stays pressed. Needs the Claude subscription lane.'
           : 'Mull runs the loop and asks the model for one step at a time, up to six, re-reading the window before each one. Reliable for “open this conversation and tell me what it says”, and not much more — it remembers nothing between steps.'}
       </p>
 
-      <Row
-        label="Which model drives"
-        hint={settings.agentLoop ? 'presses things in other apps' : 'unused while stepping'}
-      >
-        <select
-          value={settings.agentModel}
-          disabled={!settings.agentLoop}
-          onChange={(event) =>
-            void update({ agentModel: event.target.value as Settings['agentModel'] })
-          }
-        >
-          <option value="opus">Most careful — Opus 5</option>
-          <option value="sonnet">Careful — Sonnet 5</option>
-          <option value="haiku">Fast — Haiku 4.5</option>
-        </select>
-      </Row>
-      <p>
-        Separate from the edit model on purpose: a rewrite waits in a card for your ⏎, and a press
-        just happens. Cheaper is not simply faster here — every turn carries a fresh read of the
-        window, so a model that needs three more turns can take longer overall than the one that
-        costs more per turn. Which wins depends on the app being driven.
-      </p>
+      {modelControls.showAgentModel ? (
+        <>
+          <Row
+            label="Which model drives"
+            hint={settings.agentLoop ? 'presses things in other apps' : 'unused while stepping'}
+          >
+            <select
+              value={settings.agentModel}
+              disabled={!settings.agentLoop}
+              onChange={(event) =>
+                void update({ agentModel: event.target.value as Settings['agentModel'] })
+              }
+            >
+              <option value="opus">Most careful — Opus 5</option>
+              <option value="sonnet">Careful — Sonnet 5</option>
+              <option value="haiku">Fast — Haiku 4.5</option>
+            </select>
+          </Row>
+          <p>
+            Separate from the edit model on purpose: a rewrite waits in a card for your ⏎, and a
+            press just happens. Cheaper is not simply faster here — every turn carries a fresh read
+            of the window, so a model that needs three more turns can take longer overall than the
+            one that costs more per turn. Which wins depends on the app being driven.
+          </p>
+        </>
+      ) : null}
 
       <Row label="Connection">
         <button type="button" className="btn ghost" disabled={testing} onClick={() => void test()}>
@@ -420,8 +497,9 @@ function EnginePane({
 
       {message ? <p className="warn-line">{message}</p> : null}
       <p>
-        The model is sent your instruction and the text you selected, and returns a proposal. It
-        has no tools, no file access, and one turn — every change still waits for your ⏎.
+        {codexSelected
+          ? 'Codex is still an agent runtime: the CLI has no hard tools-off switch. Mull constrains each run, stops on any tool event, and never applies writing without your ⏎.'
+          : 'The model is sent your instruction and the text you selected, and returns a proposal. It has no tools, no file access, and one turn — every change still waits for your ⏎.'}
       </p>
     </section>
   )

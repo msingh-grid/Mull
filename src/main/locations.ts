@@ -1,6 +1,6 @@
-import { existsSync } from 'node:fs'
+import { accessSync, constants, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 
 /**
  * Where Mull's on-disk things live.
@@ -102,6 +102,42 @@ export function resolveWhisperCli(): string {
     if (existsSync(candidate)) return candidate
   }
   return WHISPER_CLI_CANDIDATES[0] as string
+}
+
+/**
+ * Find the user's own Codex CLI from a GUI process.
+ *
+ * Finder-launched applications inherit a very small PATH, so relying on
+ * `spawn('codex')` works in development and fails in the packaged app. Keep an
+ * explicit override for unusual installs, then search PATH and the ordinary
+ * user/Homebrew locations without invoking a shell.
+ */
+export function resolveCodexCliPath(
+  env: NodeJS.ProcessEnv = process.env,
+  home: string = homedir()
+): string | null {
+  const fromEnv = env['MULL_CODEX_CLI']?.trim()
+  const fromPath = (env['PATH'] ?? '')
+    .split(delimiter)
+    .filter(Boolean)
+    .map((directory) => join(directory, 'codex'))
+  const candidates = [
+    fromEnv,
+    ...fromPath,
+    join(home, '.local', 'bin', 'codex'),
+    '/opt/homebrew/bin/codex',
+    '/usr/local/bin/codex'
+  ].filter((candidate): candidate is string => Boolean(candidate))
+
+  for (const candidate of new Set(candidates)) {
+    try {
+      accessSync(candidate, constants.X_OK)
+      return candidate
+    } catch {
+      // Keep looking. A stale PATH entry is not an engine failure.
+    }
+  }
+  return null
 }
 
 /**
