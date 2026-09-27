@@ -1,0 +1,38 @@
+# npm run bench:report — internal dogfooding ledger, one team Mac, 17–25 Sep 2026
+#
+# What this is: Mull's own latency ledger (src/main/bench.ts), written by the app
+# during the team's own use. Lengths and timings only — no text is ever recorded.
+# What this is NOT: user research. These are team members, not the 3–5 users.
+#
+# Reading it (checked row by row, 26 Sep):
+# - The 3 ⌥Space dictations with no classifier ran 688 / 881 / 721 ms key-up→text.
+#   The 7 slow "applied" rows (2.5–8.1 s) were Fn requests the classifier routed
+#   back to "type it" (routedBy=model, classify 1.5–6.6 s). That cost is the
+#   classifier, not dictation — and is the case for keeping ⌥Space model-free.
+# - "Over budget 7 of 10": insert (paste strategy) sits at 296–309 ms against a
+#   300 ms budget — right on the line — plus one small.en ASR at 884 ms > 800 ms.
+# - 5 of 26 dictations failed with no-focused-element (spoke with no text field
+#   focused); 11 were discarded as too short / silence / empty.
+# - All 6 edits (17–18 Sep) were "unavailable: local-only": the engine was
+#   reachable but refused — rate limit, outage, no network, or no answer
+#   (src/main/engine/types.ts EngineState; health.ts). The ledger does not keep
+#   which. Zero edits completed in this ledger, so it holds no edit-lane latency.
+#
+~/Library/Application Support/mull/bench.jsonl
+32 rows, 2026-09-17 → 2026-09-25
+Dictation · 26
+  outcome        discarded 11 · applied 10 · failed 5
+  reason         too-short 6 · no-focused-element 5 · silence 3 · empty-transcript 2
+  model          ggml-base.en.bin 13 · n/a 11 · ggml-small.en.bin 2
+  app            — 11 · com.tinyspeck.slackmacgap 6 · com.microsoft.VSCode 4 · net.mull.app 3 · com.apple.systempreferences 2
+  key-up→text    n=10   median 3647 ms · p90 4050 ms · max 8139 ms
+  asr            n=10   median 435 ms · p90 790 ms · max 884 ms
+  insert         n=10   median 301 ms · p90 303 ms · max 309 ms
+  classify       n=7    median 2804 ms · p90 3110 ms · max 6605 ms
+  over budget    7 of 10 applied
+Edit · 6
+  outcome        unavailable 6
+  reason         local-only 6
+  engine         agent 6
+  app            com.tinyspeck.slackmacgap 3 · com.microsoft.VSCode 2 · com.apple.Preview 1
+  over budget    0 of 6

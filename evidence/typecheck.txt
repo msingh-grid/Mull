@@ -1,0 +1,6 @@
+# npm run typecheck — 2026-09-26 18:09 IST, node v22.14.0, macOS 15.7.7 arm64
+
+> mull@0.0.1 typecheck
+> tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json
+
+exit: 0
