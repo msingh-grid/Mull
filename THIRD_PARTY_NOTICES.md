@@ -37,7 +37,7 @@ The Swift sidecar (`mull-mac/`) has no package dependencies.
 |---|---|---|
 | App icon (`icons/main_app.svg` → `build/icon.png`) | The Noun Project | "Created by **Aaz** from the Noun Project" — Noun Project free-use licence, which requires this attribution (Creative Commons Attribution). The credit was stripped from the SVG in commit 6e0623d; this notice restores the attribution. |
 | Menu-bar icon (`icons/top_bar.svg`) | The Noun Project | "Created by **Dan Vo** from the Noun Project" — as above. |
-| Resting-state cat, "Marmalade" (`pet/cat/spritesheet.webp`, `src/renderer/assets/marmalade.webp`) | **Source not recorded in the repo** | ⚠ To be confirmed by the engineer who added it (commit dfff485) before any public release. |
+| Resting-state cat, "Marmalade" (`pet/cat/spritesheet.webp`, `src/renderer/assets/marmalade.webp`) | [codexpets.net/gallery/marmalade](https://codexpets.net/gallery/marmalade), created by **danielvictorino** on CodexPets.net (a community gallery of pet packages for the Codex app); downloaded by Mohit Singh, commit dfff485 | The resource page states no licence of its own, so the site's terms apply: "provided for personal, non-commercial use unless a specific resource page states otherwise", and "You may not redistribute, resell, or claim ownership of resources downloaded from this site." ⚠ Fine for this coursework prototype; **must be replaced (or licensed in writing) before any public or commercial release**, since shipping it in a DMG is redistribution. |
 
 Fonts: none are bundled. The interface uses macOS system fonts (New York, SF
 Pro, SF Mono) through `ui-serif` / `-apple-system` / `ui-monospace` stacks
