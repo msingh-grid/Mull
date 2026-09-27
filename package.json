@@ -6,6 +6,7 @@
   "main": "out/main/index.js",
   "scripts": {
     "postinstall": "install-electron",
+    "setup": "bash scripts/setup.sh",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "build:sidecar": "cd mull-mac && swift build -c release",
@@ -18,16 +19,21 @@
     "fetch:vad": "tsx scripts/fetch-model.ts vad",
     "smoke": "tsx scripts/smoke.ts",
     "bench:engine": "tsx scripts/bench-engine.ts",
+    "bench:report": "tsx scripts/bench-report.ts",
     "probe:asr": "tsx scripts/probe-asr.ts",
     "probe:skills": "tsx scripts/probe-skills.ts",
     "probe:overlay": "tsx scripts/probe-overlay.ts",
     "probe:findmiss": "tsx scripts/probe-findmiss.ts",
     "notarize:dryrun": "tsx scripts/notarize-dryrun.ts",
     "pack:local": "npm run build:sidecar && npm run build && tsx scripts/pack-local.ts",
-    "test": "vitest run"
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm test"
   },
   "author": "",
   "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.5"
+  },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "0.3.270",
     "@anthropic-ai/sdk": "0.125.0",

@@ -25,7 +25,7 @@ outside — reach for it when you need to know what a surface is supposed to do.
 npm run dev                # Electron + Vite, hot reload for renderer
 npm run build               # build both bundles
 npm run build:sidecar       # swift build -c release — MANUAL, run after any mull-mac/ change
-npm test                    # vitest run — the whole suite (863 tests / 49 files)
+npm test                    # vitest run — the whole suite (1,071 tests / 59 files)
 npx vitest run path/to/file.test.ts        # single file
 npx vitest run -t "test name substring"    # single test by name
 npm run typecheck           # tsc --noEmit for both tsconfig.node.json and tsconfig.web.json
@@ -126,7 +126,7 @@ Electron main ↔ Swift sidecar talk ndjson JSON-RPC over stdio, both directions
 validated against the single zod map in `src/shared/sidecar-api.ts`, so a
 Swift-side shape change fails at the boundary instead of three layers
 downstream. `FakeSidecar` (`src/main/services/sidecar.ts`) stands in for the
-real process in tests — none of the 829 vitest tests need a Mac, a subprocess,
+real process in tests — none of the vitest tests need a Mac, a subprocess,
 or a permission dialog. Prefer AppleScript over a new sidecar verb for
 anything that doesn't need `AXUIElement`/`CGEvent`/screen capture, given the
 manual-rebuild + strict-handshake cost described above (see

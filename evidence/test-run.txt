@@ -1,0 +1,1089 @@
+# npm test — 2026-09-26 18:09 IST, node v22.14.0, macOS 15.7.7 arm64
+
+ RUN  v5.0.0 /Users/skoduri/Desktop/thinkwithalma/Mull
+
+ ✓ src/renderer/hud/view-model.test.ts > hudView > gives every phase a state class and a label 2ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > shows the ghost hint only when idle and silent 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > shows a caret only while the transcript is still growing 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > correcting what Mull heard > offers the transcript for correction while a card waits on an answer 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > correcting what Mull heard > does not offer it when nothing is waiting on the user 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > correcting what Mull heard > does not offer it while the transcript is still growing 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > correcting what Mull heard > withdraws it while a plan is walking, and offers it again once it stops 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > holds the THINKING label until the card can actually be judged 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > says PREVIEW whenever a card is open, whatever the phase claims 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > names the three things a card can cost 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > calls a finished plan an answer, not a preview and not a plan 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > treats inserting as thinking visually, but says WRITING 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > takes mouse events only while a card is open 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > shows the last-action ghost only when idle 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > carries the answer through, flattened and clamped 0ms
+ ✓ src/renderer/hud/view-model.test.ts > hudView > passes chips and notices straight through 0ms
+ ✓ src/renderer/hud/view-model.test.ts > relativeTime > reads as recency while undo is still plausible 0ms
+ ✓ src/renderer/hud/view-model.test.ts > relativeTime > falls back to clock time past an hour 33ms
+ ✓ src/renderer/hud/view-model.test.ts > relativeTime > never reports the future as elapsed time 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the working line > says what Mull is doing while it is doing it 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the working line > holds the seconds back until there is actually a wait 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the working line > says nothing when nothing is in flight 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the working line > gives way to a card rather than describing the past 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the working line > survives a stage with no clock rather than counting from 1970 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the thinking toggle > is offered when idle, where the decision is actually made 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the thinking toggle > is hidden when the active engine cannot honour it 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the thinking toggle > gets out of the way while Mull is working 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the thinking toggle > stays visible while it is armed, whatever Mull is doing 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the auto-run toggle > is offered when idle, where the decision is actually made 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the auto-run toggle > gets out of the way while Mull is working 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the auto-run toggle > stays visible while it is armed, whatever Mull is doing 0ms
+ ✓ src/renderer/hud/view-model.test.ts > the auto-run toggle > is independent of thinking — one armed does not arm the other 0ms
+ ✓ src/main/engine/oauth.test.ts > pkcePair > derives the challenge as the S256 of the verifier 1ms
+ ✓ src/main/engine/oauth.test.ts > pkcePair > is url-safe and different every time 0ms
+ ✓ src/main/engine/oauth.test.ts > the request the CLI sends > is the request Mull sends — same params, same order, same shapes 1ms
+ ✓ src/main/engine/oauth.test.ts > authorizeUrl > asks for an inference-only code, bound to the loopback port 0ms
+ ✓ src/main/engine/oauth.test.ts > exchangeBody > carries the verifier and asks for a long-lived token 0ms
+ ✓ src/main/engine/oauth.test.ts > readCallback > takes a code whose state matches 0ms
+ ✓ src/main/engine/oauth.test.ts > readCallback > refuses a code whose state does not match 0ms
+ ✓ src/main/engine/oauth.test.ts > readCallback > reports the error the authorize page sent back 0ms
+ ✓ src/main/engine/oauth.test.ts > readCallback > ignores anything that is not the callback path 0ms
+ ✓ src/main/engine/oauth.test.ts > readCallback > refuses a callback with no code at all 0ms
+ ✓ src/main/engine/oauth.test.ts > signInWithBrowser > opens the browser, takes the redirect, and returns the token 38ms
+ ✓ src/main/engine/oauth.test.ts > signInWithBrowser > gives up when the browser never comes back 21ms
+ ✓ src/main/engine/oauth.test.ts > signInWithBrowser > stops when the user cancels 1ms
+ ✓ src/main/engine/oauth.test.ts > signInWithBrowser > says so when the exchange is refused 7ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > starts from defaults when there is no file, without creating one 2ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > round-trips a change through the file 1ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > round-trips the Codex lane without erasing Claude preferences 2ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > migrates old settings to independent Terra defaults without changing Claude choices 1ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > merges rather than replaces 1ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > refuses an invalid value and keeps the current one 1ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > drops unknown keys instead of persisting them 2ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > survives a corrupt file rather than taking the app down with it 3ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > falls back to defaults for a file with wrong-typed fields 3ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > reports rather than throws when the file cannot be written 1ms
+ ✓ src/main/store/settings.test.ts > SettingsStore > treats onboarding as never completed until it is stamped 2ms
+ ✓ src/main/engine/codex.test.ts > inspectCodexCli > requires every isolation flag and accepts ChatGPT status from stderr 1ms
+ ✓ src/main/engine/codex.test.ts > inspectCodexCli > does not treat API-key auth as subscription auth 1ms
+ ✓ src/main/engine/codex.test.ts > inspectCodexCli > refuses a CLI missing a required safety option 0ms
+ ✓ src/main/engine/codex.test.ts > inspectCodexCli > requires the config override capability used for safety and reasoning 0ms
+ ✓ src/main/engine/codex.test.ts > inspectCodexCli > requires explicit model selection support 0ms
+ ✓ src/main/engine/codex.test.ts > inspectCodexCli > rejects a nonzero login-status exit 0ms
+ ✓ src/main/engine/codex.test.ts > inspectCodexCli > rejects missing status text and command timeouts 0ms
+ ✓ src/main/engine/codex.test.ts > inspectCodexCli > reports a spawn error as an incompatible CLI 0ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > uses only the constrained ephemeral CLI contract and keeps the prompt on stdin 4ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > parses fragmented JSONL and monotonic message snapshots 2ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > logs content-free process timing from first event through completion 2ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > writes schemas and images with private permissions, then removes the workspace 2ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > supports classification, composition, answers and navigation without optional agent methods 4ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > kills and rejects a run as soon as Codex reports a tool item 2ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > rejects malformed JSONL and cleans up the private workspace 1ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > categorizes a synchronous spawn failure without logging its detail 1ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > maps CLI authentication failures to signed-out health 1ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > maps CLI usage limits to temporary local-only health 1ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > terminates a child that produces no response before the first-response deadline 3ms
+ ✓ src/main/engine/codex.test.ts > CodexCliEngine transport > terminates active children when disposed 2ms
+ ✓ src/main/services/sidecar.test.ts > SidecarClient > handshakes on start and sends the protocol version 2ms
+ ✓ src/main/services/sidecar.test.ts > SidecarClient > matches responses to their own request, out of order 12ms
+ ✓ src/main/services/sidecar.test.ts > SidecarClient > handles multiple messages arriving in one chunk 12ms
+ ✓ src/main/services/sidecar.test.ts > SidecarClient > surfaces JSON-RPC errors as typed rejections 1ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — what Mull is allowed to look at > reads the window when the user has allowed it 1ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — what Mull is allowed to look at > reads nothing at all when context is off 0ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — what Mull is allowed to look at > never reads a credential app, whatever the setting says 0ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — what Mull is allowed to look at > honours the user’s own exclusion list 0ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — what Mull is allowed to look at > reads nothing while secure input is on 0ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — what Mull is allowed to look at > reads nothing without Accessibility 0ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — the picture > is not asked for in text mode 2ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — the picture > is read in, and the file on disk is deleted 22ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — the picture > says why there is no picture rather than just not having one 1ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — budgets > keeps the end of a long window, not the beginning 0ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — budgets > reports truncation the sidecar itself hit 0ms
+ ✓ src/main/pipeline/context.test.ts > isExcluded > refuses every known credential app 0ms
+ ✓ src/main/pipeline/context.test.ts > isExcluded > allows an ordinary app 0ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > round-trips a secret without writing it in the clear 2ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > keeps the two secrets apart 2ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > tells a renderer whether a secret exists and nothing more 1ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > refuses to store a secret it cannot encrypt 1ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > signs out by removing the file once nothing is left 1ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > keeps the other secret when one is signed out 2ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > writes the file 0600 1ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > treats a secret it can no longer decrypt as gone, not as fatal 1ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > starts empty rather than throwing on a corrupt file 1ms
+ ✓ src/main/store/credentials.test.ts > CredentialsStore > treats blank input as signing out 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the preview > opens a card and fills it in as the engine writes 10ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the preview > stamps the Edit chip before anything is proposed 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the preview > changes nothing on its own 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — apply > replaces the selection and offers undo 3ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — apply > applies through paste without promising an undo it cannot keep 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — apply > records the edit in the ledger with a first-token time 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the refusals > cancels without writing, and still writes it down 3ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the refusals > refuses when the selection changed under the preview 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the refusals > refuses when the selection is gone 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the refusals > says so, and keeps dictation’s name out of it, when there is no engine 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the refusals > reports an engine that fails mid-stream rather than applying a fragment 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the refusals > closes the card instead of asking you to approve nothing 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — ⏎ while the engine is still writing > waits for the whole proposal instead of applying a fragment 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — a document target > says in the card that ⏎ rewrites the whole field 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — a document target > rewrites the field and stays undoable 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — a document target > refuses when the field changed under the preview 4ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — a document target > refuses in an app that will not take an AX write 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — a reference target > tells you the rewrite is going to your cursor, not over the text 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — a reference target > inserts rather than replaces, and records no `before` 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — a reference target > still refuses when the text it read has changed 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — a selection that is not where the caret is > refuses rather than pasting over whatever has focus 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — applying in an app with no readable focused element > applies a reference edit instead of refusing 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — applying in an app with no readable focused element > applies a selection edit instead of refusing 2ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — applying in an app with no readable focused element > still refuses when the selection really is gone 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — drafting a reply > says it is writing a reply, not editing anything 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — drafting a reply > renders as pure insertion — there is nothing being taken away 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — drafting a reply > asks the compose lane, not the edit lane 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — drafting a reply > inserts at the caret and replaces nothing 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — drafting a reply > does not demand a selection that never existed 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — drafting a reply > refuses when the user has moved to another app 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — drafting a reply > says so when the engine drafts nothing 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the second commit is offered > carries a commit when the user asked and the app has a known chord 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the second commit is offered > offers nothing in an app whose send chord Mull does not know 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the second commit is offered > offers nothing when the user did not ask to send 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the second commit is offered > offers nothing on every card that came before it 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — Apply alone never sends > writes the draft and posts no chord at all 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — Apply & send > writes, presses the app’s chord, and reports it only after looking 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — Apply & send > records the send as its own row, and one nothing can undo 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — Apply & send > says the send did not go through when the composer still holds the draft 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — Apply & send > says so plainly when the chord itself was refused 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — Apply & send > refuses to press anything once the user has switched apps 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — what is on screen cannot cause a send > offers no send and posts no chord, however loudly the window asks 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the ledger records the send separately > marks the row sent without folding the send into the edit’s totalMs 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the ledger records the send separately > records a send that did not land as such 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — the ledger records the send separately > leaves `sent` off an ordinary edit entirely 1ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — sendOnly > shows the text that is about to leave, and no Apply 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — sendOnly > never writes any text — the words were a command, not a message 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — sendOnly > refuses in an app whose send chord Mull does not know 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — sendOnly > refuses when the box is empty 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — sendOnly > re-reads the box before the keystroke and refuses if it moved 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — sendOnly > reports a chord that landed on nothing rather than claiming success 0ms
+ ✓ src/main/pipeline/sculpt.test.ts > SculptLane — sendOnly > writes the send down, and esc writes that down too 0ms
+ ✓ src/main/pipeline/navigate.test.ts > propose > puts up a card and presses nothing 4ms
+ ✓ src/main/pipeline/navigate.test.ts > Run > walks, shows each step as it happens, and comes back 52ms
+ ✓ src/main/pipeline/navigate.test.ts > Run > stops at the step budget rather than pressing on 51ms
+ ✓ src/main/pipeline/agent-tools.test.ts > look > reads the window’s words, and remembers them for the answer 1ms
+ ✓ src/main/pipeline/agent-tools.test.ts > look > numbers what can be pressed 1ms
+ ✓ src/main/pipeline/agent-tools.test.ts > look > does both in one call 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > look > does not forget a good read because a later window was empty 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > whether a press did anything > reports the verdict even when the look only asked for text 1ms
+ ✓ src/main/pipeline/agent-tools.test.ts > whether a press did anything > says nothing moved when nothing moved 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > whether a press did anything > does not let the press itself claim the window stood still 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > find > scans by itself rather than making the model call look first 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > find > says so plainly when nothing matches, and how much it looked at 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > find > when the words are there but nothing can be pressed > says they are on screen and are not controls 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > find > when the words are there but nothing can be pressed > does not suggest the keyboard, which cannot commit 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > find > when the words are there but nothing can be pressed > ignores prose that merely contains the word 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > find > when the words are there but nothing can be pressed > keeps the plain answer when the window cannot be read 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > find > does not report a cold browser’s toolbar as a page with nothing on it 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > a browser that is not showing its page > waits for a page that is still arriving 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > a browser that is not showing its page > says so when the page never arrives 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > a browser that is not showing its page > does not pay the wait twice for the same browser 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > a browser that is not showing its page > waits again once the run has gone somewhere else 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > press > refuses before anything has been looked at 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > press > presses, journals, and says what happened 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > press > throws the scan away afterwards, and says why 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > press > tells the next look whether the press moved the window 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > press > says plainly when a press changed nothing, so it is not tried again 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > press > reports a refusal rather than pretending it worked 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > setText > puts text in, and says what it replaced 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > setText > refuses before anything has been looked at 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > setText > will not type into something that does not take text 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > setText > keeps the scan, so a form can be filled in without re-reading it 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > once the user has stopped it > every tool refuses, and touches nothing 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > findTargets > puts an exact title first, then a prefix, then a mention 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > findTargets > prefers the label that is mostly the thing you asked for 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > findTargets > needs every word of a multi-word query to appear somewhere 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > findTargets > filters by kind when asked 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > findTargets > finds nothing for nothing 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > findTargets > never returns more than ten 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > tabs > says what is open, which page is showing, and every address 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > tabs > remembers every host it saw, which is what widens the url gate 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > tabs > says plainly when the app in front is not a browser 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > tabs > turns a refused permission into a sentence, and says not to retry 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > tabs > is refused once the user has stopped the run 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchTab > goes to a number from the list 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchTab > finds a tab by part of its address 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchTab > voids the scan, because the document underneath is a different one 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchTab > shows what is open when nothing matches, rather than just failing 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchTab > corrects both-or-neither instead of guessing 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchTab > is refused once the user has stopped the run 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > openUrl > opens a plain address 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > openUrl > refuses what checkUrl refuses, without reaching the browser 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > openUrl > opens somewhere it has already been, query string and all 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > openUrl > voids the scan and remembers where it went 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > openUrl > works even when the app in front is not a browser 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > openUrl > is refused once the user has stopped the run 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > which browser an address is for > opens a new tab unless the goal asked for the page to be replaced 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > which browser an address is for > refuses to guess when more than one browser is running 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > which browser an address is for > opens in the only browser running, rather than in the default one 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > which browser an address is for > uses the browser in front without asking anyone 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > with no bridge at all > says so and leaves the rest of the run alone 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > apps > lists what is running, with the id switchApp needs 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > apps > is what makes another application reachable at all 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > apps > says which permission is missing, and which tools to stop trying 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > apps > degrades to a sentence when this build has no bridge at all 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchApp > brings a listed application to the front and says so 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchApp > refuses an id it has not been shown, however plausible 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchApp > moves the hands, the journal and every cached belief together 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchApp > leaves the card row saying why rather than where 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchApp > does not activate the application it is already in 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > switchApp > refuses everything once the user has stopped the run 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > key > sends the key, once, and says nothing was submitted 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > key > repeats when asked, and counts what it actually sent 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > key > stops between presses, not only before the first 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > key > forgets what it read when the page moves under it 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > key > keeps the numbers, because paging does not renumber a window 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > key > refuses once the user has stopped the run 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > menus > groups the commands under the headings the app uses 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > menus > shows what is greyed out and what opens a submenu 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > menus > lists a command that will be refused, rather than pretending it is absent 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > menus > narrows to a query the way find does 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > menus > remembers every command even when the query showed one 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > menus > says so when a query matches nothing, and says how to see everything 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > menus > refuses in a sentence when this machine will not say 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > menus > tells the model to stop asking when the consent was declined 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > chooseMenu > chooses a command it was shown 1ms
+ ✓ src/main/pipeline/agent-tools.test.ts > chooseMenu > refuses a command it has not been shown 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > chooseMenu > will not send, even when the menu offered it 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > chooseMenu > refuses a submenu it cannot open, and says that is why 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > chooseMenu > refuses a greyed-out command and suggests why it is greyed out 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > chooseMenu > throws away everything it knew about the window 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > chooseMenu > leaves the card row saying why, not what 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > chooseMenu > does nothing once the run is stopped 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > scrollTo > refuses before anything has been looked at 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > scrollTo > scrolls, and leaves the numbers meaning what they meant 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > scrollTo > says what to do instead when the element cannot scroll itself 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > scrollTo > does nothing once the run is stopped 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > pressing a row that is being redrawn > looks once more and presses the same row 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > pressing a row that is being redrawn > refuses rather than guess when the title is no longer unique 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > pressing a row that is being redrawn > gives up honestly when the row is simply gone 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > pressing a row that is being redrawn > never retries something Mull refused on purpose 0ms
+ ✓ src/main/pipeline/agent-tools.test.ts > pressing a row that is being redrawn > does not retry after the user has pressed escape 0ms
+ ✓ src/main/services/insertion-table.test.ts > insertionProfile > prefers the invisible strategy in apps that support it 1ms
+ ✓ src/main/services/insertion-table.test.ts > insertionProfile > skips AX entirely for Chromium and Electron targets 0ms
+ ✓ src/main/services/insertion-table.test.ts > insertionProfile > gives Electron targets a longer paste settle than Cocoa ones 0ms
+ ✓ src/main/services/insertion-table.test.ts > insertionProfile > falls back to typing in terminals 0ms
+ ✓ src/main/services/insertion-table.test.ts > insertionProfile > refuses password managers outright 0ms
+ ✓ src/main/services/insertion-table.test.ts > insertionProfile > matches ToDesktop and JetBrains apps by prefix 0ms
+ ✓ src/main/services/insertion-table.test.ts > insertionProfile > prefers an exact match over a prefix one 0ms
+ ✓ src/main/services/insertion-table.test.ts > insertionProfile > falls back to the default for unknown and missing ids 0ms
+ ✓ src/main/services/insertion-table.test.ts > insertionProfile > documents why every classified app is classified 7ms
+ ✓ src/main/pipeline/agent.test.ts > propose > puts up a card and touches nothing 1ms
+ ✓ src/main/pipeline/agent.test.ts > propose > says the card starts something, so it survives Run 0ms
+ ✓ src/main/pipeline/agent.test.ts > Run > shows each act as it happens, then the answer, then puts the window back 54ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > runs the happy path: listen → think → insert → applied 36ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > rerun, after the user corrects the transcript > routes the corrected words without asking ASR a second time 63ms
+ ✓ src/main/engine/agent-loop.test.ts > runAgent > runs the tools the model asks for, and reports how it ended 5ms
+ ✓ src/main/engine/agent-loop.test.ts > runAgent > does not call a run that never said done a finished one 1ms
+ ✓ src/main/engine/agent-loop.test.ts > runAgent > names the budget that stopped it 1ms
+ ✓ src/main/engine/agent-loop.test.ts > the url gate > lets a plain address through to the handler 1ms
+ ✓ src/main/engine/agent-loop.test.ts > the url gate > stops a payload before the handler is ever entered 0ms
+ ✓ src/main/engine/agent-loop.test.ts > the url gate > stops a scheme that would run code in the page 0ms
+ ✓ src/main/engine/agent-loop.test.ts > the url gate > lets the run carry on afterwards, because a bad address is fixable 0ms
+ ✓ src/main/engine/agent-loop.test.ts > the url gate > falls back to the strict rule when no gate was supplied 1ms
+ ✓ src/main/engine/agent-loop.test.ts > the url gate > uses the lane’s gate when there is one 1ms
+ ✓ src/main/engine/agent-loop.test.ts > the url gate > is not a way round the stop 0ms
+ ✓ src/main/engine/agent-loop.test.ts > the stop > refuses every act once the user has stopped it 0ms
+ ✓ src/main/engine/agent-loop.test.ts > the stop > stops between one act and the next 0ms
+ ✓ src/main/engine/agent-loop.test.ts > the stop > reports a stop even when the turn finished cleanly 0ms
+ ✓ src/main/engine/agent-loop.test.ts > the deadline > ends a run that has gone quiet 2ms
+ ✓ src/shared/agent.test.ts > look > takes one of the three things a window can be read as 1ms
+ ✓ src/shared/agent.test.ts > look > refuses anything else 0ms
+ ✓ src/shared/agent.test.ts > find > takes words, and optionally a kind 0ms
+ ✓ src/shared/agent.test.ts > find > refuses an empty query and a query the size of a document 0ms
+ ✓ src/shared/agent.test.ts > find > knows only the two kinds a scan can hold 0ms
+ ✓ src/shared/agent.test.ts > press > takes an index out of the scan, and the title it was shown with 0ms
+ ✓ src/shared/agent.test.ts > press > refuses a press that does not say what it thinks it is pressing 0ms
+ ✓ src/shared/agent.test.ts > press > refuses an index that is not one 0ms
+ ✓ src/shared/agent.test.ts > setText > takes an index, the title it was shown with, and the text 0ms
+ ✓ src/shared/agent.test.ts > setText > refuses a write that does not say what it thinks it is writing into 0ms
+ ✓ src/shared/agent.test.ts > setText > allows clearing a field 0ms
+ ✓ src/shared/agent.test.ts > setText > refuses a document 0ms
+ ✓ src/shared/agent.test.ts > note > is one short clause, not an essay 0ms
+ ✓ src/shared/agent.test.ts > done > says which kind of done it is 0ms
+ ✓ src/shared/agent.test.ts > done > refuses to finish without saying whether it arrived 0ms
+ ✓ src/shared/agent.test.ts > tabs > takes nothing — it reads whatever is in front 0ms
+ ✓ src/shared/agent.test.ts > switchTab > takes a number from the list, or part of an address 0ms
+ ✓ src/shared/agent.test.ts > switchTab > refuses tab zero, which is a target index that wandered in 0ms
+ ✓ src/shared/agent.test.ts > switchTab > leaves both-or-neither to the handler, because the shape has to stay flat 0ms
+ ✓ src/shared/agent.test.ts > openUrl > takes an address, and optionally a new tab 0ms
+ ✓ src/shared/agent.test.ts > openUrl > caps how much one address can carry 0ms
+ ✓ src/shared/agent.test.ts > checkUrl > lets a plain address through 0ms
+ ✓ src/shared/agent.test.ts > checkUrl > refuses every scheme that is code rather than navigation 0ms
+ ✓ src/shared/agent.test.ts > checkUrl > refuses credentials smuggled into the address 0ms
+ ✓ src/shared/agent.test.ts > checkUrl > refuses something that is not an address at all 0ms
+ ✓ src/shared/agent.test.ts > checkUrl > refuses a query or a fragment to somewhere it has not been 0ms
+ ✓ src/shared/agent.test.ts > checkUrl > allows a query to a site that was already open 0ms
+ ✓ src/shared/agent.test.ts > checkUrl > matches hosts case-insensitively, so casing is not a bypass 0ms
+ ✓ src/shared/agent.test.ts > checkUrl > says why, in words a next turn can act on 0ms
+ ✓ src/shared/agent.test.ts > checkUrl > does not claim to stop a determined exfiltration, and this records that 0ms
+ ✓ src/shared/agent.test.ts > the closure > names fifteen tools and no more 0ms
+ ✓ src/shared/agent.test.ts > the closure > cannot express Return, under any spelling, in any tool 2ms
+ ✓ src/shared/agent.test.ts > the closure > gives the key tool eight keys, and Return is not among them 0ms
+ ✓ src/shared/agent.test.ts > the closure > asks for a strict subset of the keys the sidecar will navigate with 0ms
+ ✓ src/shared/agent.test.ts > the closure > bounds how many times one call may press a key 0ms
+ ✓ src/shared/agent.test.ts > the closure > lets exactly one tool change which application is in front 0ms
+ ✓ src/shared/agent.test.ts > the closure > makes switchApp explain itself before the screen moves 0ms
+ ✓ src/shared/agent.test.ts > the closure > lets exactly two tools carry text, for two different reasons 0ms
+ ✓ src/shared/agent.test.ts > the closure > lets exactly one tool reach off this machine 0ms
+ ✓ src/shared/agent.test.ts > the closure > has a shape here for every tool there is 0ms
+ ✓ src/shared/agent.test.ts > checkMenuCommand > refuses to send, however the application spells it 0ms
+ ✓ src/shared/agent.test.ts > checkMenuCommand > refuses to destroy, to quit and to spend 1ms
+ ✓ src/shared/agent.test.ts > checkMenuCommand > reads the heading as well as the command 0ms
+ ✓ src/shared/agent.test.ts > checkMenuCommand > allows the commands a run is for 0ms
+ ✓ src/shared/agent.test.ts > checkMenuCommand > leaves Close alone, on purpose 0ms
+ ✓ src/shared/agent.test.ts > checkMenuCommand > matches words, not substrings 0ms
+ ✓ src/shared/agent.test.ts > checkMenuCommand > does not mistake a paragraph style for blocking somebody 0ms
+ ✓ src/shared/agent.test.ts > toolName > is the full MCP name, not the bare one 0ms
+ ✓ src/main/services/send-table.test.ts > sendChord > knows the chat apps where Return sends 1ms
+ ✓ src/main/services/send-table.test.ts > sendChord > uses ⌘⇧D for Mail rather than Return 0ms
+ ✓ src/main/services/send-table.test.ts > sendChord > refuses everything it has not been told about 0ms
+ ✓ src/main/services/send-table.test.ts > sendChord > does not generalise from one app in a family to the rest 0ms
+ ✓ src/main/services/send-table.test.ts > sendChord > lists what it knows, sorted, for the settings pane 7ms
+ ✓ src/shared/sidecar-api.test.ts > sidecar-api zod contract > round-trips insertText params through parse (ndjson-style) 2ms
+ ✓ src/shared/sidecar-api.test.ts > sidecar-api zod contract > validates results and rejects bad strategies 1ms
+ ✓ src/shared/sidecar-api.test.ts > sidecar-api zod contract > requires the honesty fields — a result may not just omit `verified` 0ms
+ ✓ src/shared/sidecar-api.test.ts > sidecar-api zod contract > replaceRange carries the expectation that guards undo 1ms
+ ✓ src/shared/sidecar-api.test.ts > sidecar-api zod contract > windowContext bounds what may be asked of another app 0ms
+ ✓ src/shared/sidecar-api.test.ts > sidecar-api zod contract > windowContext says why there is no picture, not just that there isn’t one 1ms
+ ✓ src/shared/sidecar-api.test.ts > sidecar-api zod contract > checkPermissions gains screenRecording without breaking an older answer 0ms
+ ✓ src/shared/sidecar-api.test.ts > sidecar-api zod contract > applies defaults (focusedElement contextBytes = ±2KB) 0ms
+ ✓ src/shared/sidecar-api.test.ts > sidecar-api zod contract > exposes every contract method with params+result schemas 0ms
+ ✓ src/shared/sidecar-api.test.ts > uiTargets > parses a scan off the wire 1ms
+ ✓ src/shared/sidecar-api.test.ts > uiTargets > admits no kind but press and type 0ms
+ ✓ src/shared/sidecar-api.test.ts > uiTargets > keeps an unknown frame null rather than inventing one 0ms
+ ✓ src/shared/sidecar-api.test.ts > navKey > cannot express the send key, in any spelling 0ms
+ ✓ src/shared/sidecar-api.test.ts > navKey > cannot express a modifier at all 0ms
+ ✓ src/shared/sidecar-api.test.ts > navKey > is exactly the nine keys that only move a caret or a highlight 0ms
+ ✓ src/shared/sidecar-api.test.ts > pressTarget > carries the role and title the caller was shown 0ms
+ ✓ src/shared/sidecar-api.test.ts > pressTarget > says what the element turned out to be when it refuses 0ms
+ ✓ src/shared/sidecar-api.test.ts > notifications > validates the hotkey notification the event tap sends 0ms
+ ✓ src/shared/sidecar-api.test.ts > notifications > is a closed set — an unknown notification has no schema to hide behind 0ms
+ ✓ src/main/pipeline/navigate.test.ts > Run > ends the plan when the engine gives it nothing usable 52ms
+ ✓ src/main/store/skills.test.ts > learning > keeps a clause against the application it was learned in 2ms
+ ✓ src/main/store/skills.test.ts > learning > counts a lesson learned twice as a vote, not a second row 1ms
+ ✓ src/main/store/skills.test.ts > learning > keeps a do and an avoid that say the same words apart 0ms
+ ✓ src/main/store/skills.test.ts > learning > has nothing to learn from an empty list 0ms
+ ✓ src/main/store/skills.test.ts > what is shown, and what stops being shown > puts what has been present when things went well at the top 0ms
+ ✓ src/main/store/skills.test.ts > what is shown, and what stops being shown > forgets a clause that has ridden along with three failures and no wins 0ms
+ ✓ src/main/store/skills.test.ts > what is shown, and what stops being shown > keeps one that has failed but has also worked 0ms
+ ✓ src/main/store/skills.test.ts > what is shown, and what stops being shown > caps what one application may accumulate, dropping the worst 1ms
+ ✓ src/main/store/skills.test.ts > what is shown, and what stops being shown > counts the runs that were shown a clause 1ms
+ ✓ src/main/store/skills.test.ts > the user is in charge of it > lists everything, grouped by application 0ms
+ ✓ src/main/store/skills.test.ts > the user is in charge of it > forgets one, and forgets everything 0ms
+ ✓ src/main/store/skills.test.ts > the user is in charge of it > never asks about an application nobody named 0ms
+ ✓ src/main/store/skills.test.ts > the user is in charge of it > survives a database that has gone wrong 0ms
+ ✓ src/main/store/skills.test.ts > learning the same thing in different words > counts a reworded lesson as a vote for the one already kept 0ms
+ ✓ src/main/store/skills.test.ts > learning the same thing in different words > does not collapse advice that points the other way 0ms
+ ✓ src/main/store/skills.test.ts > learning the same thing in different words > keeps two lessons that are genuinely different 0ms
+ ✓ src/main/store/skills.test.ts > learning the same thing in different words > does not pretend to catch a rewording that shares only its nouns 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — it asks, because the key already decided > asks about words a verb table would have typed 2ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — it asks, because the key already decided > asks even when there is nothing in the field to edit 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — it asks, because the key already decided > types the words when the model says they were the message 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — obvious screen questions > routes the narrow accepted vocabulary directly to the answer lane 1ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — obvious screen questions > does not reinterpret declarative speech or general questions 1ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — obvious screen questions > requires readable screen context 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the model > routes the sentence that started all this 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the model > shows the model what is on screen, and only that 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the model > corrects a target that does not exist 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the model > falls back to the user’s words when the model returns no instruction 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the model > traces the actual engine and classifier model 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the fallback > uses the rules when the classifier is too slow 11ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the fallback > uses the rules when the classifier throws 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the fallback > does not even ask a signed-out engine 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the fallback > does not ask while the engine is rate limited 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the fallback > sends nothing anywhere when the user has chosen rules only 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — the fallback > never throws, whatever the engine does 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — composing a reply > routes a reply into an empty composer, which M4.1 would have typed 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — composing a reply > asks, even though the field is empty 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — composing a reply > refuses to compose when it cannot see anything 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — composing a reply > sends the window text to the classifier, but never the picture 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — an engine that cannot answer in time > keeps asking through four timeouts, and stops after the fifth 56ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — an engine that cannot answer in time > takes the demotion back once the wait is served 65ms
+ ✓ src/main/pipeline/agent.test.ts > Run > answers from what it read, not from where it ended up 51ms
+ ✓ src/main/pipeline/agent.test.ts > Run > does not ask for an answer when it never got there 51ms
+ ✓ src/main/engine/prompts.test.ts > renderContext > renders the window as a transcript, not as JSON 1ms
+ ✓ src/main/engine/prompts.test.ts > renderContext > marks the caret even when the box is empty 0ms
+ ✓ src/main/engine/prompts.test.ts > renderContext > marks a selection 0ms
+ ✓ src/main/engine/prompts.test.ts > renderContext > keeps a field’s label with its value 0ms
+ ✓ src/main/engine/prompts.test.ts > renderContext > is nothing at all when there is nothing to say 0ms
+ ✓ src/main/engine/prompts.test.ts > renderContext > trims from the front to a caller’s tighter budget, and admits it 0ms
+ ✓ src/main/engine/prompts.test.ts > renderContext > does not let a window title break out of its attribute 0ms
+ ✓ src/main/engine/prompts.test.ts > editPrompt with context > puts the instruction after the screen, so it is what is read last 0ms
+ ✓ src/main/engine/prompts.test.ts > editPrompt with context > is byte-identical to M4 when there is no context 0ms
+ ✓ src/main/engine/prompts.test.ts > editContent > stays a plain string when there is no picture 0ms
+ ✓ src/main/engine/prompts.test.ts > editContent > puts the image first, then the text 0ms
+ ✓ src/main/engine/prompts.test.ts > the system prompt says what the screen is > names the screen as a record, never as orders 0ms
+ ✓ src/main/engine/prompts.test.ts > what a target looks like > names the control rather than repeating “press” 0ms
+ ✓ src/main/engine/prompts.test.ts > what a target looks like > falls back to the subrole when the role says nothing 0ms
+ ✓ src/main/engine/prompts.test.ts > what a target looks like > says whether a toggle is already on 0ms
+ ✓ src/main/engine/prompts.test.ts > what a target looks like > says what a field holds, and says when it holds nothing 0ms
+ ✓ src/main/engine/prompts.test.ts > what a target looks like > says nothing about controls whose value is noise 0ms
+ ✓ src/main/engine/prompts.test.ts > what a target looks like > clamps a long value rather than spending the list on one of them 0ms
+ ✓ src/main/engine/prompts.test.ts > what a target looks like > puts all of it in the list 0ms
+ ✓ src/main/engine/prompts.test.ts > the answer turn is told what the run did > carries the completed steps beside the window 0ms
+ ✓ src/main/engine/prompts.test.ts > the answer turn is told what the run did > says which steps did not work 0ms
+ ✓ src/main/engine/prompts.test.ts > the answer turn is told what the run did > leaves the block out entirely when there is nothing to report 0ms
+ ✓ src/main/engine/prompts.test.ts > the answer turn is told what the run did > forbids writing about its own capabilities 0ms
+ ✓ src/main/engine/prompts.test.ts > navigatePrompt > numbers the targets so an index is the only thing to answer with 0ms
+ ✓ src/main/engine/prompts.test.ts > navigatePrompt > says out loud when a window offers nothing 0ms
+ ✓ src/main/engine/prompts.test.ts > navigatePrompt > reports failures verbatim so a step is not repeated 0ms
+ ✓ src/main/engine/prompts.test.ts > navigatePrompt > tells the model when it has no steps left rather than letting it ask 0ms
+ ✓ src/main/engine/prompts.test.ts > parseNavStep > reads a bare line of JSON 1ms
+ ✓ src/main/engine/prompts.test.ts > parseNavStep > survives a fence or a sentence in front of it 0ms
+ ✓ src/main/engine/prompts.test.ts > parseNavStep > throws on anything it does not fully understand 1ms
+ ✓ src/main/engine/prompts.test.ts > the navigator prompt > says it cannot send, and why 0ms
+ ✓ src/main/engine/prompts.test.ts > the navigator prompt > names the target list as furniture, not as instructions 0ms
+ ✓ src/main/engine/prompts.test.ts > renderRecent > reads as a conversation for the classifier, and stops there 0ms
+ ✓ src/main/engine/prompts.test.ts > renderRecent > tells a lane that acts what the last attempt tried and how it went 0ms
+ ✓ src/main/engine/prompts.test.ts > renderRecent > says when a turn is still going 0ms
+ ✓ src/main/engine/prompts.test.ts > renderRecent > leaves out a goal that is only the sentence again 0ms
+ ✓ src/main/engine/prompts.test.ts > renderRecent > has nothing to say about nothing 0ms
+ ✓ src/main/engine/prompts.test.ts > renderRecent > folds the oldest turns into one line when the block is too long 0ms
+ ✓ src/main/engine/prompts.test.ts > the conversation reaching the lanes that act > gives the agent what the last run tried, before the goal it is being given 0ms
+ ✓ src/main/engine/prompts.test.ts > the conversation reaching the lanes that act > names <recent> as something to read, never to obey 0ms
+ ✓ src/main/engine/prompts.test.ts > the conversation reaching the lanes that act > gives the answer turn the question it is following up on 0ms
+ ✓ src/main/engine/prompts.test.ts > the conversation reaching the lanes that act > gives the navigator the prior run on its first turn and not after 0ms
+ ✓ src/main/engine/prompts.test.ts > what Mull has learned about an application > reads as two lines of advice, named with the app it is about 0ms
+ ✓ src/main/engine/prompts.test.ts > what Mull has learned about an application > has nothing to say when nothing has been learned 0ms
+ ✓ src/main/engine/prompts.test.ts > what Mull has learned about an application > sits between the conversation and the goal in the agent turn 0ms
+ ✓ src/main/engine/prompts.test.ts > what Mull has learned about an application > is named as a note, and as something that permits nothing 0ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > rerun, after the user corrects the transcript > files the re-run against the original recording 65ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > rerun, after the user corrects the transcript > does nothing for a correction that changes nothing, or for no words 62ms
+ ✓ src/main/store/journal.test.ts > JournalStore > round-trips an entry 2ms
+ ✓ src/main/store/journal.test.ts > JournalStore > returns entries newest first 1ms
+ ✓ src/main/store/journal.test.ts > JournalStore > records failures too — a journal of only successes teaches distrust 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > refuses to mark an unverified write undoable 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > refuses to mark a write with no caret undoable 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > finds the newest undoable entry, optionally scoped to an app 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > stops offering an entry once it is undone 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > can retire an entry without claiming it was undone 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > prunes to the newest N, since every row holds what was said 1ms
+ ✓ src/main/store/journal.test.ts > JournalStore > survives an entry whose intent JSON is unreadable 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > round-trips the group, the timing and the detail 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > leaves them null on a row that carries none 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > amend > fills in what was not knowable when the row was written 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > amend > cannot rewrite the verdict, the text, or the receipt 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > amend > is a no-op on a row that is not there 0ms
+ ✓ src/main/store/journal.test.ts > JournalStore > amend > clamps model-authored strings rather than storing a paragraph 0ms
+ ✓ src/main/pipeline/actions.test.ts > NavStepSchema — the vocabulary is the safety argument > cannot describe sending, in any spelling 2ms
+ ✓ src/main/pipeline/actions.test.ts > NavStepSchema — the vocabulary is the safety argument > bounds the one string the navigator may write 1ms
+ ✓ src/main/pipeline/actions.test.ts > press > presses a row the scan actually offered 1ms
+ ✓ src/main/pipeline/actions.test.ts > press > refuses an index the scan never had 0ms
+ ✓ src/main/pipeline/actions.test.ts > press > will not press something destructive, whatever it was asked 0ms
+ ✓ src/main/pipeline/actions.test.ts > press > refuses when the row has become somebody else 0ms
+ ✓ src/main/pipeline/actions.test.ts > press > refuses a target that advertises no press action 0ms
+ ✓ src/main/pipeline/actions.test.ts > press > presses a text-role control that carries AXPress 0ms
+ ✓ src/main/pipeline/actions.test.ts > press > says where the press took us 0ms
+ ✓ src/main/pipeline/actions.test.ts > press > says plainly when the press changed nothing 0ms
+ ✓ src/main/pipeline/actions.test.ts > press > still reports the press when there is no window title to compare 0ms
+ ✓ src/main/pipeline/actions.test.ts > type — the only text the navigator can put anywhere > types a query into a search field 0ms
+ ✓ src/main/pipeline/actions.test.ts > type — the only text the navigator can put anywhere > types into any text control, including a composer 0ms
+ ✓ src/main/pipeline/actions.test.ts > type — the only text the navigator can put anywhere > has no way to send what it typed 0ms
+ ✓ src/main/pipeline/actions.test.ts > type — the only text the navigator can put anywhere > will not type into a button 0ms
+ ✓ src/main/pipeline/actions.test.ts > type — the only text the navigator can put anywhere > records what the field held before it wrote over it 0ms
+ ✓ src/main/pipeline/actions.test.ts > the journal > writes each step as its own command, never as an undoable edit 0ms
+ ✓ src/main/pipeline/actions.test.ts > the journal > records a refusal too — a plan that did nothing should say so 0ms
+ ✓ src/main/pipeline/actions.test.ts > restore > goes back to the app the user was in 0ms
+ ✓ src/main/pipeline/actions.test.ts > restore > presses the row the window title named, when it can find it 0ms
+ ✓ src/main/pipeline/actions.test.ts > restore > says where it left the window when the row is gone 0ms
+ ✓ src/main/pipeline/actions.test.ts > place > keeps the part that names the place 0ms
+ ✓ src/main/pipeline/actions.test.ts > place > leaves a title that is already one thing alone 0ms
+ ✓ src/main/pipeline/actions.test.ts > place > truncates a single segment that is a paragraph 0ms
+ ✓ src/main/services/hud.test.ts > HudController > passes pipeline state through untouched when no card is open 1ms
+ ✓ src/main/services/hud.test.ts > HudController > shows the card and takes over the phase while one is open 0ms
+ ✓ src/main/services/hud.test.ts > HudController > does not let a finishing utterance clear a card the user is still reading 0ms
+ ✓ src/main/services/hud.test.ts > HudController > keeps the pipeline’s transcript and app visible under the card 0ms
+ ✓ src/main/services/hud.test.ts > HudController > claims ⏎ and esc only for the life of the card 0ms
+ ✓ src/main/services/hud.test.ts > HudController > routes the global chords to the card’s handler 0ms
+ ✓ src/main/services/hud.test.ts > HudController > releases the chords even when the handler throws 0ms
+ ✓ src/main/services/hud.test.ts > HudController > answers a card exactly once 0ms
+ ✓ src/main/services/hud.test.ts > HudController > makes the panel interactive only while a card is open 1ms
+ ✓ src/main/services/hud.test.ts > HudController > ignores updates and closes when nothing is open 0ms
+ ✓ src/main/services/hud.test.ts > HudController — the second commit > claims ⌘⏎ only for a card that carries one 0ms
+ ✓ src/main/services/hud.test.ts > HudController — the second commit > delivers apply-send and closes, giving ⌘⏎ back 0ms
+ ✓ src/main/services/hud.test.ts > HudController — the second commit > downgrades apply-send to apply on a card with no commit 0ms
+ ✓ src/main/services/hud.test.ts > HudController — the bare-send card > claims ⌘⏎ for it 0ms
+ ✓ src/main/services/hud.test.ts > HudController — the bare-send card > swallows ⏎ rather than letting it through or closing the card 0ms
+ ✓ src/main/services/hud.test.ts > HudController — the answer card > never delivers an apply, whatever asks for one 0ms
+ ✓ src/main/services/hud.test.ts > HudController — the answer card > reads ⏎ as done 0ms
+ ✓ src/main/services/hud.test.ts > HudController — the answer card > cannot be talked into a commit it does not have 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > keeps the card, and the chords, when Run starts something 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > lets the run write onto the card that started it 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > closes anyway when the handler throws on its way to starting 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > closes when the handler starts nothing and shuts the card itself 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > swallows ⏎ once the run is under way 1ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > swallows ⏎ before the run has drawn its first frame 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > swallows ⏎ over a run nobody pressed Run for 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > keeps the card up when esc stops a run, so the stop is readable 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > answers esc normally again once the run says it is over 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > hands the panel over when a new utterance arrives mid-run 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > a plan that runs nothing closes like any other card 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > still answers a diff card once and gives the chords straight back 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > still answers a diff card with a commit once and gives the chords straight back 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > still answers a send card once and gives the chords straight back 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > still answers an answer card once and gives the chords straight back 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a run > still answers a plan card that runs nothing once and gives the chords straight back 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a plan that has finished walking > never runs it a second time 0ms
+ ✓ src/main/services/hud.test.ts > HudController — a plan that has finished walking > leaves an unrun plan alone 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > removes exactly the characters it inserted 2ms
+ ✓ src/main/services/undo.test.ts > UndoService > restores the previous text for an edit 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > has nothing to undo on a fresh journal 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > refuses when the user has moved to another app 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > refuses when nothing has focus 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > refuses when its own text has been edited 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > refuses when its text is gone entirely 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > removes its own text even when you kept typing after it 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > removes its own text from wherever the caret happens to be 1ms
+ ✓ src/main/services/undo.test.ts > UndoService > relies on the sidecar when the element won’t hand over its text 1ms
+ ✓ src/main/services/undo.test.ts > UndoService > undoes through an element that won’t hand over its text, when the range does match 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > refuses to touch a write it could not verify 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > reports secure input rather than silently doing nothing 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > undoes only once 0ms
+ ✓ src/main/services/undo.test.ts > UndoService > peek says what ⌥Z would reverse 0ms
+ ✓ src/main/services/undo.test.ts > UndoService.undo(entryId) > reverses a specific entry, not merely the newest one 0ms
+ ✓ src/main/services/undo.test.ts > UndoService.undo(entryId) > refuses an entry it has already undone 0ms
+ ✓ src/main/services/undo.test.ts > UndoService.undo(entryId) > refuses an entry the store never considered undoable 0ms
+ ✓ src/main/services/undo.test.ts > UndoService.undo(entryId) > refuses an id that is not in the journal 0ms
+ ✓ src/main/services/undo.test.ts > UndoService.undo(entryId) > applies the same app gate as ⌥Z 0ms
+ ✓ src/main/services/undo.test.ts > UndoService.undo(entryId) > applies the same changed-text gate as ⌥Z 0ms
+ ✓ src/main/services/undo.test.ts > UndoService — a sent message > refuses by name rather than with the generic not-verified sentence 0ms
+ ✓ src/main/services/undo.test.ts > UndoService — a sent message > is never what ⌥Z reaches for 0ms
+ ✓ src/main/services/undo.test.ts > UndoService — a send that did not go > does not warn about unsending a message that never left 0ms
+ ✓ src/main/pipeline/navigate.test.ts > Run > reports a refused step on the card rather than swallowing it 51ms
+ ✓ src/main/pipeline/navigate.test.ts > did that step do anything > reads a replaced target list as movement, whatever the title says 0ms
+ ✓ src/main/pipeline/navigate.test.ts > did that step do anything > does not call a message arriving mid-plan a change 0ms
+ ✓ src/main/pipeline/navigate.test.ts > did that step do anything > tells the next turn what the last press actually did 51ms
+ ✓ src/main/pipeline/agent.test.ts > Run > fills in a field and says so on the card, without submitting anything 50ms
+ ✓ src/main/pipeline/agent.test.ts > Run > still puts the window back when the loop throws 52ms
+ ✓ src/main/engine/fake.test.ts > FakeEngine > does not claim to be an engine 1ms
+ ✓ src/main/engine/fake.test.ts > FakeEngine > produces the design’s canonical edit from the canonical sample 1ms
+ ✓ src/main/engine/fake.test.ts > FakeEngine > falls back to the canonical sample when given nothing to edit 1ms
+ ✓ src/main/engine/fake.test.ts > FakeEngine > streams strictly growing prefixes, ending at the final text 0ms
+ ✓ src/main/engine/fake.test.ts > FakeEngine > edits the user’s own text rather than inventing a paraphrase 1ms
+ ✓ src/main/engine/fake.test.ts > FakeEngine > navigates by matching a word from the goal, then reads, then stops 0ms
+ ✓ src/main/engine/fake.test.ts > FakeEngine > stops rather than pressing on when the budget runs out 0ms
+ ✓ src/main/engine/fake.test.ts > tighten > leaves already-crisp text alone 0ms
+ ✓ src/main/engine/fake.test.ts > tighten > does not leave a dangling comma or double space behind a cut 0ms
+ ✓ src/main/engine/fake.test.ts > tighten > re-capitalises when the opening words are what got cut 0ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > rerun, after the user corrects the transcript > does nothing before anything has been said 32ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > rerun, after the user corrects the transcript > refuses while the next utterance is already being captured 62ms
+ ✓ src/main/pipeline/router.test.ts > nothingToEdit > is true only when there is neither a selection nor field text 1ms
+ ✓ src/main/pipeline/router.test.ts > route — the degraded fallback > edits the selection when there is one 1ms
+ ✓ src/main/pipeline/router.test.ts > route — the degraded fallback > edits the field when there is text but nothing highlighted 0ms
+ ✓ src/main/pipeline/router.test.ts > route — the degraded fallback > composes from the window when there is nothing to edit 0ms
+ ✓ src/main/pipeline/router.test.ts > route — the degraded fallback > types the words when there is nothing to act on at all 0ms
+ ✓ src/main/pipeline/router.test.ts > route — the degraded fallback > no longer depends on recognising the verb 0ms
+ ✓ src/main/pipeline/router.test.ts > justSend — the only thing that can press send > hears a send command with nothing else in it 0ms
+ ✓ src/main/pipeline/router.test.ts > justSend — the only thing that can press send > does not hear one where there is a message to write 0ms
+ ✓ src/main/pipeline/router.test.ts > justSend — the only thing that can press send > routes to send only when there is something in the box 0ms
+ ✓ src/main/pipeline/router.test.ts > wantsSend > hears the verb leading the request 0ms
+ ✓ src/main/pipeline/router.test.ts > wantsSend > hears it tacked onto the end, and strips it from the request 0ms
+ ✓ src/main/pipeline/router.test.ts > wantsSend > leaves an ordinary request alone 0ms
+ ✓ src/main/pipeline/router.test.ts > wantsSend > does not hear a send in speech that merely contains the word 0ms
+ ✓ src/main/store/captures.test.ts > CaptureStore > keeps the transcript as it was rendered into the prompt 1ms
+ ✓ src/main/store/captures.test.ts > CaptureStore > carries why there was no picture, not just that there wasn’t one 0ms
+ ✓ src/main/store/captures.test.ts > CaptureStore > writes the picture beside the row it belongs to 1ms
+ ✓ src/main/store/captures.test.ts > CaptureStore > refuses to resolve anything but a bare filename 0ms
+ ✓ src/main/store/captures.test.ts > CaptureStore > says nothing rather than guessing when the picture has been pruned 0ms
+ ✓ src/main/store/captures.test.ts > CaptureStore > keeps only the most recent few pictures 1ms
+ ✓ src/main/store/captures.test.ts > CaptureStore > is a no-op when there was nothing to see 0ms
+ ✓ src/main/pipeline/navigate.test.ts > giving up > tries once more when it surrenders with budget to spare 51ms
+ ✓ src/main/pipeline/navigate.test.ts > giving up > accepts the second refusal rather than arguing with itself 51ms
+ ✓ src/main/engine/agent.test.ts > AgentSession — the restart race between an old subprocess and a new one > does not write the turn until the (re)spawned session proves it is alive 2ms
+ ✓ src/main/engine/agent.test.ts > AgentSession — the restart race between an old subprocess and a new one > restarting for a thinking-mode change closes the old subprocess before the new one answers 1ms
+ ✓ src/main/engine/agent.test.ts > AgentSession — the restart race between an old subprocess and a new one > a session that dies right after a restart rejects with its own error, and logs its stderr 1ms
+ ✓ src/main/engine/agent.test.ts > AgentSession — the restart race between an old subprocess and a new one > the existing 60s watchdog still owns a handshake that never resolves, and a later resolve is a no-op 2ms
+ ✓ src/main/engine/agent.test.ts > AgentSession — the restart race between an old subprocess and a new one > warm() stays synchronous and non-blocking even when the handshake never resolves 0ms
+ ✓ src/main/services/turns.test.ts > remembering > keeps what was said, where, and what came back 1ms
+ ✓ src/main/services/turns.test.ts > remembering > remembers a turn that has not finished yet, and says so 0ms
+ ✓ src/main/services/turns.test.ts > remembering > gives a late answer to the turn that was waiting for it 0ms
+ ✓ src/main/services/turns.test.ts > remembering > ignores an empty outcome rather than filing a blank 0ms
+ ✓ src/main/services/turns.test.ts > the bounds > keeps only the last few 0ms
+ ✓ src/main/services/turns.test.ts > the bounds > forgets anything older than the window 0ms
+ ✓ src/main/services/turns.test.ts > the bounds > clamps what it keeps, and tidies the whitespace 0ms
+ ✓ src/main/services/turns.test.ts > the bounds > can be told to forget everything 0ms
+ ✓ src/main/services/turns.test.ts > what a run did, added after the fact > files the goal, the route and the ending against the open turn 1ms
+ ✓ src/main/services/turns.test.ts > what a run did, added after the fact > records a run that ended with nothing to say 0ms
+ ✓ src/main/services/turns.test.ts > what a run did, added after the fact > takes the expanded goal at open, when the classifier wrote one 0ms
+ ✓ src/main/services/turns.test.ts > what a run did, added after the fact > clamps the late fields too 0ms
+ ✓ src/main/services/turns.test.ts > fitting the block into a prompt > keeps everything when everything fits 0ms
+ ✓ src/main/services/turns.test.ts > fitting the block into a prompt > drops the oldest when the block is too long, and says how many 0ms
+ ✓ src/main/services/turns.test.ts > fitting the block into a prompt > always keeps the newest turn, however long it is 0ms
+ ✓ src/main/services/turns.test.ts > fitting the block into a prompt > has nothing to say about nothing 0ms
+ ✓ src/main/services/turns.test.ts > what a run did, in one clause > joins the acts in the lane’s own verbs 0ms
+ ✓ src/main/services/turns.test.ts > what a run did, in one clause > marks the ones that failed 0ms
+ ✓ src/main/services/turns.test.ts > what a run did, in one clause > keeps the tail and counts the rest 0ms
+ ✓ src/main/services/turns.test.ts > what a run did, in one clause > leaves out an act that is still running, and says nothing about nothing 0ms
+ ✓ src/main/pipeline/agent.test.ts > auto-run > goes without a press, and says on the card that nobody pressed anything 51ms
+ ✓ src/main/pipeline/agent.test.ts > auto-run > starts exactly one walk, however many applies arrive after it 52ms
+ ✓ src/main/services/sidecar.test.ts > SidecarClient > rejects when the sidecar goes silent 502ms
+ ✓ src/main/services/browser.test.ts > reading what is open > parses the browser’s own numbering, titles and addresses 1ms
+ ✓ src/main/services/browser.test.ts > reading what is open > survives a browser with nothing open 0ms
+ ✓ src/main/services/browser.test.ts > reading what is open > drops a malformed record instead of misreading the rest 0ms
+ ✓ src/main/services/browser.test.ts > the three dialects > asks Chromium browsers for a title and an active tab index 0ms
+ ✓ src/main/services/browser.test.ts > the three dialects > asks Safari for a name and a current tab 0ms
+ ✓ src/main/services/browser.test.ts > the three dialects > asks Arc for an active tab by identity, never by index 0ms
+ ✓ src/main/services/browser.test.ts > the three dialects > switches an Arc tab by telling it to select 0ms
+ ✓ src/main/services/browser.test.ts > the three dialects > never stores Arc’s window in a variable 0ms
+ ✓ src/main/services/browser.test.ts > the three dialects > opens an Arc tab the one way that is not a Little Arc 0ms
+ ✓ src/main/services/browser.test.ts > the three dialects > refuses an app that is not a browser rather than guessing a dialect 1ms
+ ✓ src/main/services/browser.test.ts > the cap on how many tabs are reported > keeps the first forty when the one showing is among them 0ms
+ ✓ src/main/services/browser.test.ts > the cap on how many tabs are reported > keeps the one showing even when it falls past the cap 0ms
+ ✓ src/main/services/browser.test.ts > the cap on how many tabs are reported > leaves a short list alone 0ms
+ ✓ src/main/services/browser.test.ts > outside input is an argument > never puts a URL in the script 0ms
+ ✓ src/main/services/browser.test.ts > outside input is an argument > never puts a tab number in the script 0ms
+ ✓ src/main/services/browser.test.ts > outside input is an argument > writes the bundle id into the script, because AppleScript leaves no choice 0ms
+ ✓ src/main/services/browser.test.ts > outside input is an argument > refuses a bundle id that is not one of ours, so nothing else can get in 0ms
+ ✓ src/main/services/browser.test.ts > outside input is an argument > passes newTab as a flag the script reads, not as a different script 0ms
+ ✓ src/main/services/browser.test.ts > when there is no browser in front > hands the URL to the default browser 0ms
+ ✓ src/main/services/browser.test.ts > the ways a browser says no > carries the reason through rather than flattening it 0ms
+ ✓ src/main/services/browser.test.ts > the ways a browser says no > refuses when a switch came back saying nothing 0ms
+ ✓ src/main/services/sidecar.test.ts > SidecarClient > fails pending calls when the process dies 12ms
+ ✓ src/main/services/sidecar.test.ts > SidecarClient > validates results against the contract 1ms
+ ✓ src/main/services/sidecar.test.ts > FakeSidecar > refuses insertion when secure input is on 0ms
+ ✓ src/main/services/sidecar.test.ts > FakeSidecar > records what it was asked to insert 0ms
+ ✓ src/main/engine/classify.test.ts > classifyPrompt > separates what was said from what is on screen 1ms
+ ✓ src/main/engine/classify.test.ts > classifyPrompt > names the window, so “is Priya already in front of me” is answerable 0ms
+ ✓ src/main/engine/classify.test.ts > classifyPrompt > lists what can be pressed, so “here” can be told from “elsewhere” 0ms
+ ✓ src/main/engine/classify.test.ts > classifyPrompt > says how many targets it left out rather than silently truncating 0ms
+ ✓ src/main/engine/classify.test.ts > classifyPrompt > sends no target block when the window was never scanned 0ms
+ ✓ src/main/engine/classify.test.ts > classifyPrompt > shows the selection instead of the field when there is one 0ms
+ ✓ src/main/engine/classify.test.ts > classifyPrompt > says when the field is a window onto something longer 0ms
+ ✓ src/main/engine/classify.test.ts > classifyPrompt > sends nothing about the page when there is nothing to send 0ms
+ ✓ src/main/engine/classify.test.ts > classifyPrompt > clamps a long field from both ends 0ms
+ ✓ src/main/engine/classify.test.ts > parseClassification > reads the two shapes it asked for 1ms
+ ✓ src/main/engine/classify.test.ts > parseClassification > digs the JSON out of a model that added prose anyway 0ms
+ ✓ src/main/engine/classify.test.ts > parseClassification > answers dictate for anything it cannot read 1ms
+ ✓ src/main/engine/classify.test.ts > parseClassification > trims the instruction it was given 0ms
+ ✓ src/main/engine/classify.test.ts > renderRecent > says what was asked, where, and what came back 0ms
+ ✓ src/main/engine/classify.test.ts > renderRecent > marks a turn that has not finished 0ms
+ ✓ src/main/engine/classify.test.ts > renderRecent > renders nothing at all when there is nothing to say 0ms
+ ✓ src/main/engine/classify.test.ts > renderRecent > goes into the prompt ahead of the window 0ms
+ ✓ src/main/engine/classify.test.ts > renderRecent > is absent from a prompt with no history, so nothing changes for the first thing said 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — an engine that cannot answer in time > does not give up on an engine that is merely erroring 0ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — an engine that cannot answer in time > forgets the moment the engine is swapped 66ms
+ ✓ src/main/pipeline/intent.test.ts > IntentRouter — an engine that cannot answer in time > a single answer in time clears the count 183ms
+ ✓ src/main/pipeline/intent.test.ts > usableGoal > keeps a goal that says where to go and what to do there 0ms
+ ✓ src/main/pipeline/intent.test.ts > usableGoal > falls back to the user’s own words when handed a name 0ms
+ ✓ src/main/pipeline/intent.test.ts > usableGoal > falls back on a noun phrase with no verb in it 0ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > records stage timings for every utterance 31ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > discards an accidental tap without calling ASR 32ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > discards silence rather than transcribing room tone 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > discards a transcript that cleans down to nothing 32ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — automatic > prefers the subscription, which is the one that costs nothing extra 1ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — automatic > uses a Claude Code login already on the Mac, with nothing pasted 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — automatic > falls back to the API key when that is all there is 1ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — automatic > is signed out when there is nothing at all 0ms
+ ✓ src/main/engine/select.test.ts > inheritedLogin > uses the Mac’s Claude Code login when the user has not said otherwise 0ms
+ ✓ src/main/engine/select.test.ts > inheritedLogin > stops using it once the user signs out of it 0ms
+ ✓ src/main/engine/select.test.ts > inheritedLogin > is false when there is no login to inherit, whatever the setting says 0ms
+ ✓ src/main/engine/select.test.ts > inheritedLogin > leaves the engine signed out when that login was the only credential 0ms
+ ✓ src/main/engine/select.test.ts > inheritedLogin > does not touch a token the user pasted themselves 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — an explicit choice > refuses rather than quietly using the credential you did not pick 1ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — an explicit choice > refuses the other way round too 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — an explicit choice > constructs Codex only when explicitly selected and ready 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — an explicit choice > never falls back from an unavailable explicit Codex lane to Claude 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — an explicit choice > gives Codex-specific guidance when the CLI is missing 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — an explicit choice > gives Codex-specific guidance when ChatGPT login is missing 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — an explicit choice > does not add Codex to Automatic even when its login is ready 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — the model switch > maps careful and fast to real model ids 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — the model switch > gives each of the three jobs its own model 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — the model switch > moves one without moving the others 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — the model switch > passes the routing model to the API-key lane too 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — the model switch > defaults to the same models the constants name 0ms
+ ✓ src/main/engine/select.test.ts > resolveEngine — the model switch > spells every choice as a real model id 0ms
+ ✓ src/main/engine/select.test.ts > EngineHolder > reports whatever it currently holds 0ms
+ ✓ src/main/engine/select.test.ts > EngineHolder > disposes the engine it replaces, so a warm subprocess cannot outlive it 0ms
+ ✓ src/main/engine/select.test.ts > the edit prompt > separates the instruction from the passage it is about 0ms
+ ✓ src/main/engine/select.test.ts > the edit prompt > unwraps a model that ignored "no fences" 0ms
+ ✓ src/main/engine/select.test.ts > the edit prompt > unwraps an echoed delimiter 0ms
+ ✓ src/main/engine/select.test.ts > the edit prompt > leaves ordinary text exactly alone 0ms
+ ✓ src/main/engine/select.test.ts > the edit prompt > keeps the writing’s own structure 0ms
+ ✓ src/main/engine/select.test.ts > the edit prompt > strips only an opening marker mid-stream 0ms
+ ✓ src/main/engine/select.test.ts > the edit prompt > gives the reply room to be as long as the passage 0ms
+ ✓ src/main/locations.test.ts > resolveCodexCliPath > prefers the explicit override 2ms
+ ✓ src/main/locations.test.ts > resolveCodexCliPath > searches PATH without invoking a shell 1ms
+ ✓ src/main/locations.test.ts > resolveCodexCliPath > finds the ordinary user-local installation when a GUI PATH is sparse 1ms
+ ✓ src/main/locations.test.ts > resolveCodexCliPath > ignores stale and non-executable candidates 1ms
+ ✓ src/main/pipeline/navigate.test.ts > giving up > does not re-ask when there is no budget left to use 51ms
+ ✓ src/main/pipeline/navigate.test.ts > giving up > files a surrender as failed, and hands the panel the reason 52ms
+ ✓ src/renderer/journal/row-model.test.ts > rowKind > names the intent when the action stuck 1ms
+ ✓ src/renderer/journal/row-model.test.ts > rowKind > lets the outcome outrank the intent 0ms
+ ✓ src/renderer/journal/row-model.test.ts > rowMeasure > counts changes when there were changes to count 0ms
+ ✓ src/renderer/journal/row-model.test.ts > rowMeasure > falls back to characters for plain dictation 0ms
+ ✓ src/renderer/journal/row-model.test.ts > rowMeasure > says nothing when there is nothing to measure 0ms
+ ✓ src/renderer/journal/row-model.test.ts > undoAffordance > offers undo for a verified, applied entry 0ms
+ ✓ src/renderer/journal/row-model.test.ts > undoAffordance > always gives a reason when it refuses — never a hidden button 0ms
+ ✓ src/renderer/journal/row-model.test.ts > undoAffordance > points at ⌘Z when the app never confirmed the write 0ms
+ ✓ src/renderer/journal/row-model.test.ts > undoAffordance > says so plainly once an entry has been undone 0ms
+ ✓ src/renderer/journal/row-model.test.ts > a send row > says what it was, not merely that it was a command 0ms
+ ✓ src/renderer/journal/row-model.test.ts > a send row > says it cannot be unsent, rather than blaming the app 0ms
+ ✓ src/renderer/journal/row-model.test.ts > a send row > does not claim a failed send is unsendable 0ms
+ ✓ src/renderer/journal/row-model.test.ts > a navigation row > names the verb instead of calling everything a command 0ms
+ ✓ src/renderer/journal/row-model.test.ts > a navigation row > still says Failed first — what happened outranks what it was 0ms
+ ✓ src/renderer/journal/row-model.test.ts > a navigation row > falls back to Command for a verb nobody has taught it 0ms
+ ✓ src/renderer/journal/row-model.test.ts > a navigation row > knows an expedition from one of its steps 0ms
+ ✓ src/renderer/journal/row-model.test.ts > a navigation row > measures an expedition in work done, not characters returned 0ms
+ ✓ src/renderer/journal/row-model.test.ts > a navigation row > says nothing about elapsed time when nobody measured it 0ms
+ ✓ src/renderer/journal/row-model.test.ts > groupEntries > gathers an expedition and its steps, whatever order they arrive in 0ms
+ ✓ src/renderer/journal/row-model.test.ts > groupEntries > lets the plan take the head even when it sorts below a step 0ms
+ ✓ src/renderer/journal/row-model.test.ts > groupEntries > keeps an orphaned step visible rather than swallowing it 0ms
+ ✓ src/renderer/journal/row-model.test.ts > groupEntries > leaves every ungrouped row exactly as it was 0ms
+ ✓ src/renderer/journal/row-model.test.ts > opening a group > shows nothing until the plan is opened 0ms
+ ✓ src/renderer/journal/row-model.test.ts > opening a group > lists the steps once the plan is open 0ms
+ ✓ src/renderer/journal/row-model.test.ts > opening a group > stays open when a step is the thing expanded 0ms
+ ✓ src/renderer/journal/row-model.test.ts > opening a group > is unaffected by a row in some other group 0ms
+ ✓ src/renderer/journal/row-model.test.ts > opening a group > hands a closing step back to its plan, not to nothing 0ms
+ ✓ src/main/audio/wav.test.ts > concatFloat32 > joins chunks in order 1ms
+ ✓ src/main/audio/wav.test.ts > concatFloat32 > handles the empty case 0ms
+ ✓ src/main/audio/wav.test.ts > floatToInt16 > maps the full range and clamps beyond it 0ms
+ ✓ src/main/audio/wav.test.ts > peakAmplitude > finds the loudest absolute sample 0ms
+ ✓ src/main/audio/wav.test.ts > encodeWav > writes a RIFF/WAVE container 0ms
+ ✓ src/main/audio/wav.test.ts > encodeWav > declares 16-bit mono at the given rate 0ms
+ ✓ src/main/audio/wav.test.ts > encodeWav > sizes the header against the payload 0ms
+ ✓ src/main/audio/wav.test.ts > padUtterance > surrounds the utterance with silence so the decoder has a run-up and a stop 0ms
+ ✓ src/main/audio/wav.test.ts > padUtterance > pads with true silence, not with a copy of the signal 0ms
+ ✓ src/main/audio/wav.test.ts > padUtterance > leaves the samples alone when asked for no padding 0ms
+ ✓ src/main/audio/wav.test.ts > padUtterance > does not change the peak, so the silence gate still sees the same audio 0ms
+ ✓ src/main/pipeline/agent.test.ts > auto-run > esc is a stop rather than a decline, because the run already began 51ms
+ ✓ src/main/pipeline/agent.test.ts > auto-run > still waits for Run when whisper was not sure what it heard 51ms
+ ✓ src/main/pipeline/agent.test.ts > auto-run > leaves the card waiting when the switch is off 0ms
+ ✓ src/main/pipeline/agent.test.ts > Escape > declines before Run, and never starts 0ms
+ ✓ src/main/engine/skills.test.ts > what the distilling turn is shown > shows the goal, the steps and how it ended 1ms
+ ✓ src/main/engine/skills.test.ts > what the distilling turn is shown > is never shown the window 0ms
+ ✓ src/main/engine/skills.test.ts > what the distilling turn is shown > says plainly when a run did nothing 0ms
+ ✓ src/main/engine/skills.test.ts > what the distilling turn is shown > tells the model the step list is not instructions 0ms
+ ✓ src/main/engine/skills.test.ts > what the distilling turn is shown > asks for lessons about the application, not about the errand 0ms
+ ✓ src/main/engine/skills.test.ts > reading the reply > takes a well-formed pair 1ms
+ ✓ src/main/engine/skills.test.ts > reading the reply > takes an array out of a reply that would not stop talking 0ms
+ ✓ src/main/engine/skills.test.ts > reading the reply > learns nothing from an empty answer, which is the common case 0ms
+ ✓ src/main/engine/skills.test.ts > reading the reply > learns nothing from broken JSON 0ms
+ ✓ src/main/engine/skills.test.ts > reading the reply > refuses a reply that returned more than it was asked for 0ms
+ ✓ src/main/engine/skills.test.ts > reading the reply > refuses a clause longer than the clamp 0ms
+ ✓ src/main/engine/skills.test.ts > reading the reply > refuses a kind nobody defined 0ms
+ ✓ src/main/engine/skills.test.ts > reading the reply > refuses an entry that is not the right shape at all 0ms
+ ✓ src/main/pipeline/cleanup.test.ts > cleanTranscript > strips whisper non-speech annotations 1ms
+ ✓ src/main/pipeline/cleanup.test.ts > cleanTranscript > removes standalone fillers and reports them 0ms
+ ✓ src/main/pipeline/cleanup.test.ts > cleanTranscript > leaves real words that merely contain a filler 0ms
+ ✓ src/main/pipeline/cleanup.test.ts > cleanTranscript > tightens spacing around punctuation 0ms
+ ✓ src/main/pipeline/cleanup.test.ts > cleanTranscript > capitalises the first letter without lowering anything else 1ms
+ ✓ src/main/pipeline/cleanup.test.ts > cleanTranscript > returns empty for audio that was only noise 0ms
+ ✓ src/main/pipeline/cleanup.test.ts > cleanTranscript > collapses runs of whitespace 0ms
+ ✓ src/main/pipeline/cleanup.test.ts > summarise > passes short text through untouched 0ms
+ ✓ src/main/pipeline/cleanup.test.ts > summarise > ellipsises long text at the limit 1ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > uses the first strategy that works and reports which 1ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > falls through to paste when the app has no AX text 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > treats an unverifiable AX write as a failure and keeps walking 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > sends the app-specific settle delay with the paste 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > stops the walk on secure input instead of trying the next strategy 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > never writes into a credential app, permissions notwithstanding 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > remembers that an app has no AX text and stops paying for the attempt 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > keeps the demotion per app 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > reports the last reason when every strategy is refused 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > survives a sidecar that throws mid-chain 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > carries `verified: null` through rather than inventing confidence 0ms
+ ✓ src/main/services/insertion.test.ts > InsertionService > replaceSelection returns what it overwrote 0ms
+ ✓ src/main/services/sender.test.ts > Sender > posts the app’s chord and confirms from an emptied composer 2ms
+ ✓ src/main/services/sender.test.ts > Sender > calls it unsent when the composer still holds the text 0ms
+ ✓ src/main/services/sender.test.ts > Sender > says it cannot tell when there is no composer left to read 0ms
+ ✓ src/main/services/sender.test.ts > Sender > refuses to press anything in the wrong app 0ms
+ ✓ src/main/services/sender.test.ts > Sender > reports a chord the window server would not take 0ms
+ ✓ src/main/services/sender.test.ts > Sender > refuses while secure input is on, like every other write verb 0ms
+ ✓ src/main/services/sender.test.ts > describeSend > never claims more than it saw 0ms
+ ✓ src/main/store/turns.test.ts > keeping the turns between launches > writes what it was given and reads it back unchanged 1ms
+ ✓ src/main/store/turns.test.ts > keeping the turns between launches > does not invent fields a turn never had 1ms
+ ✓ src/main/store/turns.test.ts > keeping the turns between launches > replaces rather than appends, so the disk is whatever the memory holds 0ms
+ ✓ src/main/store/turns.test.ts > keeping the turns between launches > refuses to hand back a turn older than the window 0ms
+ ✓ src/main/store/turns.test.ts > keeping the turns between launches > can be emptied 0ms
+ ✓ src/main/store/turns.test.ts > keeping the turns between launches > survives a database that has gone wrong 0ms
+ ✓ src/main/store/turns.test.ts > the memory, with a disk under it > comes back with what the last launch was talking about 0ms
+ ✓ src/main/store/turns.test.ts > the memory, with a disk under it > never remembers more than this build is willing to 0ms
+ ✓ src/main/store/turns.test.ts > the memory, with a disk under it > forgets on disk too 0ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > aborts as soon as secure input is detected at key-down 30ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > reports an insertion failure instead of pretending it worked 32ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > ignores a second key-down while already capturing 0ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > ignores a key-up that never had a key-down 31ms
+ ✓ src/main/services/chords.test.ts > ChordScope > claims nothing until a card is open 1ms
+ ✓ src/main/services/chords.test.ts > ChordScope > claims ⏎ and esc while held, and gives them back on release 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope > suspend, while the user is typing into the panel > hands the chords back and claims exactly them again 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope > suspend, while the user is typing into the panel > keeps the same handler across a suspension 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope > suspend, while the user is typing into the panel > leaves nothing behind when the card closes mid-correction 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope > suspend, while the user is typing into the panel > is inert with no card open, and does not double up 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope > routes each chord to its action 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope > refuses to hold just one of the pair — a card you can apply but not cancel is a trap 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope > swaps the handler when a second card replaces the first, without double-registering 1ms
+ ✓ src/main/services/chords.test.ts > ChordScope > is safe to release twice, and stops calling back after release 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope > survives a globalShortcut that throws 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope — the send chord > does not claim ⌘⏎ for an ordinary card 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope — the send chord > claims it for a card that offers a second commit, and routes it 0ms
+ ✓ src/main/services/chords.test.ts > ChordScope — the send chord > keeps the card usable when ⌘⏎ is claimed elsewhere 0ms
+ ✓ src/main/pipeline/navigate.test.ts > what the panel says afterwards > leaves behind the answer, not the question 51ms
+ ✓ src/main/pipeline/navigate.test.ts > what the journal keeps > ties every step to the expedition that took it 51ms
+ ✓ src/main/pipeline/ask.test.ts > AskLane > shows an answer card, and it is the only kind of card it can show 1ms
+ ✓ src/main/pipeline/ask.test.ts > AskLane > proposes nothing: no commit, no target, no text to insert 1ms
+ ✓ src/main/pipeline/ask.test.ts > AskLane > is asked the user’s question about the window they were looking at 0ms
+ ✓ src/main/pipeline/ask.test.ts > AskLane > opens on the first token and grows 0ms
+ ✓ src/main/pipeline/ask.test.ts > AskLane > says so rather than showing an empty card 0ms
+ ✓ src/main/pipeline/ask.test.ts > AskLane > reports an engine failure instead of leaving the panel working 0ms
+ ✓ src/main/pipeline/ask.test.ts > AskLane > writes one row carrying the picture, and nothing to undo 1ms
+ ✓ src/renderer/hud/pet.test.ts > when the panel is worth its space > shows only the pet at rest 1ms
+ ✓ src/renderer/hud/pet.test.ts > when the panel is worth its space > raises the panel for every phase that is not plain idle 0ms
+ ✓ src/renderer/hud/pet.test.ts > when the panel is worth its space > raises the panel for a card and for a notice, whatever the phase says 0ms
+ ✓ src/renderer/hud/pet.test.ts > when the panel is worth its space > holds the panel open for a while after an action, then folds 0ms
+ ✓ src/renderer/hud/pet.test.ts > when the panel is worth its space > does not reopen for an action from an hour ago 0ms
+ ✓ src/renderer/hud/pet.test.ts > what the user asked for > opens a resting panel and keeps it open 0ms
+ ✓ src/renderer/hud/pet.test.ts > what the user asked for > closes a lingering panel early 0ms
+ ✓ src/renderer/hud/pet.test.ts > what the user asked for > cannot fold a panel something else is holding open 0ms
+ ✓ src/renderer/hud/pet.test.ts > what the user asked for > says which way the click goes 0ms
+ ✓ src/renderer/hud/pet.test.ts > mood > reads the phase 0ms
+ ✓ src/renderer/hud/pet.test.ts > mood > lets a card outrank the phase 0ms
+ ✓ src/renderer/hud/pet.test.ts > mood > treats a notice as trouble even in idle 0ms
+ ✓ src/renderer/hud/pet.test.ts > mood > dozes off once it has been left alone 0ms
+ ✓ src/renderer/hud/pet.test.ts > mood > never dozes through something happening 0ms
+ ✓ src/renderer/hud/pet.test.ts > mood > gives every mood a sentence 0ms
+ ✓ src/renderer/hud/pet.test.ts > petWakes > asks to be woken when the linger expires 0ms
+ ✓ src/renderer/hud/pet.test.ts > petWakes > asks to be woken when the pet is due to fall asleep 0ms
+ ✓ src/renderer/hud/pet.test.ts > petWakes > takes whichever comes first 0ms
+ ✓ src/renderer/hud/pet.test.ts > petWakes > reports the doze once the linger has been and gone 0ms
+ ✓ src/renderer/hud/pet.test.ts > petWakes > asks for nothing once everything has already happened 0ms
+ ✓ src/renderer/hud/pet.test.ts > petWakes > asks for nothing while main is driving the panel anyway 0ms
+ ✓ src/renderer/hud/pet.test.ts > petWakes > does not wait for a linger the user has already overruled 0ms
+ ✓ src/renderer/hud/pet.test.ts > isTap > forgives a small drift and nothing more 0ms
+ ✓ src/main/pipeline/agent.test.ts > Escape > stops a run that has started, and nothing more happens 50ms
+ ✓ src/main/pipeline/agent.test.ts > Escape > files a stop as the run’s own row, never as a decline 52ms
+ ✓ src/main/pipeline/agent.test.ts > the journal > ties every act to the run that took it 50ms
+ ✓ src/main/pipeline/diff.test.ts > diffText > reports no changes when nothing changed 1ms
+ ✓ src/main/pipeline/diff.test.ts > diffText > handles both sides being empty 0ms
+ ✓ src/main/pipeline/diff.test.ts > diffText > marks a replaced word as one change, not two 0ms
+ ✓ src/main/pipeline/diff.test.ts > diffText > counts a pure insertion and a pure deletion separately 0ms
+ ✓ src/main/pipeline/diff.test.ts > diffText > counts a full rewrite word by word, paired in place 0ms
+ ✓ src/main/pipeline/diff.test.ts > diffText > grows text from nothing without emitting an empty deletion 0ms
+ ✓ src/main/pipeline/diff.test.ts > diffText > preserves whitespace so the body reads as prose, not tokens 0ms
+ ✓ src/main/pipeline/diff.test.ts > appliedText > reconstructs exactly the after-string the diff was built from 0ms
+ ✓ src/main/pipeline/asr-prompt.test.ts > buildAsrPrompt > is empty when there is nothing on screen to name 1ms
+ ✓ src/main/pipeline/asr-prompt.test.ts > buildAsrPrompt > names the app being spoken into first 0ms
+ ✓ src/main/pipeline/asr-prompt.test.ts > buildAsrPrompt > picks up channel handles, which are never false positives 0ms
+ ✓ src/main/pipeline/asr-prompt.test.ts > buildAsrPrompt > splits adjacent names rather than merging them into one 0ms
+ ✓ src/main/pipeline/asr-prompt.test.ts > buildAsrPrompt > keeps proper nouns and drops capitalised sentence openers 0ms
+ ✓ src/main/pipeline/asr-prompt.test.ts > buildAsrPrompt > is a noun list, never a sentence — whisper continues prose it is given 0ms
+ ✓ src/main/pipeline/asr-prompt.test.ts > buildAsrPrompt > never exceeds the character cap whisper enforces 0ms
+ ✓ src/main/pipeline/asr-prompt.test.ts > buildAsrPrompt > does not list the same name twice in different cases 0ms
+ ✓ src/main/services/hotkey.test.ts > HotkeyService ladder > prefers the sidecar tap and never touches globalShortcut 1ms
+ ✓ src/main/services/hotkey.test.ts > HotkeyService ladder > turns tap notifications into start and stop 0ms
+ ✓ src/main/services/hotkey.test.ts > HotkeyService ladder > falls back to the old path when Input Monitoring is missing 0ms
+ ✓ src/main/services/hotkey.test.ts > HotkeyService ladder > falls back when the sidecar throws 0ms
+ ✓ src/main/services/hotkey.test.ts > HotkeyService ladder > refuses to leave a tap running that nothing can listen to 0ms
+ ✓ src/main/services/hotkey.test.ts > HotkeyService ladder > reports unavailable when nothing at all is on offer 0ms
+ ✓ src/main/services/hotkey.test.ts > HotkeyService ladder > reports which key was held, so the pipeline knows what was meant 0ms
+ ✓ src/main/services/hotkey.test.ts > HotkeyService ladder > cannot offer instructions without the tap, and says so 0ms
+ ✓ src/main/services/hotkey.test.ts > HotkeyService ladder > stops the tap and unsubscribes on shutdown 1ms
+ ✓ src/main/trace.test.ts > Trace > stamps every step with the time since the key went down 1ms
+ ✓ src/main/trace.test.ts > Trace > puts every step of one utterance under the same id 0ms
+ ✓ src/main/trace.test.ts > Trace > gives the next utterance a different one 0ms
+ ✓ src/main/trace.test.ts > Trace > renders fields on one line and drops the empty ones 0ms
+ ✓ src/main/trace.test.ts > Trace > clamps the one free-text field rather than pasting a paragraph 0ms
+ ✓ src/main/trace.test.ts > Trace > quotes what needs it and leaves the rest bare 0ms
+ ✓ src/main/trace.test.ts > Trace > reports a failure at warn, with the reason attached 0ms
+ ✓ src/main/trace.test.ts > Trace > times one operation without disturbing the utterance clock 0ms
+ ✓ src/main/trace.test.ts > Trace > forks to restart the clock while keeping the id 0ms
+ ✓ src/main/trace.test.ts > kb > reads as a size, and says nothing when there is nothing 0ms
+ ✓ src/main/services/menus.test.ts > reading the menus > gives back the heading, the command, and both of its states 1ms
+ ✓ src/main/services/menus.test.ts > reading the menus > keeps the commands the app has greyed out 0ms
+ ✓ src/main/services/menus.test.ts > reading the menus > drops a malformed record instead of misreading the rest 0ms
+ ✓ src/main/services/menus.test.ts > reading the menus > drops a command with no name 0ms
+ ✓ src/main/services/menus.test.ts > reading the menus > treats an empty answer as a failure, because every Mac app has menus 0ms
+ ✓ src/main/services/menus.test.ts > the scripts > passes the process, the menu and the command as arguments, never as script 0ms
+ ✓ src/main/services/menus.test.ts > the scripts > reads with the process as its only argument 0ms
+ ✓ src/main/services/menus.test.ts > the scripts > never reads the Apple menu 0ms
+ ✓ src/main/services/menus.test.ts > the scripts > fetches each property as a whole list rather than item by item 0ms
+ ✓ src/main/services/menus.test.ts > when System Events says no > carries the reason through rather than flattening it 0ms
+ ✓ src/main/services/hud-position.test.ts > defaultPosition > puts the panel at the bottom centre, per docs/DESIGN.md §6.1 1ms
+ ✓ src/main/services/hud-position.test.ts > defaultPosition > follows the work area onto a second display 0ms
+ ✓ src/main/services/hud-position.test.ts > nextPosition > moves the window by exactly what the pointer moved 0ms
+ ✓ src/main/services/hud-position.test.ts > nextPosition > stays put when the pointer does 0ms
+ ✓ src/main/services/hud-position.test.ts > nextPosition > cannot be dragged off the left or right 0ms
+ ✓ src/main/services/hud-position.test.ts > nextPosition > cannot be dragged below the bottom of the screen 0ms
+ ✓ src/main/services/hud-position.test.ts > nextPosition > can be dragged to the top, with the panel still showing 0ms
+ ✓ src/main/services/hud-position.test.ts > clampPosition > rescues a position saved on a display that is gone 0ms
+ ✓ src/main/services/hud-position.test.ts > clampPosition > leaves a position that is already fine exactly alone 0ms
+ ✓ src/main/services/hud-position.test.ts > clampPosition > survives a work area smaller than the window 0ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > journals an applied utterance as undoable, with the caret it landed at 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > journals a failed insertion too, and does not offer to undo it 31ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > records text withheld because secure input came on mid-utterance 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > announce() never interrupts a live utterance 32ms
+ ✓ src/main/pipeline/navigate.test.ts > what the journal keeps > records how long each step took and what it was choosing from 51ms
+ ✓ src/main/pipeline/navigate.test.ts > what the journal keeps > goes back and writes down what a press turned out to do 52ms
+ ✓ src/main/asr/whisper-cli.test.ts > parseWhisperJson > joins segment text and averages token probabilities 1ms
+ ✓ src/main/asr/whisper-cli.test.ts > parseWhisperJson > ignores whisper special tokens when scoring 0ms
+ ✓ src/main/asr/whisper-cli.test.ts > parseWhisperJson > reports no confidence rather than a fake one when probabilities are absent 0ms
+ ✓ src/main/asr/whisper-cli.test.ts > parseWhisperJson > returns empty text for an empty transcription 0ms
+ ✓ src/main/asr/whisper-cli.test.ts > parseWhisperJson > collapses whitespace across segments 0ms
+ ✓ src/main/asr/whisper-cli.test.ts > parseWhisperStdout > strips timestamp prefixes and log lines 0ms
+ ✓ src/main/asr/whisper-cli.test.ts > WhisperCliProvider > reports a missing binary as a reason a human can act on 0ms
+ ✓ src/main/asr/whisper-cli.test.ts > WhisperCliProvider > reports a missing model separately from a missing binary 0ms
+ ✓ src/main/asr/whisper-cli.test.ts > WhisperCliProvider > outlives the longest utterance the pipeline can hand it 0ms
+ ✓ src/main/asr/whisper-cli.test.ts > MAX_PROMPT_CHARS > stays well inside whisper’s own n_text_ctx/2 ceiling 0ms
+ ✓ src/main/services/ptt-machine.test.ts > PttStateMachine (edge mode) > starts on ⌥ then Space, stops on Space up 1ms
+ ✓ src/main/services/ptt-machine.test.ts > PttStateMachine (edge mode) > ignores key repeat while already recording 0ms
+ ✓ src/main/services/ptt-machine.test.ts > PttStateMachine (edge mode) > stops when ⌥ is released first, and the trailing Space up is a no-op 0ms
+ ✓ src/main/services/ptt-machine.test.ts > PttStateMachine (edge mode) > ignores Space without ⌥ 0ms
+ ✓ src/main/services/ptt-machine.test.ts > PttStateMachine (edge mode) > ignores chords that belong to someone else 0ms
+ ✓ src/main/services/ptt-machine.test.ts > PttStateMachine (edge mode) > accepts the right-hand ⌥ key 0ms
+ ✓ src/main/services/ptt-machine.test.ts > PttStateMachine (edge mode) > reset() releases a stranded hold 0ms
+ ✓ src/main/services/ptt-machine.test.ts > PttStateMachine (up-only mode) > never starts on its own — globalShortcut owns key-down 0ms
+ ✓ src/main/services/ptt-machine.test.ts > PttStateMachine (up-only mode) > stops after markStarted() 0ms
+ ✓ src/main/pipeline/agent.test.ts > the journal > records what the run cost and how many turns it took 52ms
+ ✓ src/main/engine/health.test.ts > EngineHealth > starts optimistic — asking costs nothing 1ms
+ ✓ src/main/engine/health.test.ts > EngineHealth > treats a rejected credential as something the user must fix 0ms
+ ✓ src/main/engine/health.test.ts > EngineHealth > never expires a signed-out state — waiting does not fix it 0ms
+ ✓ src/main/engine/health.test.ts > EngineHealth > degrades a rate limit to local-only, and recovers on its own 0ms
+ ✓ src/main/engine/health.test.ts > EngineHealth > says the service is busy for a 529 0ms
+ ✓ src/main/engine/health.test.ts > EngineHealth > recognises being offline from the error, not from a status 0ms
+ ✓ src/main/engine/health.test.ts > EngineHealth > passes an unrecognised failure through in the user’s sentence 0ms
+ ✓ src/main/engine/health.test.ts > EngineHealth > clears a degrade the moment something succeeds 0ms
+ ✓ src/main/services/apps.test.ts > reading what is running > gives back the id, the name and which one is in front 1ms
+ ✓ src/main/services/apps.test.ts > reading what is running > drops a process that cannot be activated rather than offering it 0ms
+ ✓ src/main/services/apps.test.ts > reading what is running > drops a malformed record instead of misreading the rest 0ms
+ ✓ src/main/services/apps.test.ts > reading what is running > treats an empty list as a failure, because a Mac always has one 1ms
+ ✓ src/main/services/apps.test.ts > the script > passes nothing in, because there is nothing to pass 0ms
+ ✓ src/main/services/apps.test.ts > the script > asks only for processes a person could switch to 0ms
+ ✓ src/main/services/apps.test.ts > when System Events says no > carries the reason through rather than flattening it 0ms
+ ✓ src/main/asr/switchable.test.ts > SwitchableAsrProvider > delegates to whatever it currently holds 1ms
+ ✓ src/main/asr/switchable.test.ts > SwitchableAsrProvider > disposes the provider it retires, exactly once 0ms
+ ✓ src/main/asr/switchable.test.ts > SwitchableAsrProvider > swapping in the same provider is not a dispose 0ms
+ ✓ src/main/asr/switchable.test.ts > SwitchableAsrProvider > leaves a transcription already running on the old provider 0ms
+ ✓ src/main/services/permissions.test.ts > PermissionsService > lists Screen Recording alongside the three that are required 1ms
+ ✓ src/main/services/permissions.test.ts > PermissionsService > says which one is optional, and which needs a relaunch 0ms
+ ✓ src/main/services/permissions.test.ts > PermissionsService > reports what macOS said, not what was asked for 0ms
+ ✓ src/main/services/permissions.test.ts > PermissionsService > registers the app before sending anyone to the Screen Recording pane 0ms
+ ✓ src/main/services/permissions.test.ts > PermissionsService > still just opens the pane for the ones with no in-process prompt 0ms
+ ✓ src/main/services/permissions.test.ts > PermissionsService > survives a sidecar that cannot answer at all 0ms
+ ✓ src/renderer/engine-models.test.ts > engineModelControls > shows Claude choices for Automatic, subscription, and API-key lanes 1ms
+ ✓ src/renderer/engine-models.test.ts > engineModelControls > shows independent Codex choices and hides the Claude agent model 0ms
+ ✓ src/main/services/model.test.ts > model catalog > offers every model the settings pane lists 1ms
+ ✓ src/main/services/model.test.ts > model catalog > still resolves the names only the CLI can ask for 0ms
+ ✓ src/main/services/model.test.ts > model catalog > takes an explicit filename, and falls back for anything else 0ms
+ ✓ src/main/services/model.test.ts > model catalog > puts every model in the models directory 0ms
+ ✓ src/shared/hud.test.ts > cardFamily > puts everything that writes on fresh paper 1ms
+ ✓ src/shared/hud.test.ts > cardFamily > puts an answer in the well, always 0ms
+ ✓ src/shared/hud.test.ts > cardFamily > crosses a plan over when its walk ends 0ms
+ ✓ src/shared/hud.test.ts > cardFamily > finishes a plan that found nothing, not just one that found something 0ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline > drops chunks that arrive outside an utterance 32ms
+ ✓ src/main/pipeline/dictation.test.ts > describeInsertionReason > explains what to do, not just what broke 0ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — routing > hands an instruction to the edit lane instead of the caret 32ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — routing > types on ⌥Space even with text selected and an instruction on the tongue 32ms
+ ✓ src/main/pipeline/navigate.test.ts > auto-run > walks without a press, and marks the card as having started itself 51ms
+ ✓ src/main/pipeline/navigate.test.ts > auto-run > still waits for Run when whisper was not sure what it heard 0ms
+ ✓ src/main/pipeline/navigate.test.ts > auto-run > leaves the card waiting when the switch is off 0ms
+ ✓ src/main/pipeline/navigate.test.ts > Escape > stops before the card is run, and never starts 0ms
+ ✓ src/main/pipeline/navigate.test.ts > Escape > stops a walk that has started, and still puts the window back 52ms
+ ↓ src/main/engine/codex.integration.test.ts > CodexCliEngine real subscription > classifies
+ ↓ src/main/engine/codex.integration.test.ts > CodexCliEngine real subscription > transforms
+ ↓ src/main/engine/codex.integration.test.ts > CodexCliEngine real subscription > composes
+ ↓ src/main/engine/codex.integration.test.ts > CodexCliEngine real subscription > answers
+ ↓ src/main/engine/codex.integration.test.ts > CodexCliEngine real subscription > returns one validated navigation step
+ ✓ src/main/pipeline/agent.test.ts > the journal > leaves behind the answer, not the question 51ms
+ ✓ src/main/pipeline/agent.test.ts > endingNote > prefers the model’s own words when it has any 0ms
+ ✓ src/main/pipeline/agent.test.ts > endingNote > says which budget stopped it 0ms
+ ✓ src/main/pipeline/agent.test.ts > endingNote > never lets a stop read as “nothing happened” 0ms
+ ✓ src/main/pipeline/agent.test.ts > going to another application > puts the reason on the card before the screen moves 52ms
+ ✓ src/main/pipeline/navigate.test.ts > Escape > files a stop as the plan’s own row, never as a decline 51ms
+ ✓ src/main/pipeline/navigate.test.ts > Escape > leaves ⏎ claimed and inert while the walk is running 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — routing > shows what is selected while you are still speaking 62ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — routing > never consults the engine on ⌥Space, whatever the words are 32ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — routing > is pure dictation when there is no edit lane at all 32ms
+ ✓ src/main/pipeline/agent.test.ts > going to another application > comes back to where the user was 50ms
+ ✓ src/main/pipeline/agent.test.ts > going to another application > files each step against the application it actually happened in 51ms
+ ✓ src/main/pipeline/navigate.test.ts > the answer > turns what it read into something a person can read 51ms
+ ✓ src/main/pipeline/navigate.test.ts > the answer > is asked about the window it arrived at, not the one it left 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — dictation does not depend on the engine > survives an edit lane that throws, and dictates again immediately after 62ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — an instruction about the field in front of you > edits the whole field instead of typing the question 32ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — an instruction about the field in front of you > still types when the model says these are just words 32ms
+ ✓ src/main/pipeline/agent.test.ts > going to another application > stops mid-errand and still puts the window back 51ms
+ ✓ src/main/pipeline/agent.test.ts > where the user is left > stays where it went when being there was the point 51ms
+ ✓ src/main/pipeline/navigate.test.ts > the answer > does not ask when there was nothing to read 51ms
+ ✓ src/main/pipeline/navigate.test.ts > the answer > stays honest when it cannot say what it found 52ms
+ ✓ src/main/pipeline/agent.test.ts > where the user is left > comes back when it went to fetch something 50ms
+ ✓ src/main/pipeline/agent.test.ts > where the user is left > guesses from what happened when the model did not say 52ms
+ ✓ src/main/pipeline/navigate.test.ts > the journal row > files the picture the model was actually shown 51ms
+ ✓ src/main/pipeline/navigate.test.ts > the journal row > is written even when the user declines 0ms
+ ✓ src/main/pipeline/navigate.test.ts > the journal row > says plainly that it found nothing, rather than claiming it did 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — an instruction about the field in front of you > keeps naming the app when a lane replaces the whole chip array 32ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — an instruction about the field in front of you > says nothing about the app once there is no app — idle earns its silence 63ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — an instruction about the field in front of you > names the field in the chip while you are still speaking 62ms
+ ✓ src/main/pipeline/agent.test.ts > where the user is left > puts the window back when the run did not finish, whatever it asked for 51ms
+ ✓ src/main/pipeline/agent.test.ts > where the user is left > counts a destination as done even though it has nothing to say 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — an instruction about the field in front of you > types the words and says why when the field is too long to rewrite whole 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — a selection that is not in the focused element > edits read-only text into the caret instead of typing the question 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — a selection that is not in the focused element > replaces in place when the selection is where the caret is 32ms
+ ✓ src/main/pipeline/agent.test.ts > where the user is left > leaves single-window runs exactly as they were 50ms
+ ✓ src/main/pipeline/agent.test.ts > using the menus > puts the command and the reason on the card 51ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — a selection that is not in the focused element > asks the app with ⌘C when accessibility finds nothing 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — a selection that is not in the focused element > does not press ⌘C for ordinary speech 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the send wish comes off the transcript > passes send:true and hands the lane an instruction without the send phrase 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the send wish comes off the transcript > leaves send unset for the same request without those words 33ms
+ ✓ src/main/pipeline/agent.test.ts > using the menus > will not send, and the run carries on without it 50ms
+ ✓ src/main/pipeline/agent.test.ts > using the menus > shows what the menus were asked for 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the send wish comes off the transcript > ignores a send that only the classifier asked for 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — "send" reaches the right lane > "send that I will get the code done in 2 days" composes, and asks to send 34ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook > shows the run what previous runs learned here, and counts that it did 51ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — "send" reaches the right lane > "send the message" opens the send card over what is already written 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — "send" reaches the right lane > answers a bare send without asking the model 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — "send" reaches the right lane > types "send the message" when the box is empty — those words were a sentence 34ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > asks about “summarize this thread” on Fn 34ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — a window still building its accessibility tree > asks again rather than reporting an empty window 1605ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook > credits what was shown with how the run ended 102ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook > writes down what the run taught, against the app it happened in 53ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > types “summarize this thread” on ⌥Space 34ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > asks about “catch me up on this” on Fn 35ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook > learns nothing from a run the user stopped 51ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook > does nothing at all when the setting is off 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > types “catch me up on this” on ⌥Space 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > asks about “what did they decide about the redlines” on Fn 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > types “what did they decide about the redlines” on ⌥Space 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > asks about “turn this thread into bullet points” on Fn 34ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook > runs normally against an engine that cannot learn 52ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook > does not let a failed distillation reach the run 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > types “turn this thread into bullet points” on ⌥Space 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > asks about “translate this to French” on Fn 34ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > types “translate this to French” on ⌥Space 32ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook, across a switch > files what was learned against the app the work happened in 51ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook, across a switch > hands over the destination’s notes as it arrives 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > asks about “send that I will get the code done in 2 days” on Fn 31ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > types “send that I will get the code done in 2 days” on ⌥Space 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > shows a chip while Fn is held, and none while ⌥Space is 62ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook, across a switch > credits a note handed over mid-run, not just the ones read at the start 51ms
+ ✓ src/main/pipeline/agent.test.ts > the notebook, across a switch > says nothing about a notebook with nothing in it for that app 51ms
+ ✓ src/main/pipeline/agent.test.ts > only learning when there was something to learn > does not ask a run that went straight there 51ms
+ ✓ src/main/pipeline/agent.test.ts > only learning when there was something to learn > asks a run that took a long way round 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > reads nothing at all while ⌥Space is held, not even the text 32ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > reads the window when Fn is held, which is the key that asks 32ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > never shows a working phase without saying what it is working on 34ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — the two keys > clears the line on the way out, so it cannot outlive the work 64ms
+ ✓ src/main/pipeline/agent.test.ts > only learning when there was something to learn > asks a short run that stumbled 50ms
+ ✓ src/main/pipeline/agent.test.ts > only learning when there was something to learn > asks a run that did not arrive, however short 52ms
+ ✓ src/main/pipeline/agent.test.ts > only learning when there was something to learn > still credits the notes a quiet run was shown 50ms
+ ✓ src/main/pipeline/agent.test.ts > only learning when there was something to learn > shows the distiller the whole notebook for the app it is filing against 52ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — asking, which writes nothing > hands the question to the lane with no target 33ms
+ ✓ src/main/pipeline/dictation.test.ts > DictationPipeline — asking, which writes nothing > types nothing and offers no edit 32ms
+ ✓ src/main/pipeline/dictation.test.ts > telling whisper what is on screen > passes the app being spoken into as a decoding hint 64ms
+ ✓ src/main/pipeline/dictation.test.ts > telling whisper what is on screen > transcribes without waiting for the harvest to land 32ms
+ ✓ src/main/pipeline/dictation.test.ts > telling whisper what is on screen > does not bias one utterance with the previous window 97ms
+ ✓ src/main/pipeline/dictation.test.ts > when whisper is not sure it heard right > records the confidence of every utterance, sure or not 33ms
+ ✓ src/main/pipeline/dictation.test.ts > when whisper is not sure it heard right > tells the lane that goes and looks when it was not sure it heard 33ms
+ ✓ src/main/pipeline/dictation.test.ts > when whisper is not sure it heard right > and says so when it heard cleanly, so the run is allowed to start itself 35ms
+ ✓ src/main/pipeline/dictation.test.ts > when whisper is not sure it heard right > says so on the HUD rather than acting as if sure 37ms
+ ✓ src/main/pipeline/dictation.test.ts > when whisper is not sure it heard right > still types it — ⌥Space never withholds the words 32ms
+ ✓ src/main/pipeline/dictation.test.ts > when whisper is not sure it heard right > says nothing when the provider reports no confidence at all 33ms
+ ✓ src/main/pipeline/dictation.test.ts > the conversation a lane is handed > gives the lane what came before, and never the utterance it is serving 68ms
+ ✓ src/main/pipeline/context.test.ts > captureContext — a window still building its accessibility tree > gives up honestly when the tree never arrives 1605ms
+
+ Test Files  58 passed | 1 skipped (59)
+      Tests  1071 passed | 5 skipped (1076)
+   Start at  18:09:15
+   Duration  3.51s (tests 74%, transform 13%, import 12%, worker 1%)
+
+    Isolate  59 workers spawned · ~63ms startup each (spawn + environment, per file)
+             at least ~273ms faster with isolate: false — reuses workers across files instead of one per file
+

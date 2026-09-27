@@ -1,0 +1,50 @@
+# npm run smoke — 2026-09-26 18:09 IST, node v22.14.0, macOS 15.7.7 arm64
+# Headless end-to-end: real Swift sidecar over ndjson, real whisper-cli, pipeline against fakes.
+
+> mull@0.0.1 smoke
+> tsx scripts/smoke.ts
+
+mull M1 smoke
+
+pure functions
+  ok   cleanup strips fillers + annotations — "So send the deck, please."
+  ok   wav header is RIFF/WAVE
+  ok   wav length matches sample count — 3244 bytes
+
+pipeline (fakes)
+  ok   capture started on key-down
+  ok   phase sequence reaches applied — listening → listening → listening → thinking → thinking → thinking → inserting → applied → idle
+  ok   text was inserted once — ["This is the smoke test."]
+  ok   cleanup ran before insertion — This is the smoke test.
+  ok   the action was journalled — Dictation · TextEdit · “This is the smoke test.”
+  ok   and it is undoable — verified=true
+  ok   undo removes exactly what was inserted — ""
+  ok   undo refuses a second time
+  ok   secure input blocks the utterance
+  ok   nothing inserted while secure input is on
+
+sidecar
+  ok   binary present — /Users/skoduri/Desktop/thinkwithalma/Mull/mull-mac/.build/release/mull-mac
+  ok   init handshake
+  ok   checkPermissions responds — {"accessibility":true,"inputMonitoring":true,"screenRecording":true}
+  ok   secureInputState responds — active=false
+  ok   frontmostApp responds — Claude
+  ok   focusedElement answers — null (no-focused-element)
+  ok   selectedText answers without touching the pasteboard — null (no-selection)
+  ok   windowContext reads the focused window — 1 blocks, 6 chars, 7ms harvest (662ms round trip), stoppedBy=tree-warming
+  ok   and stays inside its deadline — 7ms
+  ok   and does not photograph unless asked
+  ok   Screen Recording granted
+  ok   replaceRange refuses when its expectation misses — no-focused-element
+  ok   keyChord rejects unknown keys without posting — unknown-key
+  ok   hotkey tap starts — swallowing ⌥Space
+  ok   hotkey tap stops
+  ok   fn tap admits it cannot swallow
+
+speech recognition
+  ok   whisper-cli installed
+  ok   model downloaded
+  ..   selected provider: whisper-cli
+  ok   transcribes a tone without crashing — 384 ms, model ggml-small.en.bin
+
+SMOKE_OK

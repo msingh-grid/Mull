@@ -191,8 +191,8 @@ whisper.cpp via its `whisper-cli` binary, as a subprocess. On device, offline,
 no audio leaves the machine. The model (`ggml-small.en.bin`, ~466 MB) is fetched
 explicitly — nothing downloads it silently.
 
-Settings → Speech model offers a second one, `ggml-small.en.bin` (~490 MB):
-better on names, jargon and a noisy room, two to three times slower. Switching
+Settings → Speech model offers a second one, `ggml-base.en.bin` (~150 MB):
+faster, and weaker on names, jargon and a noisy room. Switching
 is live — the next utterance uses it — and downloading it is its own click.
 
 ### The language engine
@@ -288,20 +288,39 @@ built**.
 
 - **macOS** on Apple silicon (the sidecar and the accessibility work are
   Mac-only by nature)
-- **Node** — developed against v24; anything recent should do
+- **Node** ≥ 22.5 (`engines` in package.json; the tests use `node:sqlite`) — developed against v22 and v24
 - **Xcode command line tools** — `swift build` must work
 - **whisper-cli** — `brew install whisper-cpp`. Looked for at
   `/opt/homebrew/bin/whisper-cli`, then `/usr/local/bin`, then the `-cpp`
   spellings of both; `MULL_WHISPER_CLI` overrides the search entirely.
 
-### Install and run
+### One command
+
+```bash
+npm run setup
+```
+
+Checks the machine, installs whisper.cpp with Homebrew if it is missing, runs
+`npm ci` from the lockfile, builds the Swift sidecar, fetches the speech model
+(~466 MB, skipped if present) and launches the app. Every step is idempotent.
+`npm run setup -- --no-run` stops short of launching.
+
+**Without a Mac**, the app cannot run, but the engineering can still be checked:
+
+```bash
+npm ci && npm run verify     # typecheck both projects + the full Vitest suite
+```
+
+The most recent output of both is saved in [`evidence/`](evidence/).
+
+### Install and run, step by step
 
 ```bash
 npm install
 npm run build:sidecar     # Swift — needed before the first run, and after
                           # any change under mull-mac/
-npm run fetch:model       # ~150 MB, ggml-base.en.bin
-npm run fetch:model -- small.en   # optional, ~490 MB — or do it from Settings
+npm run fetch:model       # ~466 MB, ggml-small.en.bin (the default)
+npm run fetch:model -- base.en    # optional, ~150 MB, faster — or do it from Settings
 npm run dev
 ```
 
@@ -413,7 +432,7 @@ is, usually including what was tried first and why it failed. The densest are:
 
 ## How this codebase is tested
 
-**863 tests across 49 files**, all under Vitest, none of them needing a Mac, a
+**1,071 tests across 59 files** (5 skipped), all under Vitest, none of them needing a Mac, a
 subprocess, or a permission dialog. `FakeSidecar` stands in for Swift; the
 AppleScript runner and every bridge take an injected `run`.
 

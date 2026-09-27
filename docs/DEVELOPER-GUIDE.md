@@ -816,8 +816,8 @@ argument quietly erodes.
 - `check:applescript` is only as complete as the browsers installed on the
   machine running it.
 - `swift test` needs full Xcode, not just command-line tools.
-- **`npm run bench:report` is referenced in `src/main/bench.ts` but does not
-  exist** in `package.json`.
+- **`npm run bench:report`** (`scripts/bench-report.ts`) summarises `bench.jsonl`:
+  outcomes, stage timings as median/p90/max, and budget breaches.
 - `appId: net.mull.app` is a placeholder and must match the Team ID's prefix
   before the first notarised build — but **do not change it locally**, because
   TCC files your grants under it.
